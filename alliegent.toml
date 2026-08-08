@@ -1,0 +1,50 @@
+# Non-secret configuration. Safe to commit.
+# Secrets live in .env locally and in `fly secrets` in production.
+#
+# The [agenda.props] / [projects.props] tables map this app's internal field
+# names to the *actual property names in your Notion databases*. Defaults below
+# are guesses — run `uv run python scripts/inspect_notion.py` to dump your real
+# schema, then correct these. Values are the exact Notion property names.
+
+timezone = "Asia/Seoul"
+
+[schedule]
+# 24h local time in `timezone` above.
+daily_brief = "08:00"          # morning briefing to Discord
+incomplete_alert = "21:00"     # nudge about today's unfinished items
+week_scaffold_weekday = "mon"  # create the coming week's rows
+week_scaffold_time = "06:00"
+stale_project_weekday = "wed"
+stale_project_time = "10:00"
+weekly_review_weekday = "sun"
+weekly_review_time = "21:00"
+
+[agenda]
+# How many days ahead the week-scaffolding job pre-creates rows for.
+scaffold_days = 7
+
+[agenda.props]
+title = "Name"          # title property
+date = "Date"           # date property
+status = "Status"       # status OR select OR checkbox — auto-detected
+project = "Project"     # optional relation to the projects DB; "" to disable
+
+[agenda.status_values]
+# Used when `status` is a status/select property. Ignored for checkbox.
+todo = "Not started"
+doing = "In progress"
+done = "Done"
+
+[projects]
+# A project with no agenda activity for this many days gets a nudge.
+stale_after_days = 7
+
+[projects.props]
+title = "Name"
+status = "Status"
+next_action = "Next action"   # optional; "" to disable
+last_activity = ""            # optional date prop; "" = derive from agenda rows
+
+[projects.status_values]
+active = "In progress"
+done = "Done"

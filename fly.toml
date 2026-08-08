@@ -1,0 +1,18 @@
+app = "alliegent"
+primary_region = "nrt"   # Tokyo — closest to Asia/Seoul
+
+[build]
+
+[env]
+  # Secrets go through `fly secrets set`, never here.
+  PYTHONPATH = "/app/src"
+
+# A Discord gateway connection is long-lived and inbound-portless, so this is
+# a plain worker: no [http_service], and the machine must not auto-stop or the
+# bot goes offline and scheduled jobs never fire.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[processes]
+  app = "alliegent"
