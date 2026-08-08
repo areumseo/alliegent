@@ -27,7 +27,7 @@ async def _run(name: str, commit: bool) -> int:
     secrets = get_secrets()
     secrets.require("notion_token", "notion_agenda_db_id")
 
-    async def printer(message: str) -> None:  # pragma: no cover - trivial
+    async def printer(message: str, kind: str = "") -> None:  # pragma: no cover
         print(message)
 
     client = NotionClient(secrets.notion_token)

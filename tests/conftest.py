@@ -123,3 +123,29 @@ class FakeNotionClient:
 @pytest.fixture
 def config() -> Config:
     return Config()
+
+
+SECRET_ENV_VARS = (
+    "NOTION_TOKEN",
+    "NOTION_AGENDA_DB_ID",
+    "NOTION_PROJECTS_DB_ID",
+    "DISCORD_BOT_TOKEN",
+    "DISCORD_GUILD_ID",
+    "DISCORD_CHANNEL_ID",
+    "DISCORD_AGENDA_CHANNEL_ID",
+    "DISCORD_PROJECTS_CHANNEL_ID",
+    "DISCORD_REVIEW_CHANNEL_ID",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolate_secrets(monkeypatch, tmp_path):
+    """Keep Secrets() from picking up the developer's real .env or shell vars.
+
+    Without this, a filled-in local .env makes tests pass here and fail in CI
+    (or the reverse), which is the worst kind of flake.
+    """
+    for name in SECRET_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    # `env_file=".env"` resolves against the working directory.
+    monkeypatch.chdir(tmp_path)

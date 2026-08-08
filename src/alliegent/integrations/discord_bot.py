@@ -10,7 +10,7 @@ from discord import app_commands
 
 from .. import reports
 from ..agenda import AgendaService, ProjectService
-from ..config import Config
+from ..config import Config, Secrets
 from ..jobs import Jobs
 
 log = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ class AlliegentBot(discord.Client):
         config: Config,
         agenda: AgendaService,
         projects: ProjectService | None,
-        channel_id: int,
+        secrets: Secrets,
         guild_id: int = 0,
     ) -> None:
         # Slash commands need no privileged intents; message content is never read.
@@ -31,7 +31,7 @@ class AlliegentBot(discord.Client):
         self.config = config
         self.agenda = agenda
         self.projects = projects
-        self.channel_id = channel_id
+        self.secrets = secrets
         self.guild_id = guild_id
         self.tree = app_commands.CommandTree(self)
         self.jobs = Jobs(agenda, projects, config, self.notify)
@@ -51,17 +51,23 @@ class AlliegentBot(discord.Client):
     async def on_ready(self) -> None:
         log.info("Logged in as %s", self.user)
 
-    async def notify(self, message: str) -> None:
-        """Push a scheduled message to the configured channel."""
-        channel = self.get_channel(self.channel_id)
+    async def notify(self, message: str, kind: str = "agenda") -> None:
+        """Push a scheduled message to the channel configured for `kind`."""
+        try:
+            channel_id = self.secrets.channel_for(kind)
+        except RuntimeError as exc:
+            log.error("%s", exc)
+            return
+
+        channel = self.get_channel(channel_id)
         if channel is None:
             try:
-                channel = await self.fetch_channel(self.channel_id)
+                channel = await self.fetch_channel(channel_id)
             except discord.HTTPException as exc:
-                log.error("Cannot reach channel %s: %s", self.channel_id, exc)
+                log.error("Cannot reach channel %s (%s): %s", channel_id, kind, exc)
                 return
         if not isinstance(channel, discord.abc.Messageable):
-            log.error("Channel %s is not messageable", self.channel_id)
+            log.error("Channel %s is not messageable", channel_id)
             return
         for part in reports.chunk(message):
             await channel.send(part)

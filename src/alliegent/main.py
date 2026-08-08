@@ -28,9 +28,11 @@ async def main() -> None:
     configure_logging()
     config = get_config()
     secrets = get_secrets()
-    secrets.require(
-        "notion_token", "notion_agenda_db_id", "discord_bot_token", "discord_channel_id"
-    )
+    secrets.require("notion_token", "notion_agenda_db_id", "discord_bot_token")
+    # Resolve every route up front so a missing channel fails at boot rather
+    # than silently swallowing a scheduled message days later.
+    for kind in ("agenda", "projects", "review"):
+        secrets.channel_for(kind)
 
     client = NotionClient(secrets.notion_token)
     agenda = AgendaService(client, config, secrets.notion_agenda_db_id)
@@ -46,7 +48,7 @@ async def main() -> None:
         config=config,
         agenda=agenda,
         projects=projects,
-        channel_id=secrets.discord_channel_id,
+        secrets=secrets,
         guild_id=secrets.discord_guild_id,
     )
     scheduler = build_scheduler(bot.jobs, config)

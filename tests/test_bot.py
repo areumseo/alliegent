@@ -8,7 +8,7 @@ name fails in CI rather than on first deploy.
 from __future__ import annotations
 
 from alliegent.agenda import AgendaService, ProjectService
-from alliegent.config import Config
+from alliegent.config import Config, Secrets
 from alliegent.integrations.discord_bot import AlliegentBot
 
 from .conftest import FakeNotionClient
@@ -23,7 +23,7 @@ def make_bot() -> AlliegentBot:
         config=config,
         agenda=AgendaService(client, config, "agenda-db"),
         projects=ProjectService(client, config, "proj-db"),
-        channel_id=123,
+        secrets=Secrets(discord_channel_id=123),
         guild_id=0,
     )
 

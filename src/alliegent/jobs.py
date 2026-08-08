@@ -20,7 +20,9 @@ from .config import Config
 
 log = logging.getLogger(__name__)
 
-Notifier = Callable[[str], Awaitable[None]]
+# (message, channel_kind) -> None. The kind is routed to a channel by the
+# notifier, so jobs stay unaware of Discord IDs.
+Notifier = Callable[[str, str], Awaitable[None]]
 
 
 class Jobs:
@@ -91,23 +93,23 @@ class Jobs:
 
     # -- run + send --------------------------------------------------------
 
-    async def _send(self, message: str | None) -> None:
+    async def _send(self, message: str | None, kind: str) -> None:
         if message is None:
-            log.info("nothing to report; staying quiet")
+            log.info("nothing to report for %s; staying quiet", kind)
             return
-        await self.notify(message)
+        await self.notify(message, kind)
 
     async def run_daily_brief(self) -> None:
-        await self._send(await self.build_daily_brief())
+        await self._send(await self.build_daily_brief(), "agenda")
 
     async def run_incomplete_alert(self) -> None:
-        await self._send(await self.build_incomplete_alert())
+        await self._send(await self.build_incomplete_alert(), "agenda")
 
     async def run_stale_projects(self) -> None:
-        await self._send(await self.build_stale_projects())
+        await self._send(await self.build_stale_projects(), "projects")
 
     async def run_weekly_review(self) -> None:
-        await self._send(await self.build_weekly_review())
+        await self._send(await self.build_weekly_review(), "review")
 
     async def run_week_scaffold(self) -> None:
-        await self._send(await self.week_scaffold(commit=True))
+        await self._send(await self.week_scaffold(commit=True), "agenda")

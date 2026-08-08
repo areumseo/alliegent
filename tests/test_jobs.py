@@ -14,10 +14,10 @@ PROJ_DS = "ds_proj-db"
 
 
 def build(agenda_pages=None, project_pages=None):
-    sent: list[str] = []
+    sent: list[tuple[str, str]] = []
 
-    async def notify(message: str) -> None:
-        sent.append(message)
+    async def notify(message: str, kind: str) -> None:
+        sent.append((message, kind))
 
     client = FakeNotionClient({DS: agenda_pages or [], PROJ_DS: project_pages or []})
     config = Config()
@@ -60,7 +60,7 @@ async def test_scaffold_commit_writes_rows():
 async def test_weekly_review_covers_the_trailing_seven_days():
     jobs, sent, _ = build([make_page("p1", "한 일", day="2026-08-05", status="Done")])
     await jobs.run_weekly_review()
-    assert "한 일" in sent[0]
+    assert "한 일" in sent[0][0]
 
 
 async def test_stale_project_job_reports_neglected_projects():
@@ -68,7 +68,18 @@ async def test_stale_project_job_reports_neglected_projects():
         agenda_pages=[], project_pages=[make_project("b", "방치된 프로젝트")]
     )
     await jobs.run_stale_projects()
-    assert sent and "방치된 프로젝트" in sent[0]
+    assert sent and "방치된 프로젝트" in sent[0][0]
+
+
+async def test_jobs_route_to_their_own_channel_kinds():
+    """Agenda chatter and project nudges go to different channels, so the
+    kind each job emits is part of its contract."""
+    jobs, sent, _ = build(project_pages=[make_project("b", "방치됨")])
+    await jobs.run_daily_brief()
+    await jobs.run_week_scaffold()
+    await jobs.run_stale_projects()
+    await jobs.run_weekly_review()
+    assert [kind for _, kind in sent] == ["agenda", "agenda", "projects", "review"]
 
 
 def test_scheduler_registers_every_job():

@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -26,8 +26,55 @@ class Secrets(BaseSettings):
     notion_projects_db_id: str = ""
 
     discord_bot_token: str = ""
-    discord_channel_id: int = 0
     discord_guild_id: int = 0
+
+    # Fallback used by any channel left unset below.
+    discord_channel_id: int = 0
+    discord_agenda_channel_id: int = 0
+    discord_projects_channel_id: int = 0
+    discord_review_channel_id: int = 0
+
+    @field_validator(
+        "discord_guild_id",
+        "discord_channel_id",
+        "discord_agenda_channel_id",
+        "discord_projects_channel_id",
+        "discord_review_channel_id",
+        mode="before",
+    )
+    @classmethod
+    def _optional_id(cls, value: object) -> object:
+        """Treat a blank ID as 'not configured' rather than a parse error.
+
+        A .env full of `KEY=` placeholders is the normal starting state, and it
+        should not crash before the app can explain what is missing. Trailing
+        comments are stripped too, since python-dotenv leaves them on the value.
+        """
+        if isinstance(value, str):
+            text = value.split("#", 1)[0].strip()
+            return text or 0
+        return value
+
+    def channel_for(self, kind: str) -> int:
+        """Resolve a job's target channel, falling back to the default.
+
+        Review posts fall back to the agenda channel rather than the generic
+        default, since a weekly review belongs with the agenda if it has no
+        channel of its own.
+        """
+        agenda = self.discord_agenda_channel_id or self.discord_channel_id
+        routes = {
+            "agenda": agenda,
+            "projects": self.discord_projects_channel_id or self.discord_channel_id,
+            "review": self.discord_review_channel_id or agenda,
+        }
+        target = routes.get(kind, agenda)
+        if not target:
+            raise RuntimeError(
+                f"No Discord channel configured for {kind!r}. Set "
+                f"DISCORD_{kind.upper()}_CHANNEL_ID or DISCORD_CHANNEL_ID."
+            )
+        return target
 
     def require(self, *names: str) -> None:
         """Fail loudly and early rather than mid-job with a confusing 401."""
