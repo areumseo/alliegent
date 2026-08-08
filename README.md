@@ -31,12 +31,13 @@ Commands work in any channel the bot can see, regardless of the notification rou
 
 ## Setup
 
-### 1. Notion integration
+### 1. Notion token
 
-1. Go to <https://www.notion.so/my-integrations> → **New integration** → name it `alliegent`
-2. Copy the **Internal Integration Secret** (starts with `ntn_`)
-3. Open your Weekly Agenda and Projects databases, then `···` → **Connections** → add `alliegent`
-   - Without this the API returns 404. A valid token does not grant access to databases that haven't been shared with the integration.
+1. Go to <https://www.notion.so/developers/tokens> → **New token** → name it `alliegent` → select the **Notion API** capability → **Create token**
+   - The older `notion.so/my-integrations` URL now 404s. If the developer portal is unavailable to you, the equivalent lives in Settings → **Connections** → *Develop or manage integrations*, which only workspace owners can see. On Business and Enterprise plans an owner must first enable token creation there.
+2. Copy the token (starts with `ntn_`)
+3. Grant it access to your Weekly Agenda and Projects databases — either by selecting them while creating the token, or afterwards from each database's `···` → **Connections**
+   - Without this the API returns 404. A valid token does not grant access to databases it hasn't been given.
 4. Copy each database's 32-character hex ID from its URL: `notion.so/myworkspace/<DATABASE_ID>?v=...`
 
 ### 2. Discord app
