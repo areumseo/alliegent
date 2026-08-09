@@ -26,6 +26,8 @@ class AgendaItem:
     done: bool
     url: str
     project_ids: tuple[str, ...] = ()
+    recurring: bool = False
+    category: str | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,8 @@ class AgendaService:
             done=n.is_done(page, p.status, self._cfg.agenda.status_values["done"]),
             url=n.page_url(page),
             project_ids=tuple(n.read_relation_ids(page, p.project)) if p.project else (),
+            recurring=n.read_checkbox(page, p.recurring) if p.recurring else False,
+            category=n.read_select(page, p.category) if p.category else None,
         )
 
     async def items_between(self, start: date, end: date) -> list[AgendaItem]:
@@ -121,7 +125,13 @@ class AgendaService:
     # -- writes ------------------------------------------------------------
 
     async def add_item(
-        self, title: str, day: date, *, project_id: str | None = None
+        self,
+        title: str,
+        day: date,
+        *,
+        project_id: str | None = None,
+        recurring: bool = False,
+        category: str | None = None,
     ) -> AgendaItem:
         p = self.props
         properties = {
@@ -130,6 +140,10 @@ class AgendaService:
         }
         if project_id and p.project:
             properties[p.project] = n.relation([project_id])
+        if recurring and p.recurring:
+            properties[p.recurring] = n.checkbox(True)
+        if category and p.category:
+            properties[p.category] = n.select(category)
         page = await self._client.create_page(await self.data_source_id(), properties)
         return self._to_item(page)
 
@@ -145,22 +159,48 @@ class AgendaService:
     async def reschedule(self, page_id: str, day: date) -> None:
         await self._client.update_page(page_id, {self.props.date: n.date_prop(day)})
 
-    async def ensure_days(self, start: date, days: int, template: str) -> list[date]:
-        """Create a placeholder row for each upcoming date that has none yet.
+    async def plan_week(self, week_start: date) -> list[tuple[str, date, str | None]]:
+        """Work out which recurring items are missing from the given week.
 
-        Returns the dates actually created, so the caller can report honestly
-        when there was nothing to do.
+        The template is the previous week's recurring rows, copied onto the same
+        weekday. That mirrors how the agenda is actually maintained — the same
+        lessons and classes reappear each week — instead of inventing empty
+        placeholder rows nobody asked for.
+
+        Returns (title, target_day, category) for each item that would be
+        created, so callers can preview without writing.
         """
-        end = start + timedelta(days=days - 1)
-        existing = {item.day for item in await self.items_between(start, end)}
-        created: list[date] = []
-        for offset in range(days):
-            day = start + timedelta(days=offset)
-            if day in existing:
+        days = self._cfg.agenda.scaffold_days
+        week_end = week_start + timedelta(days=days - 1)
+        prev_start = week_start - timedelta(days=7)
+
+        template = [
+            item
+            for item in await self.items_between(prev_start, prev_start + timedelta(days=6))
+            if item.recurring and item.day is not None
+        ]
+        # Match on (title, day) so re-running the job never duplicates a row.
+        existing = {
+            (item.title, item.day) for item in await self.items_between(week_start, week_end)
+        }
+
+        planned: list[tuple[str, date, str | None]] = []
+        for item in template:
+            assert item.day is not None
+            target = item.day + timedelta(days=7)
+            if not (week_start <= target <= week_end):
                 continue
-            await self.add_item(template.format(date=day.isoformat()), day)
-            created.append(day)
-        return created
+            if (item.title, target) in existing:
+                continue
+            planned.append((item.title, target, item.category))
+        return planned
+
+    async def scaffold_week(self, week_start: date) -> list[tuple[str, date, str | None]]:
+        """Create the missing recurring rows returned by `plan_week`."""
+        planned = await self.plan_week(week_start)
+        for title, day, category in planned:
+            await self.add_item(title, day, recurring=True, category=category)
+        return planned
 
 
 class ProjectService:

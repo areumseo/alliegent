@@ -16,6 +16,8 @@ def make_page(
     status_type: str = "status",
     checkbox: bool | None = None,
     projects: list[str] | None = None,
+    recurring: bool | None = None,
+    category: str | None = None,
     in_trash: bool = False,
 ) -> dict[str, Any]:
     """Build a Notion page object shaped the way the API returns it."""
@@ -36,6 +38,10 @@ def make_page(
             "type": "relation",
             "relation": [{"id": pid} for pid in projects],
         }
+    if recurring is not None:
+        props["Recurring"] = {"type": "checkbox", "checkbox": recurring}
+    if category is not None:
+        props["Category"] = {"type": "select", "select": {"name": category}}
     return {
         "object": "page",
         "id": page_id,
@@ -105,9 +111,16 @@ class FakeNotionClient:
         return self.schema
 
     async def query(self, data_source_id, *, filter=None, sorts=None, page_size=100):
+        # Apply date filters for real. The week-scaffolding logic queries two
+        # different date ranges and compares them, so a fake that ignored
+        # filters would make those tests meaningless.
+        bounds = _date_bounds(filter)
         for page in self.pages.get(data_source_id, []):
-            if not page.get("in_trash"):
-                yield page
+            if page.get("in_trash"):
+                continue
+            if bounds and not _within(page, bounds):
+                continue
+            yield page
 
     async def create_page(self, data_source_id, properties, *, children=None):
         self.created.append((data_source_id, properties))
@@ -118,6 +131,32 @@ class FakeNotionClient:
     async def update_page(self, page_id, properties):
         self.updated.append((page_id, properties))
         return {"id": page_id}
+
+
+def _date_bounds(filter: dict[str, Any] | None) -> dict[str, str] | None:
+    """Flatten the date conditions out of a Notion filter into {op: value}."""
+    if not filter:
+        return None
+    clauses = filter.get("and") or [filter]
+    bounds: dict[str, str] = {}
+    for clause in clauses:
+        for op, value in (clause.get("date") or {}).items():
+            bounds[op] = value
+    return bounds or None
+
+
+def _within(page: dict[str, Any], bounds: dict[str, str]) -> bool:
+    value = (page.get("properties", {}).get("Date") or {}).get("date")
+    if not value or not value.get("start"):
+        return False
+    day = value["start"][:10]
+    if "on_or_after" in bounds and day < bounds["on_or_after"]:
+        return False
+    if "on_or_before" in bounds and day > bounds["on_or_before"]:
+        return False
+    if "before" in bounds and day >= bounds["before"]:
+        return False
+    return True
 
 
 @pytest.fixture

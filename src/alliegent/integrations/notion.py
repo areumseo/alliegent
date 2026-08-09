@@ -287,6 +287,23 @@ def is_done(page: dict[str, Any], prop: str, done_value: str) -> bool:
     return name is not None and name.casefold() == done_value.casefold()
 
 
+def read_checkbox(page: dict[str, Any], prop: str) -> bool:
+    return bool((page.get("properties", {}).get(prop) or {}).get("checkbox"))
+
+
+def read_select(page: dict[str, Any], prop: str) -> str | None:
+    value = (page.get("properties", {}).get(prop) or {}).get("select")
+    return value.get("name") if value else None
+
+
+def checkbox(value: bool) -> dict[str, Any]:
+    return {"checkbox": value}
+
+
+def select(name: str) -> dict[str, Any]:
+    return {"select": {"name": name}}
+
+
 def read_relation_ids(page: dict[str, Any], prop: str) -> list[str]:
     value = (page.get("properties", {}).get(prop) or {}).get("relation") or []
     return [item["id"] for item in value if "id" in item]

@@ -92,7 +92,9 @@ class AgendaProps(BaseModel):
     title: str = "Name"
     date: str = "Date"
     status: str = "Status"
-    project: str = "Project"
+    recurring: str = "Recurring"
+    category: str = "Category"
+    project: str = ""
 
 
 class ProjectProps(BaseModel):
@@ -115,6 +117,7 @@ class Schedule(BaseModel):
 
 class AgendaConfig(BaseModel):
     scaffold_days: int = 7
+    scaffold_from_recurring: bool = True
     props: AgendaProps = Field(default_factory=AgendaProps)
     status_values: dict[str, str] = Field(
         default_factory=lambda: {

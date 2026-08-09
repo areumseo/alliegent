@@ -26,6 +26,8 @@ GUESS_ORDER = {
     "title": ["title"],
     "date": ["date"],
     "status": ["status", "select", "checkbox"],
+    "recurring": ["checkbox"],
+    "category": ["select"],
     "project": ["relation"],
     "next_action": ["rich_text"],
     "last_activity": ["date", "last_edited_time"],
@@ -86,7 +88,7 @@ async def main() -> int:
 
     targets = [
         ("Weekly Agenda", secrets.notion_agenda_db_id, "agenda",
-         ["title", "date", "status", "project"]),
+         ["title", "date", "status", "recurring", "category", "project"]),
         ("Projects", secrets.notion_projects_db_id, "projects",
          ["title", "status", "next_action", "last_activity"]),
     ]

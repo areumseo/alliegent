@@ -82,11 +82,20 @@ def incomplete_alert(
     return "\n".join(out).strip()
 
 
-def week_scaffold(created: list[date]) -> str | None:
+def week_scaffold(
+    week_start: date, created: list[tuple[str, date, str | None]]
+) -> str | None:
+    """None when the week already has every recurring item — nothing to say."""
     if not created:
         return None
-    days = ", ".join(fmt_date(d) for d in created)
-    return f"🗓️ **주간 항목 생성** — {len(created)}일치 추가했습니다.\n{days}"
+    out = [
+        f"🗓️ **{fmt_date(week_start)} 주간 준비** — 반복 항목 {len(created)}건 추가",
+        "",
+    ]
+    for day in sorted({d for _, d, _ in created}):
+        out.append(f"**{fmt_date(day)}**")
+        out += [f"• {title}" for title, d, _ in created if d == day]
+    return "\n".join(out)
 
 
 def stale_projects(items: list[tuple[Project, date | None]]) -> str | None:
