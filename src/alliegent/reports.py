@@ -54,6 +54,11 @@ def daily_brief(
     if pending:
         out.append(f"**Today ({len(pending)})**")
         out += _bullets(pending, numbered=True)
+    elif todays:
+        # An empty day and a finished one both leave nothing to list, but
+        # telling someone who cleared seven items that nothing was scheduled
+        # reads as the bot not having noticed.
+        out.append(f"**Today** — all {len(todays)} done. 🎉")
     else:
         out.append("**Today** — nothing scheduled.")
     out.append("")

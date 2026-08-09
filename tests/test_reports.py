@@ -110,6 +110,14 @@ def test_daily_brief_handles_an_empty_day():
     assert "nothing scheduled" in text
 
 
+def test_daily_brief_distinguishes_a_finished_day_from_an_empty_one():
+    """Both leave nothing to list; telling someone who cleared the day that
+    nothing was scheduled reads as the bot not having noticed."""
+    text = reports.daily_brief(TODAY, [item("a", done=True), item("b", done=True)], [], [])
+    assert "all 2 done" in text
+    assert "nothing scheduled" not in text
+
+
 def test_incomplete_alert_is_silent_when_nothing_is_pending():
     assert reports.incomplete_alert(TODAY, [item("끝남", done=True)], []) is None
 
