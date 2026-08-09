@@ -9,7 +9,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | Job | Default time (Asia/Seoul) | Description |
 | --- | --- | --- |
 | Daily brief | 08:00 daily | Today's items, anything overdue, and active projects, in one message |
-| AI news digest | 09:00 daily | Top ~10 AI stories from the last 24h — English headline and link, summarised in English and Korean |
+| AI news digest | 09:00 daily | Up to 10 AI stories from the last 24h — English headline and link, three-sentence summary in English and Korean |
 | Incomplete alert | 21:00 daily | Today's unfinished items and anything past its date |
 | Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
 | Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
@@ -132,7 +132,22 @@ The machine must not auto-stop. A Discord gateway connection is long-lived and t
 
 Claude searches the web itself (the server-side `web_search` tool) rather than reading a curated RSS list — there is no feed set to maintain, no dedup or ranking code, and no feed that can die quietly. One API call covers finding, selecting, summarising, and translating.
 
-The model returns the finished message rather than JSON. Structured outputs are incompatible with the citations the search tool produces, and a parse failure at 09:00 would mean no digest at all, so the format lives in the prompt (`src/alliegent/integrations/claude.py`) and there is nothing here that can fail to parse. To change how the digest looks, edit the prompt.
+Each story gets its English headline, the link, and a three-sentence summary in English and again in Korean:
+
+```
+**1. OpenAI says it slowed Astra model development over security concerns**
+https://techcrunch.com/2026/08/07/...
+OpenAI said it deliberately slowed development and release of its next major
+model after internal evaluations flagged it as potentially reaching "critical"
+capability in cybersecurity. …
+OpenAI가 차기 주력 모델의 개발과 공개를 의도적으로 늦췄다고 밝혔습니다. …
+```
+
+Which language is which is obvious at a glance, so there are no `EN:` / `KO:` labels in the output. The model is still asked to emit them — they make the field boundaries unambiguous for the cleanup below — and they are stripped before sending.
+
+The model returns the finished message rather than JSON. Structured outputs are incompatible with the citations the search tool produces, and a parse failure at 09:00 would mean no digest at all, so the format lives in the prompt (`src/alliegent/integrations/claude.py`). To change how the digest reads — length, tone, what counts as significant — edit the prompt.
+
+What the prompt asks for is not left to trust. `_clean()` drops anything before the first item and after the last summary, so a stray "I'll search for the latest AI news." can't survive at the top of every morning's digest, and folds back the line breaks that citations insert mid-sentence.
 
 This is the only feature that needs `ANTHROPIC_API_KEY`. Leave it unset and the job is skipped with a warning; everything else still runs. Cost is roughly $8/month on Opus 5 at one digest a day, plus web search usage — the input side dominates, since the search results are far larger than the summary.
 
