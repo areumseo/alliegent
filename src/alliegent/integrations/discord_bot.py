@@ -34,7 +34,13 @@ class AlliegentBot(discord.Client):
         self.secrets = secrets
         self.guild_id = guild_id
         self.tree = app_commands.CommandTree(self)
-        self.jobs = Jobs(agenda, projects, config, self.notify)
+        self.jobs = Jobs(
+            agenda,
+            projects,
+            config,
+            self.notify,
+            anthropic_api_key=secrets.anthropic_api_key,
+        )
         _register(self)
 
     async def setup_hook(self) -> None:
@@ -178,6 +184,17 @@ def _register(bot: AlliegentBot) -> None:
     async def brief_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         await _reply(interaction, await bot.jobs.build_daily_brief())
+
+    @tree.command(name="news", description="Fetch today's AI news digest now")
+    async def news_cmd(interaction: discord.Interaction) -> None:
+        # Searching and summarising takes well over Discord's 3s window, which
+        # the earlier defer() already covers.
+        await interaction.response.defer()
+        digest = await bot.jobs.build_ai_news()
+        await _reply(
+            interaction,
+            digest or "⚠️ Couldn't fetch the news digest — check the logs.",
+        )
 
     @tree.error
     async def on_error(

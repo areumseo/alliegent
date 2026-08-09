@@ -33,11 +33,13 @@ class Jobs:
         config: Config,
         notify: Notifier,
         clock: Callable[[], date] | None = None,
+        anthropic_api_key: str = "",
     ) -> None:
         self.agenda = agenda
         self.projects = projects
         self.config = config
         self.notify = notify
+        self._anthropic_api_key = anthropic_api_key
         # Injectable so tests can pin a date instead of drifting with the
         # calendar; production leaves it as the configured timezone's today.
         self._clock = clock
@@ -67,6 +69,28 @@ class Jobs:
             return None
         stale = await self.projects.stale(self.today(), self.agenda)
         return reports.stale_projects(stale)
+
+    async def build_ai_news(self) -> str | None:
+        """Fetch and format today's AI news digest.
+
+        Returns None when the digest can't be produced. A missing morning
+        digest is a non-event; a stack trace in the news channel is not.
+        """
+        if not self._anthropic_api_key:
+            log.warning("ANTHROPIC_API_KEY not set — AI news is disabled")
+            return None
+
+        from .integrations.claude import NewsUnavailable, fetch_ai_news
+
+        today = self.today()
+        try:
+            body = await fetch_ai_news(
+                self._anthropic_api_key, today, count=self.config.news.count
+            )
+        except NewsUnavailable as exc:
+            log.error("AI news unavailable: %s", exc)
+            return None
+        return reports.ai_news(today, body)
 
     async def build_weekly_planning(self) -> str:
         """Nudge to plan the coming week, with what is already in it.
@@ -119,6 +143,9 @@ class Jobs:
 
     async def run_stale_projects(self) -> None:
         await self._send(await self.build_stale_projects(), "projects")
+
+    async def run_ai_news(self) -> None:
+        await self._send(await self.build_ai_news(), "news")
 
     async def run_weekly_planning(self) -> None:
         await self._send(await self.build_weekly_planning(), "agenda")
