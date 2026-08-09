@@ -155,6 +155,73 @@ def test_weekly_review_computes_completion_rate():
     assert "50%" in text
 
 
+def test_weekly_review_groups_by_day():
+    """A flat list of eighteen ticks says only that the week happened; the
+    question a review answers is what each day held."""
+    text = reports.weekly_review(
+        date(2026, 8, 3),
+        date(2026, 8, 9),
+        [
+            item("Karrot 5PM", done=True, day=date(2026, 8, 3)),
+            item("Ballet", done=True, day=date(2026, 8, 4)),
+            item("Diary", day=date(2026, 8, 4)),
+        ],
+    )
+    assert "**Mon 8/3**" in text
+    assert "**Tue 8/4**" in text
+    assert text.index("Karrot 5PM") < text.index("Ballet")
+
+
+def test_a_day_with_unfinished_items_shows_its_own_count():
+    text = reports.weekly_review(
+        date(2026, 8, 3),
+        date(2026, 8, 9),
+        [
+            item("a", done=True, day=date(2026, 8, 4)),
+            item("b", day=date(2026, 8, 4)),
+        ],
+    )
+    assert "**Tue 8/4**  (1/2)" in text
+
+
+def test_a_fully_finished_day_carries_no_count():
+    """The tick marks already say it; a (3/3) beside them is noise."""
+    text = reports.weekly_review(
+        date(2026, 8, 3),
+        date(2026, 8, 9),
+        [item("a", done=True, day=date(2026, 8, 4))],
+    )
+    assert "**Tue 8/4**\n" in text
+    assert "(1/1)" not in text
+
+
+def test_days_with_nothing_on_them_are_skipped():
+    text = reports.weekly_review(
+        date(2026, 8, 3), date(2026, 8, 9), [item("a", day=date(2026, 8, 4))]
+    )
+    assert "8/5" not in text
+
+
+def test_nothing_is_truncated():
+    """A review that hides a third of the week defeats itself; long messages
+    are chunked at send time instead."""
+    items = [item(f"task {n}", done=True, day=date(2026, 8, 3)) for n in range(20)]
+    text = reports.weekly_review(date(2026, 8, 3), date(2026, 8, 9), items)
+    assert "more" not in text
+    for n in range(20):
+        assert f"task {n}" in text
+
+
+def test_undated_items_are_kept_at_the_end():
+    text = reports.weekly_review(
+        date(2026, 8, 3),
+        date(2026, 8, 9),
+        [item("floating", day=None), item("dated", done=True, day=date(2026, 8, 4))],
+    )
+    assert "**No date**" in text
+    assert text.index("dated") < text.index("floating")
+
+
 def test_weekly_review_handles_an_empty_week():
     text = reports.weekly_review(date(2026, 8, 2), TODAY, [])
     assert "0%" in text

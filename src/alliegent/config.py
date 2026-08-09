@@ -27,6 +27,11 @@ class Secrets(BaseSettings):
 
     anthropic_api_key: str = ""
 
+    # One or more ICS subscription URLs, separated by commas or whitespace.
+    # These are unauthenticated links: anyone holding one can read that
+    # calendar, so they are secrets even though they look like plain URLs.
+    calendar_ics_urls: str = ""
+
     discord_bot_token: str = ""
     discord_guild_id: int = 0
 

@@ -42,13 +42,30 @@ def _dated(items: list[AgendaItem], marker: str = "⚠️") -> list[str]:
     return lines
 
 
+def calendar_block(events: list) -> list[str]:
+    """Render calendar events as brief lines. Empty when there are none —
+    a 'no events' line every morning is noise."""
+    if not events:
+        return []
+    out = ["**📅 Calendar**"]
+    for event in events:
+        when = "all day" if event.all_day or event.start is None else event.start.strftime("%H:%M")
+        out.append(f"`{when:>7}`  {event.summary}")
+    out.append("")
+    return out
+
+
 def daily_brief(
     today: date,
     todays: list[AgendaItem],
     overdue: list[AgendaItem],
     active_projects: list[Project],
+    events: list | None = None,
 ) -> str:
     out = [f"☀️ **Daily brief — {fmt_date(today)}**", ""]
+    # Calendar first: it is the part of the day already committed, and the
+    # to-do list has to fit around it.
+    out += calendar_block(events or [])
 
     pending = [i for i in todays if not i.done]
     if pending:
@@ -154,8 +171,15 @@ def stale_projects(items: list[tuple[Project, date | None]]) -> str | None:
 
 
 def weekly_review(start: date, end: date, items: list[AgendaItem]) -> str:
+    """A day-by-day account of the week.
+
+    Grouped by date rather than split into completed and carried-over lists:
+    the question a review answers is what each day held, and a flat list of
+    eighteen ticks says only that the week happened. Nothing is truncated —
+    a review that hides a third of the week defeats itself, and long messages
+    are chunked before sending.
+    """
     done = [i for i in items if i.done]
-    undone = [i for i in items if not i.done]
     total = len(items)
     rate = round(len(done) / total * 100) if total else 0
 
@@ -165,18 +189,32 @@ def weekly_review(start: date, end: date, items: list[AgendaItem]) -> str:
         f"Done {len(done)} of {total} ({rate}%)",
         "",
     ]
-    if done:
-        out.append("**Completed**")
-        out += [f"✅ {i.title}" for i in done[:15]]
-        if len(done) > 15:
-            out.append(f"…and {len(done) - 15} more")
+
+    by_day: dict[date, list[AgendaItem]] = {}
+    undated: list[AgendaItem] = []
+    for item in items:
+        if item.day is None:
+            undated.append(item)
+        else:
+            by_day.setdefault(item.day, []).append(item)
+
+    for day in sorted(by_day):
+        # Days with nothing on them are skipped rather than printed empty —
+        # a rest day is not a finding.
+        entries = by_day[day]
+        finished = sum(1 for i in entries if i.done)
+        header = f"**{fmt_date(day)}**"
+        if finished < len(entries):
+            header += f"  ({finished}/{len(entries)})"
+        out.append(header)
+        out += [f"{'✅' if i.done else '•'} {i.title}" for i in entries]
         out.append("")
-    if undone:
-        out.append("**Carrying over**")
-        out += [f"• {i.title}" for i in undone[:15]]
-        if len(undone) > 15:
-            out.append(f"…and {len(undone) - 15} more")
+
+    if undated:
+        out.append("**No date**")
+        out += [f"{'✅' if i.done else '•'} {i.title}" for i in undated]
         out.append("")
+
     out.append("_What went well, what got stuck, what to change next week._")
     return "\n".join(out).strip()
 
