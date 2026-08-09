@@ -68,6 +68,18 @@ class Jobs:
         stale = await self.projects.stale(self.today(), self.agenda)
         return reports.stale_projects(stale)
 
+    async def build_weekly_planning(self) -> str:
+        """Nudge to plan the coming week, with what is already in it.
+
+        Always sends, even when the week is empty — an empty week is exactly
+        when the reminder is worth having.
+        """
+        today = self.today()
+        week_start = self.coming_monday(today)
+        items = await self.agenda.items_between(week_start, week_start + timedelta(days=6))
+        overdue = await self.agenda.overdue(today)
+        return reports.weekly_planning(week_start, items, overdue)
+
     async def build_weekly_review(self) -> str:
         today = self.today()
         start = today - timedelta(days=6)
@@ -107,6 +119,9 @@ class Jobs:
 
     async def run_stale_projects(self) -> None:
         await self._send(await self.build_stale_projects(), "projects")
+
+    async def run_weekly_planning(self) -> None:
+        await self._send(await self.build_weekly_planning(), "agenda")
 
     async def run_weekly_review(self) -> None:
         await self._send(await self.build_weekly_review(), "review")

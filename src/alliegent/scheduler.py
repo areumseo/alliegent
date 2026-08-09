@@ -23,6 +23,10 @@ def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone=config.tz)
 
     def add(name: str, func, *, time: str, day_of_week: str | None = None) -> None:
+        # An empty time is how a job is switched off in alliegent.toml.
+        if not time.strip():
+            log.info("skipped %s (no time configured)", name)
+            return
         hour, minute = _hhmm(time)
         trigger = CronTrigger(
             hour=hour, minute=minute, day_of_week=day_of_week, timezone=config.tz
@@ -42,6 +46,12 @@ def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
 
     add("daily_brief", jobs.run_daily_brief, time=sched.daily_brief)
     add("incomplete_alert", jobs.run_incomplete_alert, time=sched.incomplete_alert)
+    add(
+        "weekly_planning",
+        jobs.run_weekly_planning,
+        time=sched.weekly_planning_time,
+        day_of_week=sched.weekly_planning_weekday,
+    )
     add(
         "week_scaffold",
         jobs.run_week_scaffold,

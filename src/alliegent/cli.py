@@ -19,7 +19,7 @@ from .config import get_config, get_secrets
 from .integrations.notion import NotionClient, NotionError
 from .jobs import Jobs
 
-JOBS = ("brief", "incomplete", "scaffold", "stale", "review")
+JOBS = ("brief", "incomplete", "planning", "scaffold", "stale", "review")
 
 
 async def _run(name: str, commit: bool) -> int:
@@ -44,6 +44,8 @@ async def _run(name: str, commit: bool) -> int:
             message = await jobs.build_daily_brief()
         elif name == "incomplete":
             message = await jobs.build_incomplete_alert()
+        elif name == "planning":
+            message = await jobs.build_weekly_planning()
         elif name == "stale":
             message = await jobs.build_stale_projects()
         elif name == "review":

@@ -12,8 +12,16 @@ timezone = "Asia/Seoul"
 # 24h local time in `timezone` above.
 daily_brief = "08:00"          # morning briefing to Discord
 incomplete_alert = "21:00"     # nudge about today's unfinished items
-week_scaffold_weekday = "mon"  # create the coming week's rows
-week_scaffold_time = "06:00"
+
+# Prompt to plan the coming week, with what is already in it.
+weekly_planning_weekday = "sat"
+weekly_planning_time = "10:00"
+
+# Copies last week's Recurring rows onto the coming week. An empty time
+# disables a job; this one is off because nothing repeats weekly yet. Tick
+# Recurring on a few rows and set a time here to switch it on.
+week_scaffold_weekday = "mon"
+week_scaffold_time = ""
 stale_project_weekday = "wed"
 stale_project_time = "10:00"
 weekly_review_weekday = "sun"
