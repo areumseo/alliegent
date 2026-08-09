@@ -34,6 +34,8 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 
 Everything the bot shows in Discord is English, so nothing needs an input-method switch. Korean date words are still accepted as `when` values.
 
+**Commands post to the same channel their scheduled equivalent uses**, wherever you invoke them from — agenda commands to the agenda channel, `/projects` to the projects channel, `/news` to the news channel. Run one from somewhere else and you get a one-line "Posted to #channel" instead, so the archive never splits across whichever channel you happened to be in. Run it from the destination channel and it just answers in place. `/add` and `/done` are the exception: they answer where you typed them, since routing a one-line confirmation would turn every write into two messages.
+
 Commands work in any channel the bot can see, regardless of the notification routing below.
 
 ## Setup

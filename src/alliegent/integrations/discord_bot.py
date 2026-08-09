@@ -90,6 +90,32 @@ async def _reply(interaction: discord.Interaction, message: str) -> None:
         await interaction.followup.send(part)
 
 
+async def _deliver(
+    bot: AlliegentBot, interaction: discord.Interaction, message: str, kind: str
+) -> None:
+    """Post to the channel this kind belongs to, wherever it was invoked from.
+
+    A command and its scheduled twin should land in the same place, or the
+    archive ends up split across whichever channel someone happened to be in.
+    Invoked from that channel already, it just replies inline — posting there
+    and acknowledging here would duplicate it.
+    """
+    try:
+        target = bot.secrets.channel_for(kind)
+    except RuntimeError:
+        await _reply(interaction, message)
+        return
+
+    if interaction.channel_id == target:
+        await _reply(interaction, message)
+        return
+
+    await bot.notify(message, kind)
+    channel = bot.get_channel(target)
+    name = f"#{channel.name}" if isinstance(channel, discord.TextChannel) else "its channel"
+    await interaction.followup.send(f"📨 Posted to {name}.")
+
+
 def parse_day(text: str | None, today: date) -> date:
     """Accept 'today', 'tomorrow', 'MM-DD', 'YYYY-MM-DD', or the Korean
     equivalents, which are shorter to type on a Korean keyboard."""
@@ -123,7 +149,7 @@ def _register(bot: AlliegentBot) -> None:
         await interaction.response.defer()
         day = bot.today()
         items = await bot.agenda.items_on(day)
-        await _reply(interaction, reports.today_list(day, items))
+        await _deliver(bot, interaction, reports.today_list(day, items), "agenda")
 
     @tree.command(name="tomorrow", description="Show tomorrow's agenda")
     async def tomorrow_cmd(interaction: discord.Interaction) -> None:
@@ -131,7 +157,9 @@ def _register(bot: AlliegentBot) -> None:
         day = bot.today() + timedelta(days=1)
         items = await bot.agenda.items_on(day)
         # Unnumbered: /done applies to today, so numbers here would mislead.
-        await _reply(interaction, reports.day_list(day, items, numbered=False))
+        await _deliver(
+            bot, interaction, reports.day_list(day, items, numbered=False), "agenda"
+        )
 
     @tree.command(name="status", description="Today's and this week's progress")
     async def status_cmd(interaction: discord.Interaction) -> None:
@@ -141,7 +169,9 @@ def _register(bot: AlliegentBot) -> None:
         todays = await bot.agenda.items_on(day)
         overdue = await bot.agenda.overdue(day)
         week = await bot.agenda.items_between(monday, monday + timedelta(days=6))
-        await _reply(interaction, reports.status(day, todays, overdue, week))
+        await _deliver(
+            bot, interaction, reports.status(day, todays, overdue, week), "agenda"
+        )
 
     @tree.command(name="add", description="Add an item to the agenda")
     @app_commands.describe(
@@ -186,7 +216,7 @@ def _register(bot: AlliegentBot) -> None:
     async def overdue_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         items = await bot.agenda.overdue(bot.today())
-        await _reply(interaction, reports.overdue_list(items))
+        await _deliver(bot, interaction, reports.overdue_list(items), "agenda")
 
     @tree.command(name="projects", description="Show active projects")
     async def projects_cmd(interaction: discord.Interaction) -> None:
@@ -196,12 +226,13 @@ def _register(bot: AlliegentBot) -> None:
                 "⚠️ No projects database configured (NOTION_PROJECTS_DB_ID)."
             )
             return
-        await _reply(interaction, reports.project_list(await bot.projects.active()))
+        projects = reports.project_list(await bot.projects.active())
+        await _deliver(bot, interaction, projects, "projects")
 
     @tree.command(name="brief", description="Run the daily brief now")
     async def brief_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.defer()
-        await _reply(interaction, await bot.jobs.build_daily_brief())
+        await _deliver(bot, interaction, await bot.jobs.build_daily_brief(), "agenda")
 
     @tree.command(name="news", description="Fetch today's AI news digest now")
     async def news_cmd(interaction: discord.Interaction) -> None:
@@ -209,10 +240,12 @@ def _register(bot: AlliegentBot) -> None:
         # the earlier defer() already covers.
         await interaction.response.defer()
         digest = await bot.jobs.build_ai_news()
-        await _reply(
-            interaction,
-            digest or "⚠️ Couldn't fetch the news digest — check the logs.",
-        )
+        if digest is None:
+            await interaction.followup.send(
+                "⚠️ Couldn't fetch the news digest — check the logs."
+            )
+            return
+        await _deliver(bot, interaction, digest, "news")
 
     @tree.error
     async def on_error(

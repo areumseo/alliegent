@@ -75,3 +75,33 @@ def test_descriptions_are_english_too():
 def test_bot_shares_its_notifier_with_the_jobs():
     bot = make_bot()
     assert bot.jobs.notify == bot.notify
+
+
+# -- command → channel routing ---------------------------------------------
+# A command and its scheduled twin must land in the same channel, or the
+# archive splits across whichever channel someone happened to be in.
+
+COMMAND_CHANNELS = {
+    "today": "agenda",
+    "tomorrow": "agenda",
+    "status": "agenda",
+    "overdue": "agenda",
+    "brief": "agenda",
+    "projects": "projects",
+    "news": "news",
+}
+
+# Short write confirmations answer in place: routing a one-line "Added — X"
+# would turn every write into two messages.
+INLINE_COMMANDS = {"add", "done"}
+
+
+def test_every_command_either_routes_or_is_deliberately_inline():
+    names = {cmd.name for cmd in make_bot().tree.get_commands()}
+    assert names == set(COMMAND_CHANNELS) | INLINE_COMMANDS
+
+
+def test_routed_kinds_all_resolve_to_a_channel():
+    secrets = Secrets(discord_channel_id=1)
+    for kind in set(COMMAND_CHANNELS.values()):
+        assert secrets.channel_for(kind) > 0
