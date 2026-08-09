@@ -152,6 +152,9 @@ def main() -> int:
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING)
     logging.getLogger("discord").setLevel(logging.WARNING)
+    # discord.py warns about missing voice support on every connect; this bot
+    # only posts text, so the warning is pure noise.
+    logging.getLogger("discord.client").setLevel(logging.ERROR)
     return asyncio.run(_run(args.job, args.commit, args.send))
 
 

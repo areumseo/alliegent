@@ -152,6 +152,20 @@ Pinned to version `2026-03-11`. Two things in recent versions break older exampl
 
 Status is read from the schema rather than assumed, so a checkbox, a select, or a status property all work for marking things done.
 
+## Troubleshooting
+
+**`ModuleNotFoundError: No module named 'alliegent'`** — the editable install intermittently stops being applied to `sys.path`, even though `uv pip list` shows the package installed. Prefix the command instead of reinstalling every time:
+
+```bash
+PYTHONPATH=src uv run python -m alliegent.cli brief
+```
+
+`uv sync --reinstall-package alliegent` also fixes it, but not durably. Production is unaffected: the Docker image installs a real wheel and `fly.toml` sets `PYTHONPATH` anyway.
+
+**`403 Forbidden (error code: 50001): Missing Access` when sending** — the bot is in the server but cannot see that channel. Inviting the bot to a server does not grant access to private channels. Right-click the channel → **Edit Channel** → **Permissions** → **Add members or roles** → pick the bot → allow **View Channel** and **Send Messages**. The channel ID is not the problem.
+
+**Notion returns 404 for a database that exists** — the token has not been given access to it. Open the database → `···` → **Connections** → add your integration. A valid token alone grants nothing.
+
 ## Development
 
 ```bash
