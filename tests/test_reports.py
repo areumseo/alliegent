@@ -34,6 +34,24 @@ def test_daily_brief_lists_pending_and_overdue():
     assert "다음 단계" in text
 
 
+def test_no_empty_checkbox_anywhere():
+    """An unchecked box on every line of an all-unfinished list is pure noise."""
+    brief = reports.daily_brief(TODAY, [item("남은 것")], [], [])
+    today = reports.today_list(TODAY, [item("한 것", done=True), item("남은 것")])
+    review = reports.weekly_review(
+        date(2026, 8, 2), TODAY, [item("한 것", done=True), item("남은 것")]
+    )
+    planning = reports.weekly_planning(date(2026, 8, 10), [item("예정")], [])
+    for text in (brief, today, review, planning):
+        assert "⬜" not in text
+
+
+def test_done_items_stay_marked_where_they_mix_with_pending():
+    text = reports.today_list(TODAY, [item("한 것", done=True), item("남은 것")])
+    assert "✅ 한 것" in text
+    assert "✅ 남은 것" not in text
+
+
 def test_daily_brief_handles_an_empty_day():
     text = reports.daily_brief(TODAY, [], [], [])
     assert "등록된 항목이 없습니다" in text
