@@ -1,18 +1,24 @@
-app = "alliegent"
-primary_region = "nrt"   # Tokyo — closest to Asia/Seoul
+# fly.toml app configuration file generated for alliegent on 2026-08-09T18:01:54+09:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'alliegent'
+primary_region = 'nrt'
 
 [build]
-
 [env]
-  # Secrets go through `fly secrets set`, never here.
-  PYTHONPATH = "/app/src"
-
-# A Discord gateway connection is long-lived and inbound-portless, so this is
-# a plain worker: no [http_service], and the machine must not auto-stop or the
-# bot goes offline and scheduled jobs never fire.
-[[vm]]
-  size = "shared-cpu-1x"
-  memory = "512mb"
+  PYTHONPATH = '/app/src'
 
 [processes]
-  app = "alliegent"
+  app = 'alliegent'
+
+# Deliberately no [http_service]. A Discord gateway connection is outbound and
+# long-lived, so nothing ever arrives on an internal port. With an http_service
+# and auto_stop_machines, Fly sees no traffic, stops the machine, and the bot
+# goes offline while scheduled jobs silently stop firing. `fly launch`
+# re-adds this block every time it runs — remove it again.
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '512mb'
