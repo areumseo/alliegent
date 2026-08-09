@@ -9,6 +9,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | Job | Default time (Asia/Seoul) | Description |
 | --- | --- | --- |
 | Daily brief | 08:00 daily | Today's items, anything overdue, and active projects, in one message |
+| AI news digest | 09:00 daily | Top ~10 AI stories from the last 24h — English headline and link, summarised in English and Korean |
 | Incomplete alert | 21:00 daily | Today's unfinished items and anything past its date |
 | Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
 | Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
@@ -27,6 +28,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/overdue` | Overdue, unfinished items |
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
+| `/news` | Fetch the AI news digest now |
 
 Everything the bot shows in Discord is English, so nothing needs an input-method switch. Korean date words are still accepted as `when` values.
 
@@ -57,6 +59,7 @@ Each job posts to the channel matching its kind:
 | `DISCORD_AGENDA_CHANNEL_ID` | Daily brief, incomplete alert, week scaffolding |
 | `DISCORD_PROJECTS_CHANNEL_ID` | Stale project nudges |
 | `DISCORD_REVIEW_CHANNEL_ID` | Weekly review (falls back to the agenda channel) |
+| `DISCORD_NEWS_CHANNEL_ID` | Daily AI news digest |
 | `DISCORD_CHANNEL_ID` | Fallback for anything left blank |
 
 ### 3. Run locally
@@ -120,6 +123,16 @@ fly deploy
 ```
 
 The machine must not auto-stop. A Discord gateway connection is long-lived and takes no inbound HTTP, so `fly.toml` deliberately has no `[http_service]` — if the machine suspends, the bot goes offline and scheduled jobs never fire.
+
+## The AI news digest
+
+Claude searches the web itself (the server-side `web_search` tool) rather than reading a curated RSS list — there is no feed set to maintain, no dedup or ranking code, and no feed that can die quietly. One API call covers finding, selecting, summarising, and translating.
+
+The model returns the finished message rather than JSON. Structured outputs are incompatible with the citations the search tool produces, and a parse failure at 09:00 would mean no digest at all, so the format lives in the prompt (`src/alliegent/integrations/claude.py`) and there is nothing here that can fail to parse. To change how the digest looks, edit the prompt.
+
+This is the only feature that needs `ANTHROPIC_API_KEY`. Leave it unset and the job is skipped with a warning; everything else still runs. Cost is roughly $8/month on Opus 5 at one digest a day, plus web search usage — the input side dominates, since the search results are far larger than the summary.
+
+When the digest can't be produced — no key, rate limit, refusal — nothing is posted. A missing digest is a non-event; a stack trace in the news channel is not.
 
 ## The agenda database
 

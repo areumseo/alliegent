@@ -45,6 +45,7 @@ def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
         log.info("scheduled %s at %s%s", name, time, f" ({day_of_week})" if day_of_week else "")
 
     add("daily_brief", jobs.run_daily_brief, time=sched.daily_brief)
+    add("ai_news", jobs.run_ai_news, time=sched.ai_news)
     add("incomplete_alert", jobs.run_incomplete_alert, time=sched.incomplete_alert)
     add(
         "weekly_planning",

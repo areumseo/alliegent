@@ -183,6 +183,15 @@ def today_list(today: date, items: list[AgendaItem]) -> str:
     return "\n".join([header, *_bullets(items, numbered=True)])
 
 
+def ai_news(today: date, body: str) -> str:
+    """Wrap the model-written digest in a dated header.
+
+    The body is used verbatim — its formatting is the model's responsibility,
+    so a change of format here means changing the prompt, not this function.
+    """
+    return f"🤖 **AI News — {fmt_date(today)}**\n\n{body.strip()}"
+
+
 def overdue_list(items: list[AgendaItem]) -> str:
     if not items:
         return "🎉 Nothing overdue."

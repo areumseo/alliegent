@@ -33,8 +33,10 @@ async def main() -> None:
     secrets.require("notion_token", "notion_agenda_db_id", "discord_bot_token")
     # Resolve every route up front so a missing channel fails at boot rather
     # than silently swallowing a scheduled message days later.
-    for kind in ("agenda", "projects", "review"):
+    for kind in ("agenda", "projects", "review", "news"):
         secrets.channel_for(kind)
+    if not secrets.anthropic_api_key:
+        log.warning("ANTHROPIC_API_KEY not set — the AI news digest is disabled")
 
     client = NotionClient(secrets.notion_token)
     agenda = AgendaService(client, config, secrets.notion_agenda_db_id)

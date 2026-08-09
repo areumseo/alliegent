@@ -17,7 +17,13 @@ PROJ_DS = "ds_proj-db"
 TODAY = date(2026, 8, 9)
 
 
-def build(agenda_pages=None, project_pages=None, today=TODAY, link_projects=True):
+def build(
+    agenda_pages=None,
+    project_pages=None,
+    today=TODAY,
+    link_projects=True,
+    anthropic_api_key="",
+):
     sent: list[tuple[str, str]] = []
 
     async def notify(message: str, kind: str) -> None:
@@ -34,6 +40,7 @@ def build(agenda_pages=None, project_pages=None, today=TODAY, link_projects=True
         config,
         notify,
         clock=lambda: today,
+        anthropic_api_key=anthropic_api_key,
     )
     return jobs, sent, client
 
@@ -67,6 +74,57 @@ async def test_scaffold_commit_writes_rows():
     )
     await jobs.week_scaffold(commit=True)
     assert len(client.created) == 1
+
+
+async def test_ai_news_stays_silent_without_an_api_key():
+    """No key means the feature is off, not that the channel gets an error."""
+    jobs, sent, _ = build()
+    await jobs.run_ai_news()
+    assert sent == []
+
+
+async def test_ai_news_stays_silent_when_the_digest_fails(monkeypatch):
+    """A missing morning digest is a non-event; a stack trace in Discord isn't."""
+    from alliegent.integrations import claude
+
+    async def boom(*args, **kwargs):
+        raise claude.NewsUnavailable("rate limited")
+
+    monkeypatch.setattr(claude, "fetch_ai_news", boom)
+    jobs, sent, _ = build(anthropic_api_key="sk-test")
+    await jobs.run_ai_news()
+    assert sent == []
+
+
+async def test_ai_news_posts_to_the_news_channel(monkeypatch):
+    from alliegent.integrations import claude
+
+    async def digest(api_key, today, count=10):
+        return "**1. Something happened**\nhttps://example.com\nEN: x\nKO: x"
+
+    monkeypatch.setattr(claude, "fetch_ai_news", digest)
+    jobs, sent, _ = build(anthropic_api_key="sk-test")
+    await jobs.run_ai_news()
+    message, kind = sent[0]
+    assert kind == "news"
+    assert "Something happened" in message
+    assert "AI News" in message
+
+
+async def test_ai_news_passes_the_configured_count(monkeypatch):
+    from alliegent.integrations import claude
+
+    seen = {}
+
+    async def digest(api_key, today, count=10):
+        seen["count"] = count
+        return "body"
+
+    monkeypatch.setattr(claude, "fetch_ai_news", digest)
+    jobs, _, _ = build(anthropic_api_key="sk-test")
+    jobs.config.news.count = 5
+    await jobs.run_ai_news()
+    assert seen["count"] == 5
 
 
 async def test_weekly_planning_sends_even_when_next_week_is_empty():
@@ -141,6 +199,7 @@ def test_scheduler_registers_the_enabled_jobs():
     ids = {job.id for job in scheduler.get_jobs()}
     assert ids == {
         "daily_brief",
+        "ai_news",
         "incomplete_alert",
         "weekly_planning",
         "stale_projects",

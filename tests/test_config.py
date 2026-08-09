@@ -23,6 +23,15 @@ def test_unset_channels_fall_back_to_the_default():
     assert secrets.channel_for("projects") == 1
 
 
+def test_news_has_its_own_channel():
+    secrets = Secrets(discord_channel_id=1, discord_news_channel_id=9)
+    assert secrets.channel_for("news") == 9
+
+
+def test_news_falls_back_to_the_default_channel():
+    assert Secrets(discord_channel_id=1).channel_for("news") == 1
+
+
 def test_review_falls_back_to_the_agenda_channel_not_the_default():
     secrets = Secrets(discord_channel_id=1, discord_agenda_channel_id=2)
     assert secrets.channel_for("review") == 2

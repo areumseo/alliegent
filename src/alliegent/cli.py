@@ -23,11 +23,12 @@ from .config import get_config, get_secrets
 from .integrations.notion import NotionClient, NotionError
 from .jobs import Jobs
 
-JOBS = ("brief", "incomplete", "planning", "scaffold", "stale", "review")
+JOBS = ("brief", "news", "incomplete", "planning", "scaffold", "stale", "review")
 
 # Which channel each job posts to, mirroring jobs.py.
 JOB_CHANNEL = {
     "brief": "agenda",
+    "news": "news",
     "incomplete": "agenda",
     "planning": "agenda",
     "scaffold": "agenda",
@@ -87,13 +88,17 @@ async def _run(name: str, commit: bool, send: bool) -> int:
         if secrets.notion_projects_db_id
         else None
     )
-    jobs = Jobs(agenda, projects, config, printer)
+    jobs = Jobs(
+        agenda, projects, config, printer, anthropic_api_key=secrets.anthropic_api_key
+    )
 
     try:
         if name == "brief":
             message = await jobs.build_daily_brief()
         elif name == "incomplete":
             message = await jobs.build_incomplete_alert()
+        elif name == "news":
+            message = await jobs.build_ai_news()
         elif name == "planning":
             message = await jobs.build_weekly_planning()
         elif name == "stale":

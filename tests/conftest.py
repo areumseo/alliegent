@@ -165,6 +165,8 @@ def config() -> Config:
 
 
 SECRET_ENV_VARS = (
+    "ANTHROPIC_API_KEY",
+    "DISCORD_NEWS_CHANNEL_ID",
     "NOTION_TOKEN",
     "NOTION_AGENDA_DB_ID",
     "NOTION_PROJECTS_DB_ID",

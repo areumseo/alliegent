@@ -25,6 +25,8 @@ class Secrets(BaseSettings):
     notion_agenda_db_id: str = ""
     notion_projects_db_id: str = ""
 
+    anthropic_api_key: str = ""
+
     discord_bot_token: str = ""
     discord_guild_id: int = 0
 
@@ -33,6 +35,7 @@ class Secrets(BaseSettings):
     discord_agenda_channel_id: int = 0
     discord_projects_channel_id: int = 0
     discord_review_channel_id: int = 0
+    discord_news_channel_id: int = 0
 
     @field_validator(
         "discord_guild_id",
@@ -40,6 +43,7 @@ class Secrets(BaseSettings):
         "discord_agenda_channel_id",
         "discord_projects_channel_id",
         "discord_review_channel_id",
+        "discord_news_channel_id",
         mode="before",
     )
     @classmethod
@@ -67,6 +71,7 @@ class Secrets(BaseSettings):
             "agenda": agenda,
             "projects": self.discord_projects_channel_id or self.discord_channel_id,
             "review": self.discord_review_channel_id or agenda,
+            "news": self.discord_news_channel_id or self.discord_channel_id,
         }
         target = routes.get(kind, agenda)
         if not target:
@@ -106,6 +111,7 @@ class ProjectProps(BaseModel):
 
 class Schedule(BaseModel):
     daily_brief: str = "08:00"
+    ai_news: str = "09:00"
     incomplete_alert: str = "21:00"
     weekly_planning_weekday: str = "sat"
     weekly_planning_time: str = "10:00"
@@ -140,11 +146,16 @@ class ProjectsConfig(BaseModel):
     )
 
 
+class NewsConfig(BaseModel):
+    count: int = 10
+
+
 class Config(BaseModel):
     timezone: str = "Asia/Seoul"
     schedule: Schedule = Field(default_factory=Schedule)
     agenda: AgendaConfig = Field(default_factory=AgendaConfig)
     projects: ProjectsConfig = Field(default_factory=ProjectsConfig)
+    news: NewsConfig = Field(default_factory=NewsConfig)
 
     @property
     def tz(self) -> ZoneInfo:
