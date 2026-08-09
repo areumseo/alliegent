@@ -14,7 +14,17 @@ from alliegent.integrations.discord_bot import AlliegentBot
 
 from .conftest import FakeNotionClient
 
-EXPECTED = {"today", "add", "done", "overdue", "projects", "brief", "news"}
+EXPECTED = {
+    "today",
+    "tomorrow",
+    "status",
+    "add",
+    "done",
+    "overdue",
+    "projects",
+    "brief",
+    "news",
+}
 
 
 def make_bot() -> AlliegentBot:

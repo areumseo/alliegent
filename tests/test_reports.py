@@ -52,6 +52,59 @@ def test_done_items_stay_marked_where_they_mix_with_pending():
     assert "✅ 남은 것" not in text
 
 
+def test_day_list_can_omit_numbers():
+    """Tomorrow's list is unnumbered — /done resolves against today."""
+    text = reports.day_list(TODAY, [item("내일 할 것")], numbered=False)
+    assert "내일 할 것" in text
+    assert "`1.`" not in text
+
+
+def test_day_list_reports_an_empty_day():
+    assert "nothing scheduled" in reports.day_list(TODAY, [], numbered=False)
+
+
+# -- status ----------------------------------------------------------------
+
+
+def test_status_counts_today_and_the_week():
+    todays = [item("a", done=True), item("b"), item("c")]
+    week = [item("a", done=True), item("b"), item("c"), item("d", done=True)]
+    text = reports.status(TODAY, todays, [], week)
+    assert "Today — 1 of 3 done (33%)" in text
+    assert "This week — 2 of 4 done (50%)" in text
+
+
+def test_status_numbers_match_the_today_list():
+    """The numbers must index the full day, not the pending subset — /done
+    resolves them the way /today prints them."""
+    todays = [item("done one", done=True), item("still open")]
+    text = reports.status(TODAY, todays, [], todays)
+    assert "`2.` still open" in text
+    assert "`1.` still open" not in text
+
+
+def test_status_celebrates_a_finished_day():
+    todays = [item("a", done=True)]
+    text = reports.status(TODAY, todays, [], todays)
+    assert "Nothing left today" in text
+
+
+def test_status_omits_overdue_when_there_is_none():
+    text = reports.status(TODAY, [item("a")], [], [item("a")])
+    assert "Overdue" not in text
+
+
+def test_status_shows_overdue_count():
+    text = reports.status(TODAY, [], [item("x"), item("y")], [])
+    assert "Overdue — 2" in text
+
+
+def test_status_handles_a_completely_empty_day():
+    text = reports.status(TODAY, [], [], [])
+    assert "nothing scheduled" in text
+    assert "Nothing left today" not in text  # nothing was scheduled to finish
+
+
 def test_daily_brief_handles_an_empty_day():
     text = reports.daily_brief(TODAY, [], [], [])
     assert "nothing scheduled" in text

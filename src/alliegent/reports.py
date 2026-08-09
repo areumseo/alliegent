@@ -176,11 +176,59 @@ def weekly_review(start: date, end: date, items: list[AgendaItem]) -> str:
     return "\n".join(out).strip()
 
 
-def today_list(today: date, items: list[AgendaItem]) -> str:
+def day_list(day: date, items: list[AgendaItem], *, numbered: bool = True) -> str:
+    """One day's items.
+
+    `numbered` is off for any day other than today: /done resolves numbers
+    against today's list, so numbering a future day invites completing the
+    wrong row.
+    """
     if not items:
-        return f"{fmt_date(today)} — nothing scheduled."
-    header = f"**{fmt_date(today)} — {len(items)} item(s)**"
-    return "\n".join([header, *_bullets(items, numbered=True)])
+        return f"{fmt_date(day)} — nothing scheduled."
+    header = f"**{fmt_date(day)} — {len(items)} item(s)**"
+    return "\n".join([header, *_bullets(items, numbered=numbered)])
+
+
+def today_list(today: date, items: list[AgendaItem]) -> str:
+    return day_list(today, items, numbered=True)
+
+
+def status(
+    today: date,
+    todays: list[AgendaItem],
+    overdue: list[AgendaItem],
+    week: list[AgendaItem],
+) -> str:
+    """A numbers-first snapshot: how today and this week are actually going."""
+
+    def ratio(items: list[AgendaItem]) -> str:
+        done = sum(1 for i in items if i.done)
+        if not items:
+            return "nothing scheduled"
+        return f"{done} of {len(items)} done ({round(done / len(items) * 100)}%)"
+
+    out = [
+        f"📊 **Status — {fmt_date(today)}**",
+        "",
+        f"Today — {ratio(todays)}",
+        f"This week — {ratio(week)}",
+    ]
+    if overdue:
+        out.append(f"Overdue — {len(overdue)}")
+
+    # Number against the full day, not against the filtered pending list —
+    # /done resolves numbers the way /today prints them, so renumbering here
+    # would complete the wrong row.
+    pending = [
+        f"`{idx}.` {item.title}"
+        for idx, item in enumerate(todays, start=1)
+        if not item.done
+    ]
+    if pending:
+        out += ["", f"**Left today ({len(pending)})**", *pending]
+    elif todays:
+        out += ["", "Nothing left today. 🎉"]
+    return "\n".join(out)
 
 
 def ai_news(today: date, body: str) -> str:
