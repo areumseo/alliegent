@@ -27,6 +27,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/status` | Today's and this week's completion, plus what's left today |
 | `/add <task> [when]` | Add an item. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow`, `2026-08-15`, `08-15`, or `08/15`; defaults to today |
 | `/done <number>` | Complete an item by its number in `/today` |
+| `/delete <number>` | Move an item to Notion's trash by its number in `/today` — recoverable there |
 | `/overdue` | Overdue, unfinished items |
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
@@ -138,7 +139,7 @@ Mention the bot and it answers, using the same agenda underneath:
 @alliegent Diary 끝냈어
 ```
 
-It can read any day, list what's overdue, add items, and mark them done. It cannot delete items or move dates — a misread request that quietly removes a row is worse than one that says it can't, so those stay in Notion.
+It can read any day, list what's overdue, add items, mark them done, and move them to Notion's trash. Deleting is a trash move, not a hard delete — the row is recoverable in Notion, which is what makes it safe to expose. Changing an item's date is not exposed: a silently moved item is hard to notice and hard to undo, unlike a trashed one you can see in the trash.
 
 Only mentions trigger it. Replying to everything would talk over conversations and bill for the privilege. Context is kept per channel for about six exchanges, so follow-ups ("그럼 그건 모레로") resolve without repeating yourself.
 

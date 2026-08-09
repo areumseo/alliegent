@@ -264,6 +264,30 @@ def _register(bot: AlliegentBot) -> None:
         await bot.agenda.set_done(item.id)
         await interaction.followup.send(f"✅ Done — **{item.title}**")
 
+    @tree.command(
+        name="delete", description="Move an item to Notion's trash by its number in /today"
+    )
+    @app_commands.describe(number="The number shown in /today")
+    async def delete_cmd(interaction: discord.Interaction, number: int) -> None:
+        await interaction.response.defer()
+        day = bot.today()
+        # Same list and same order as /today, so the number the user read is
+        # the row that goes.
+        items = await bot.agenda.items_on(day)
+        if not 1 <= number <= len(items):
+            hint = (
+                f"⚠️ Pick a number between 1 and {len(items)}."
+                if items
+                else "⚠️ Nothing scheduled today."
+            )
+            await interaction.followup.send(hint)
+            return
+        item = items[number - 1]
+        await bot.agenda.trash(item.id)
+        await interaction.followup.send(
+            f"🗑️ Moved to trash — **{item.title}** (recoverable in Notion)"
+        )
+
     @tree.command(name="overdue", description="Show overdue, unfinished items")
     async def overdue_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.defer()

@@ -108,26 +108,47 @@ async def test_unknown_tool_is_reported_rather_than_raising():
 # -- tool definitions ------------------------------------------------------
 
 
-def test_every_tool_is_implemented():
-    """A declared tool with no branch would come back as "Unknown tool" at
-    runtime, which the model can't do anything useful with."""
+async def test_every_declared_tool_is_implemented():
+    """A declared tool with no branch comes back as "Unknown tool" at runtime,
+    which the model can do nothing useful with."""
     agent, _ = build()
     for tool in TOOLS:
-        assert tool["name"] in {
-            "list_agenda",
-            "list_overdue",
-            "add_item",
-            "complete_item",
-        }
+        out = await agent._run_tool(tool["name"], {})
+        assert "Unknown tool" not in out, tool["name"]
 
 
 def test_tools_declare_their_required_arguments():
     by_name = {t["name"]: t for t in TOOLS}
-    assert by_name["add_item"]["input_schema"]["required"] == ["title", "day"]
-    assert by_name["complete_item"]["input_schema"]["required"] == ["title", "day"]
+    for name in ("add_item", "complete_item", "delete_item"):
+        assert by_name[name]["input_schema"]["required"] == ["title", "day"]
 
 
-def test_no_tool_can_delete():
-    """Deletion is deliberately absent: an agent that can quietly remove rows
-    on a misread request is worse than one that says it can't."""
-    assert not any("delete" in t["name"] for t in TOOLS)
+def test_nothing_can_change_a_date():
+    """Rescheduling exists on the service but is deliberately not exposed:
+    silently moving an item is hard to notice and hard to undo, unlike a
+    trashed row that Notion keeps."""
+    assert not any("resched" in t["name"] or "move" in t["name"] for t in TOOLS)
+
+
+# -- delete ----------------------------------------------------------------
+
+
+async def test_delete_trashes_the_matching_row():
+    agent, client = build([make_page("p1", "장보기", day="2026-08-09")])
+    out = await agent._run_tool("delete_item", {"title": "장보기", "day": "2026-08-09"})
+    assert client.trashed == ["p1"]
+    assert "trash" in out.lower()
+
+
+async def test_delete_leaves_the_row_alone_when_the_title_is_wrong():
+    agent, client = build([make_page("p1", "장보기", day="2026-08-09")])
+    await agent._run_tool("delete_item", {"title": "쇼핑", "day": "2026-08-09"})
+    assert client.trashed == []
+
+
+async def test_delete_and_complete_are_not_interchangeable():
+    """Same matching logic, different outcomes — a mix-up would either lose a
+    row or fail to record work as done."""
+    agent, client = build([make_page("p1", "Diary", day="2026-08-09")])
+    await agent._run_tool("complete_item", {"title": "Diary", "day": "2026-08-09"})
+    assert client.updated and client.trashed == []

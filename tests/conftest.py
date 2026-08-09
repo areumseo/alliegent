@@ -103,6 +103,7 @@ class FakeNotionClient:
         }
         self.created: list[tuple[str, dict[str, Any]]] = []
         self.updated: list[tuple[str, dict[str, Any]]] = []
+        self.trashed: list[str] = []
 
     async def resolve_data_source(self, database_id: str) -> str:
         return f"ds_{database_id}"
@@ -131,6 +132,10 @@ class FakeNotionClient:
     async def update_page(self, page_id, properties):
         self.updated.append((page_id, properties))
         return {"id": page_id}
+
+    async def trash_page(self, page_id):
+        self.trashed.append(page_id)
+        return {"id": page_id, "in_trash": True}
 
 
 def _date_bounds(filter: dict[str, Any] | None) -> dict[str, str] | None:
