@@ -13,7 +13,11 @@ DS = "ds_agenda-db"
 PROJ_DS = "ds_proj-db"
 
 
-def build(agenda_pages=None, project_pages=None):
+# Sunday. Pinned so the tests don't drift with the real calendar.
+TODAY = date(2026, 8, 9)
+
+
+def build(agenda_pages=None, project_pages=None, today=TODAY, link_projects=True):
     sent: list[tuple[str, str]] = []
 
     async def notify(message: str, kind: str) -> None:
@@ -21,11 +25,15 @@ def build(agenda_pages=None, project_pages=None):
 
     client = FakeNotionClient({DS: agenda_pages or [], PROJ_DS: project_pages or []})
     config = Config()
+    # Staleness needs the agenda->project relation as evidence; the shipped
+    # default has none, so tests that exercise it opt in.
+    config.agenda.props.project = "Project" if link_projects else ""
     jobs = Jobs(
         AgendaService(client, config, "agenda-db"),
         ProjectService(client, config, "proj-db"),
         config,
         notify,
+        clock=lambda: today,
     )
     return jobs, sent, client
 
@@ -45,16 +53,37 @@ async def test_incomplete_alert_sends_nothing_when_all_clear():
 
 
 async def test_scaffold_preview_does_not_write_to_notion():
-    jobs, _, client = build()
+    jobs, _, client = build(
+        [make_page("t1", "Ballet 7:10PM", day="2026-08-03", recurring=True)]
+    )
     message = await jobs.week_scaffold(commit=False)
     assert client.created == []
-    assert message is not None
+    assert message is not None and "Ballet 7:10PM" in message
 
 
 async def test_scaffold_commit_writes_rows():
-    jobs, _, client = build()
+    jobs, _, client = build(
+        [make_page("t1", "Ballet 7:10PM", day="2026-08-03", recurring=True)]
+    )
     await jobs.week_scaffold(commit=True)
-    assert len(client.created) == Config().agenda.scaffold_days
+    assert len(client.created) == 1
+
+
+async def test_scaffold_says_nothing_when_the_week_is_already_set_up():
+    jobs, sent, _ = build()
+    await jobs.run_week_scaffold()
+    assert sent == []
+
+
+def test_coming_monday_is_today_when_today_is_monday():
+    jobs, _, _ = build()
+    assert jobs.coming_monday(date(2026, 8, 10)) == date(2026, 8, 10)
+
+
+def test_coming_monday_skips_ahead_from_any_other_day():
+    jobs, _, _ = build()
+    assert jobs.coming_monday(date(2026, 8, 9)) == date(2026, 8, 10)
+    assert jobs.coming_monday(date(2026, 8, 11)) == date(2026, 8, 17)
 
 
 async def test_weekly_review_covers_the_trailing_seven_days():
@@ -74,7 +103,12 @@ async def test_stale_project_job_reports_neglected_projects():
 async def test_jobs_route_to_their_own_channel_kinds():
     """Agenda chatter and project nudges go to different channels, so the
     kind each job emits is part of its contract."""
-    jobs, sent, _ = build(project_pages=[make_project("b", "방치됨")])
+    jobs, sent, _ = build(
+        # A recurring template item, so the scaffolding job has something to
+        # say rather than staying silent.
+        agenda_pages=[make_page("t1", "Ballet 7:10PM", day="2026-08-03", recurring=True)],
+        project_pages=[make_project("b", "방치됨")],
+    )
     await jobs.run_daily_brief()
     await jobs.run_week_scaffold()
     await jobs.run_stale_projects()
@@ -103,6 +137,8 @@ def test_scheduler_uses_configured_timezone():
     assert str(scheduler.timezone) == "Asia/Seoul"
 
 
-def test_jobs_today_respects_configured_timezone():
+def test_jobs_today_uses_the_configured_timezone_by_default():
+    """No clock injected — falls back to the real Asia/Seoul date."""
     jobs, _, _ = build()
+    jobs._clock = None
     assert isinstance(jobs.today(), date)

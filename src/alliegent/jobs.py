@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from . import reports
 from .agenda import AgendaService, ProjectService
@@ -32,15 +32,19 @@ class Jobs:
         projects: ProjectService | None,
         config: Config,
         notify: Notifier,
+        clock: Callable[[], date] | None = None,
     ) -> None:
         self.agenda = agenda
         self.projects = projects
         self.config = config
         self.notify = notify
+        # Injectable so tests can pin a date instead of drifting with the
+        # calendar; production leaves it as the configured timezone's today.
+        self._clock = clock
 
     def today(self) -> date:
-        from datetime import datetime
-
+        if self._clock is not None:
+            return self._clock()
         return datetime.now(self.config.tz).date()
 
     # -- message builders --------------------------------------------------
@@ -70,26 +74,22 @@ class Jobs:
         items = await self.agenda.items_between(start, today)
         return reports.weekly_review(start, today, items)
 
+    def coming_monday(self, today: date) -> date:
+        """The Monday of the week to scaffold — today if it already is Monday."""
+        return today + timedelta(days=(7 - today.weekday()) % 7)
+
     async def week_scaffold(self, *, commit: bool = True) -> str | None:
-        """Create placeholder rows for upcoming dates that have none.
+        """Copy last week's recurring items onto the coming week.
 
         Unlike the other jobs this one writes to Notion, so `commit=False`
         reports what *would* be created without touching the database.
         """
-        today = self.today()
-        days = self.config.agenda.scaffold_days
-        if not commit:
-            end = today + timedelta(days=days - 1)
-            existing = {i.day for i in await self.agenda.items_between(today, end)}
-            missing = [
-                today + timedelta(days=offset)
-                for offset in range(days)
-                if today + timedelta(days=offset) not in existing
-            ]
-            return reports.week_scaffold(missing)
-
-        created = await self.agenda.ensure_days(today, days, "{date}")
-        return reports.week_scaffold(created)
+        week_start = self.coming_monday(self.today())
+        if commit:
+            created = await self.agenda.scaffold_week(week_start)
+        else:
+            created = await self.agenda.plan_week(week_start)
+        return reports.week_scaffold(week_start, created)
 
     # -- run + send --------------------------------------------------------
 

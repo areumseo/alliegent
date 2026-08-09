@@ -15,11 +15,19 @@ PROJ_DS = "ds_proj-db"
 TODAY = date(2026, 8, 8)
 
 
-def service(pages, **kwargs):
-    client = FakeNotionClient({DS: pages}, **kwargs)
+def make_config(link_projects: bool = False):
+    """Config() has no project relation by default — the real workspace has no
+    projects database yet. Tests that exercise linking opt in explicitly."""
     from alliegent.config import Config
 
-    return client, AgendaService(client, Config(), DB)
+    config = Config()
+    config.agenda.props.project = "Project" if link_projects else ""
+    return config
+
+
+def service(pages, link_projects=False, **kwargs):
+    client = FakeNotionClient({DS: pages}, **kwargs)
+    return client, AgendaService(client, make_config(link_projects), DB)
 
 
 async def test_items_on_reads_titles_and_status():
@@ -41,8 +49,6 @@ async def test_untitled_rows_get_a_placeholder_not_an_empty_string():
 
 
 async def test_overdue_excludes_completed_items():
-    # The fake client ignores filters, so both rows come back and the
-    # done-filtering in `overdue` is what's under test here.
     _, svc = service(
         [
             make_page("p1", "밀린 것", day="2026-08-01", status="Not started"),
@@ -53,18 +59,66 @@ async def test_overdue_excludes_completed_items():
     assert [i.title for i in items] == ["밀린 것"]
 
 
-async def test_ensure_days_only_creates_missing_dates():
-    client, svc = service([make_page("p1", "이미 있음", day="2026-08-09")])
-    created = await svc.ensure_days(TODAY, 3, "{date}")
-    assert created == [date(2026, 8, 8), date(2026, 8, 10)]
+# -- week scaffolding ------------------------------------------------------
+# Monday 2026-08-10 is the week being filled; 2026-08-03 is the template week.
+
+WEEK_START = date(2026, 8, 10)
+
+
+async def test_scaffold_copies_recurring_items_onto_the_same_weekday():
+    client, svc = service(
+        [
+            # Template week: Monday and Wednesday.
+            make_page("t1", "Ballet 7:10PM", day="2026-08-03", recurring=True,
+                      category="Exercise"),
+            make_page("t2", "BC English 9:30PM", day="2026-08-05", recurring=True),
+        ]
+    )
+    planned = await svc.scaffold_week(WEEK_START)
+    assert planned == [
+        ("Ballet 7:10PM", date(2026, 8, 10), "Exercise"),
+        ("BC English 9:30PM", date(2026, 8, 12), None),
+    ]
     assert len(client.created) == 2
 
 
-async def test_ensure_days_creates_nothing_when_week_is_full():
-    days = [make_page(f"p{i}", "x", day=f"2026-08-0{8 + i}") for i in range(2)]
-    client, svc = service(days)
-    assert await svc.ensure_days(TODAY, 2, "{date}") == []
+async def test_scaffold_ignores_one_off_items():
+    """Only rows flagged Recurring are templates; a one-off stays in its week."""
+    client, svc = service(
+        [make_page("t1", "가짜연구소 지원", day="2026-08-03", recurring=False)]
+    )
+    assert await svc.scaffold_week(WEEK_START) == []
     assert client.created == []
+
+
+async def test_scaffold_is_idempotent():
+    """Re-running the job must not duplicate rows already in the target week."""
+    client, svc = service(
+        [
+            make_page("t1", "Ballet 7:10PM", day="2026-08-03", recurring=True),
+            make_page("e1", "Ballet 7:10PM", day="2026-08-10", recurring=True),
+        ]
+    )
+    assert await svc.scaffold_week(WEEK_START) == []
+    assert client.created == []
+
+
+async def test_plan_week_previews_without_writing():
+    client, svc = service(
+        [make_page("t1", "Ballet 7:10PM", day="2026-08-03", recurring=True)]
+    )
+    planned = await svc.plan_week(WEEK_START)
+    assert [t for t, _, _ in planned] == ["Ballet 7:10PM"]
+    assert client.created == []
+
+
+async def test_scaffolded_rows_stay_recurring_so_the_next_week_works():
+    client, svc = service(
+        [make_page("t1", "Ballet 7:10PM", day="2026-08-03", recurring=True)]
+    )
+    await svc.scaffold_week(WEEK_START)
+    _, props = client.created[0]
+    assert props["Recurring"] == {"checkbox": True}
 
 
 async def test_set_done_uses_the_detected_property_type():
@@ -88,7 +142,7 @@ async def test_missing_status_property_gives_an_actionable_error():
 
 
 async def test_add_item_links_project_when_relation_configured():
-    client, svc = service([])
+    client, svc = service([], link_projects=True)
     await svc.add_item("할 일", TODAY, project_id="proj-1")
     _, props = client.created[0]
     assert props["Project"] == {"relation": [{"id": "proj-1"}]}
@@ -97,11 +151,9 @@ async def test_add_item_links_project_when_relation_configured():
 # -- projects --------------------------------------------------------------
 
 
-def project_services(agenda_pages, project_pages):
-    from alliegent.config import Config
-
+def project_services(agenda_pages, project_pages, link_projects=True):
     client = FakeNotionClient({DS: agenda_pages, PROJ_DS: project_pages})
-    config = Config()
+    config = make_config(link_projects)
     return (
         AgendaService(client, config, DB),
         ProjectService(client, config, PROJ_DB),
@@ -136,12 +188,9 @@ async def test_stale_reports_no_activity_as_none_date():
 
 async def test_stale_stays_silent_when_relation_is_not_configured():
     """Without a project relation there is no evidence of inactivity, so the
-    job must not nag about every project."""
-    from alliegent.config import Config
-
-    config = Config()
-    config.agenda.props.project = ""
-    client = FakeNotionClient({DS: [], PROJ_DS: [make_project("b", "프로젝트")]})
-    agenda = AgendaService(client, config, DB)
-    projects = ProjectService(client, config, PROJ_DB)
+    job must not nag about every project. This is the shipped default today,
+    since the workspace has no projects database yet."""
+    agenda, projects = project_services(
+        [], [make_project("b", "프로젝트")], link_projects=False
+    )
     assert await projects.stale(TODAY, agenda, days=7) == []

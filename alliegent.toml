@@ -2,9 +2,9 @@
 # Secrets live in .env locally and in `fly secrets` in production.
 #
 # The [agenda.props] / [projects.props] tables map this app's internal field
-# names to the *actual property names in your Notion databases*. Defaults below
-# are guesses — run `uv run python scripts/inspect_notion.py` to dump your real
-# schema, then correct these. Values are the exact Notion property names.
+# names to the *actual property names in your Notion databases*. The agenda
+# values below were verified against the real "Weekly Agenda DB" on 2026-08-09.
+# Set an optional field to "" to disable the feature that uses it.
 
 timezone = "Asia/Seoul"
 
@@ -20,14 +20,16 @@ weekly_review_weekday = "sun"
 weekly_review_time = "21:00"
 
 [agenda]
-# How many days ahead the week-scaffolding job pre-creates rows for.
+# Length of the week the scaffolding job fills in.
 scaffold_days = 7
 
 [agenda.props]
 title = "Name"          # title property
 date = "Date"           # date property
 status = "Status"       # status OR select OR checkbox — auto-detected
-project = "Project"     # optional relation to the projects DB; "" to disable
+recurring = "Recurring" # checkbox marking items that repeat weekly
+category = "Category"   # select; copied onto scaffolded items
+project = ""            # relation to a projects DB; none exists yet
 
 [agenda.status_values]
 # Used when `status` is a status/select property. Ignored for checkbox.

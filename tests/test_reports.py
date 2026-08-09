@@ -49,7 +49,21 @@ def test_incomplete_alert_reports_pending_work():
 
 
 def test_week_scaffold_is_silent_when_nothing_was_created():
-    assert reports.week_scaffold([]) is None
+    assert reports.week_scaffold(date(2026, 8, 10), []) is None
+
+
+def test_week_scaffold_groups_created_items_by_day():
+    text = reports.week_scaffold(
+        date(2026, 8, 10),
+        [
+            ("Ballet 7:10PM", date(2026, 8, 11), "Exercise"),
+            ("Butfit 12:30PM", date(2026, 8, 13), "Exercise"),
+            ("Ballet 7:10PM", date(2026, 8, 13), "Exercise"),
+        ],
+    )
+    assert text is not None
+    assert "8/11(화)" in text and "8/13(목)" in text
+    assert text.count("Ballet 7:10PM") == 2
 
 
 def test_weekly_review_computes_completion_rate():

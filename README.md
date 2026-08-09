@@ -10,7 +10,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | --- | --- | --- |
 | Daily brief | 08:00 daily | Today's items, anything overdue, and active projects, in one message |
 | Incomplete alert | 21:00 daily | Today's unfinished items and anything past its date |
-| Week scaffolding | Mon 06:00 | Creates agenda rows for upcoming dates that don't have one |
+| Week scaffolding | Mon 06:00 | Copies last week's `Recurring` items onto the coming week, same weekday |
 | Stale project nudge | Wed 10:00 | Projects with no linked agenda activity for N days |
 | Weekly review | Sun 21:00 | Completion stats for the past week as a review draft |
 
@@ -111,6 +111,23 @@ fly deploy
 ```
 
 The machine must not auto-stop. A Discord gateway connection is long-lived and takes no inbound HTTP, so `fly.toml` deliberately has no `[http_service]` — if the machine suspends, the bot goes offline and scheduled jobs never fire.
+
+## The agenda database
+
+The Weekly Agenda is a Notion database, one row per item:
+
+| Property | Type | Purpose |
+| --- | --- | --- |
+| `Name` | title | The item |
+| `Date` | date | Which day it belongs to |
+| `Status` | status | `Not started` / `In progress` / `Done` |
+| `Recurring` | checkbox | Repeats weekly — the scaffolding job uses these as its template |
+| `Category` | select | Lesson / Work / Exercise / Study / Contact / Personal / Admin |
+| `Note` | text | Optional |
+
+`Recurring` is what makes the Monday job useful: tick it on the classes and calls that come back every week, and they are recreated on the same weekday without retyping. Scaffolded rows stay ticked, so the following week works from them in turn. Re-running the job never duplicates a row — it matches on title and date.
+
+A database rather than a hand-built page means past weeks accumulate instead of being overwritten, which is what makes the weekly review possible at all.
 
 ## Configuration
 
