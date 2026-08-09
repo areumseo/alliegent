@@ -107,8 +107,12 @@ class ProjectProps(BaseModel):
 class Schedule(BaseModel):
     daily_brief: str = "08:00"
     incomplete_alert: str = "21:00"
+    weekly_planning_weekday: str = "sat"
+    weekly_planning_time: str = "10:00"
     week_scaffold_weekday: str = "mon"
-    week_scaffold_time: str = "06:00"
+    # Empty disables the job. Off by default: nothing in the agenda repeats
+    # weekly yet, so there is no template to copy from.
+    week_scaffold_time: str = ""
     stale_project_weekday: str = "wed"
     stale_project_time: str = "10:00"
     weekly_review_weekday: str = "sun"

@@ -10,7 +10,8 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | --- | --- | --- |
 | Daily brief | 08:00 daily | Today's items, anything overdue, and active projects, in one message |
 | Incomplete alert | 21:00 daily | Today's unfinished items and anything past its date |
-| Week scaffolding | Mon 06:00 | Copies last week's `Recurring` items onto the coming week, same weekday |
+| Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
+| Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
 | Stale project nudge | Wed 10:00 | Projects with no linked agenda activity for N days |
 | Weekly review | Sun 21:00 | Completion stats for the past week as a review draft |
 
@@ -80,7 +81,7 @@ Preview any job in the terminal without posting to Discord:
 uv run python -m alliegent.cli brief
 ```
 
-Jobs: `brief`, `incomplete`, `scaffold`, `stale`, `review`.
+Jobs: `brief`, `incomplete`, `planning`, `scaffold`, `stale`, `review`.
 
 `scaffold` is the only job that writes to Notion, so it previews by default and needs `--commit` to actually create rows:
 
@@ -125,9 +126,11 @@ The Weekly Agenda is a Notion database, one row per item:
 | `Category` | select | Lesson / Work / Exercise / Study / Contact / Personal / Admin |
 | `Note` | text | Optional |
 
-`Recurring` is what makes the Monday job useful: tick it on the classes and calls that come back every week, and they are recreated on the same weekday without retyping. Scaffolded rows stay ticked, so the following week works from them in turn. Re-running the job never duplicates a row — it matches on title and date.
+A database rather than a hand-built page means past weeks accumulate instead of being overwritten, which is what makes the weekly review possible at all. It also means there is no week to "set up" — a date view draws the days on its own.
 
-A database rather than a hand-built page means past weeks accumulate instead of being overwritten, which is what makes the weekly review possible at all.
+`Recurring` is unused for now, since nothing in the agenda repeats on a fixed weekly slot. If that changes, tick it on the rows that come back every week and give `week_scaffold_time` a value in `alliegent.toml`; the job then recreates them on the same weekday without retyping. Scaffolded rows stay ticked, so the following week works from them in turn, and re-running never duplicates because it matches on title and date.
+
+Any job can be switched off the same way: blank its time in `alliegent.toml`.
 
 ## Configuration
 

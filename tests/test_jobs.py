@@ -69,6 +69,24 @@ async def test_scaffold_commit_writes_rows():
     assert len(client.created) == 1
 
 
+async def test_weekly_planning_sends_even_when_next_week_is_empty():
+    """An empty week is exactly when the planning nudge earns its place."""
+    jobs, sent, _ = build()
+    await jobs.run_weekly_planning()
+    assert len(sent) == 1
+    assert "아직 없습니다" in sent[0][0]
+
+
+async def test_weekly_planning_reports_what_is_already_scheduled():
+    jobs, sent, _ = build(
+        [make_page("p1", "Ballet 7:10PM", day="2026-08-11", status="Not started")]
+    )
+    await jobs.run_weekly_planning()
+    message = sent[0][0]
+    assert "등록된 항목 1건" in message
+    assert "8/10(월)" in message  # 8/11 has an item, so 8/10 is listed as empty
+
+
 async def test_scaffold_says_nothing_when_the_week_is_already_set_up():
     jobs, sent, _ = build()
     await jobs.run_week_scaffold()
@@ -116,18 +134,34 @@ async def test_jobs_route_to_their_own_channel_kinds():
     assert [kind for _, kind in sent] == ["agenda", "agenda", "projects", "review"]
 
 
-def test_scheduler_registers_every_job():
+def test_scheduler_registers_the_enabled_jobs():
+    """week_scaffold ships disabled — nothing in the agenda repeats weekly."""
     jobs, _, _ = build()
-    config = Config()
-    scheduler = build_scheduler(jobs, config)
+    scheduler = build_scheduler(jobs, Config())
     ids = {job.id for job in scheduler.get_jobs()}
     assert ids == {
         "daily_brief",
         "incomplete_alert",
-        "week_scaffold",
+        "weekly_planning",
         "stale_projects",
         "weekly_review",
     }
+
+
+def test_an_empty_time_disables_a_job():
+    jobs, _, _ = build()
+    config = Config()
+    config.schedule.daily_brief = ""
+    ids = {job.id for job in build_scheduler(jobs, config).get_jobs()}
+    assert "daily_brief" not in ids
+
+
+def test_setting_a_time_enables_week_scaffolding_again():
+    jobs, _, _ = build()
+    config = Config()
+    config.schedule.week_scaffold_time = "06:00"
+    ids = {job.id for job in build_scheduler(jobs, config).get_jobs()}
+    assert "week_scaffold" in ids
 
 
 def test_scheduler_uses_configured_timezone():

@@ -3,7 +3,7 @@ without touching Notion or Discord."""
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from .agenda import AgendaItem, Project
 
@@ -96,6 +96,45 @@ def week_scaffold(
         out.append(f"**{fmt_date(day)}**")
         out += [f"• {title}" for title, d, _ in created if d == day]
     return "\n".join(out)
+
+
+def weekly_planning(
+    week_start: date, items: list[AgendaItem], overdue: list[AgendaItem]
+) -> str:
+    week_end = week_start + timedelta(days=6)
+    out = [
+        f"📅 **다음 주 계획 ({fmt_date(week_start)} ~ {fmt_date(week_end)})**",
+        "",
+    ]
+
+    if items:
+        out.append(f"등록된 항목 {len(items)}건")
+        by_day: dict[date, int] = {}
+        for item in items:
+            if item.day:
+                by_day[item.day] = by_day.get(item.day, 0) + 1
+        empty = [
+            week_start + timedelta(days=offset)
+            for offset in range(7)
+            if (week_start + timedelta(days=offset)) not in by_day
+        ]
+        if empty:
+            out.append("비어 있는 날 — " + ", ".join(fmt_date(d) for d in empty))
+    else:
+        out.append("다음 주에 등록된 항목이 아직 없습니다.")
+    out.append("")
+
+    if overdue:
+        out.append(f"**넘어온 것 ({len(overdue)}건)**")
+        for item in overdue[:10]:
+            when = fmt_date(item.day) if item.day else "날짜 없음"
+            out.append(f"⚠️ {item.title} — {when}")
+        if len(overdue) > 10:
+            out.append(f"…외 {len(overdue) - 10}건")
+        out.append("")
+
+    out.append("_이번 주에 남은 것부터 정리하고, 다음 주 일정을 채워보세요._")
+    return "\n".join(out).strip()
 
 
 def stale_projects(items: list[tuple[Project, date | None]]) -> str | None:

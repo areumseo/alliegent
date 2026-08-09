@@ -81,6 +81,28 @@ def test_weekly_review_handles_an_empty_week():
     assert "0%" in text
 
 
+def test_weekly_planning_lists_empty_days():
+    text = reports.weekly_planning(
+        date(2026, 8, 10),
+        [item("Ballet", day=date(2026, 8, 11))],
+        [],
+    )
+    assert "등록된 항목 1건" in text
+    assert "8/11(화)" not in text.split("비어 있는 날")[1]
+
+
+def test_weekly_planning_prompts_when_the_week_is_empty():
+    text = reports.weekly_planning(date(2026, 8, 10), [], [])
+    assert "아직 없습니다" in text
+
+
+def test_weekly_planning_surfaces_overdue_carryover():
+    text = reports.weekly_planning(
+        date(2026, 8, 10), [], [item("밀린 것", day=date(2026, 8, 3))]
+    )
+    assert "넘어온 것" in text and "밀린 것" in text
+
+
 def test_stale_projects_is_silent_when_none():
     assert reports.stale_projects([]) is None
 
