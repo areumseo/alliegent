@@ -91,6 +91,43 @@ def test_option_descriptions_fit_discords_limit():
             assert len(param.description) <= 100, (cmd.name, param.display_name)
 
 
+def test_chat_is_off_without_an_api_key():
+    """No key means no message_content intent either — requesting a privileged
+    intent the app doesn't need is what makes a bot fail to connect."""
+    bot = make_bot()
+    assert bot.chat is None
+    assert bot.intents.message_content is False
+
+
+def test_chat_and_its_intent_turn_on_together():
+    client = FakeNotionClient()
+    config = Config()
+    bot = AlliegentBot(
+        config=config,
+        agenda=AgendaService(client, config, "agenda-db"),
+        projects=None,
+        secrets=Secrets(discord_channel_id=123, anthropic_api_key="sk-test"),
+    )
+    assert bot.chat is not None
+    assert bot.intents.message_content is True
+
+
+def test_chat_can_be_disabled_even_with_a_key():
+    """The fallback when the portal intent isn't enabled: keep the scheduled
+    jobs running rather than refusing to start."""
+    client = FakeNotionClient()
+    config = Config()
+    bot = AlliegentBot(
+        config=config,
+        agenda=AgendaService(client, config, "agenda-db"),
+        projects=None,
+        secrets=Secrets(discord_channel_id=123, anthropic_api_key="sk-test"),
+        enable_chat=False,
+    )
+    assert bot.chat is None
+    assert bot.intents.message_content is False
+
+
 def test_bot_shares_its_notifier_with_the_jobs():
     bot = make_bot()
     assert bot.jobs.notify == bot.notify

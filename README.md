@@ -128,6 +128,26 @@ fly deploy
 
 The machine must not auto-stop. A Discord gateway connection is long-lived and takes no inbound HTTP, so `fly.toml` deliberately has no `[http_service]` — if the machine suspends, the bot goes offline and scheduled jobs never fire.
 
+## Talking to it
+
+Mention the bot and it answers, using the same agenda underneath:
+
+```
+@alliegent 내일 뭐 있지?
+@alliegent 장보기 내일 추가해줘
+@alliegent Diary 끝냈어
+```
+
+It can read any day, list what's overdue, add items, and mark them done. It cannot delete items or move dates — a misread request that quietly removes a row is worse than one that says it can't, so those stay in Notion.
+
+Only mentions trigger it. Replying to everything would talk over conversations and bill for the privilege. Context is kept per channel for about six exchanges, so follow-ups ("그럼 그건 모레로") resolve without repeating yourself.
+
+Runs on Sonnet 5 at low effort — chat is latency-sensitive and each turn is small. Roughly $1–2/month at twenty messages a day.
+
+**This needs the Message Content intent**, which is privileged: discord.com/developers → your app → **Bot** → **Privileged Gateway Intents** → enable **MESSAGE CONTENT INTENT**. Without it, messages arrive with empty content and the bot looks like it's ignoring you. If the app requests the intent without it being enabled, Discord refuses the connection outright — so when that happens the bot logs the fix, drops the chat feature, and starts anyway rather than taking the scheduled jobs down with it.
+
+Chat is skipped entirely when `ANTHROPIC_API_KEY` is unset, and the intent isn't requested at all.
+
 ## The AI news digest
 
 Claude searches the web itself (the server-side `web_search` tool) rather than reading a curated RSS list — there is no feed set to maintain, no dedup or ranking code, and no feed that can die quietly. One API call covers finding, selecting, summarising, and translating.
