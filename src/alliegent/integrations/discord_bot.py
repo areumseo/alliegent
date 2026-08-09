@@ -16,6 +16,7 @@ from ..agenda import AgendaService, ProjectService
 from ..chat import ChatAgent, strip_mentions
 from ..config import Config, Secrets
 from ..jobs import Jobs
+from .calendar import parse_urls
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ class AlliegentBot(discord.Client):
             config,
             self.notify,
             anthropic_api_key=secrets.anthropic_api_key,
+            calendar_urls=parse_urls(secrets.calendar_ics_urls),
         )
         _register(self)
 

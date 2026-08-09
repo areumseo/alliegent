@@ -34,7 +34,9 @@ class Jobs:
         notify: Notifier,
         clock: Callable[[], date] | None = None,
         anthropic_api_key: str = "",
+        calendar_urls: list[str] | None = None,
     ) -> None:
+        self.calendar_urls = calendar_urls or []
         self.agenda = agenda
         self.projects = projects
         self.config = config
@@ -51,12 +53,29 @@ class Jobs:
 
     # -- message builders --------------------------------------------------
 
+    async def calendar_on(self, day: date) -> list:
+        """Today's calendar events, or nothing if the feeds can't be read.
+
+        A calendar outage should cost the brief its calendar block, not the
+        whole brief.
+        """
+        if not self.calendar_urls:
+            return []
+        from .integrations.calendar import events_on
+
+        try:
+            return await events_on(self.calendar_urls, day, self.config.tz)
+        except Exception:
+            log.exception("calendar lookup failed")
+            return []
+
     async def build_daily_brief(self) -> str:
         today = self.today()
         todays = await self.agenda.items_on(today)
         overdue = await self.agenda.overdue(today)
         active = await self.projects.active() if self.projects else []
-        return reports.daily_brief(today, todays, overdue, active)
+        events = await self.calendar_on(today)
+        return reports.daily_brief(today, todays, overdue, active, events)
 
     async def build_incomplete_alert(self) -> str | None:
         today = self.today()
