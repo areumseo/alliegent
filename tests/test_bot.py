@@ -8,9 +8,11 @@ name fails in CI rather than on first deploy.
 
 from __future__ import annotations
 
+import pytest
+
 from alliegent.agenda import AgendaService, ProjectService
 from alliegent.config import Config, Secrets
-from alliegent.integrations.discord_bot import AlliegentBot
+from alliegent.integrations.discord_bot import AlliegentBot, parse_numbers
 
 from .conftest import FakeNotionClient
 
@@ -90,6 +92,41 @@ def test_option_descriptions_fit_discords_limit():
     for cmd in make_bot().tree.get_commands():
         for param in cmd.parameters:
             assert len(param.description) <= 100, (cmd.name, param.display_name)
+
+
+# -- number parsing --------------------------------------------------------
+# /done and /delete take several numbers at once and resolve them against one
+# snapshot. Running them one at a time would let an earlier change shift the
+# list under the later numbers.
+
+
+def test_a_single_number_still_works():
+    assert parse_numbers("3") == [3]
+
+
+@pytest.mark.parametrize("text", ["3,5", "3 5", "3, 5", " 3 ,5 "])
+def test_separators_people_actually_type(text):
+    assert parse_numbers(text) == [3, 5]
+
+
+def test_typed_order_is_preserved():
+    """The reply reads back in the order they asked for."""
+    assert parse_numbers("5,3") == [5, 3]
+
+
+def test_duplicates_collapse():
+    assert parse_numbers("3,3,5") == [3, 5]
+
+
+@pytest.mark.parametrize("text", ["", "   ", ",", " , "])
+def test_nothing_to_act_on_is_rejected(text):
+    with pytest.raises(ValueError):
+        parse_numbers(text)
+
+
+def test_non_numbers_are_rejected_by_name():
+    with pytest.raises(ValueError, match="three"):
+        parse_numbers("3,three")
 
 
 def test_chat_is_off_without_an_api_key():
