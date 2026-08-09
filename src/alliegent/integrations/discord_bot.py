@@ -176,7 +176,9 @@ def _register(bot: AlliegentBot) -> None:
     @tree.command(name="add", description="Add an item to the agenda")
     @app_commands.describe(
         task="What to add",
-        when="today / tomorrow / 2026-08-15 / 08-15 (defaults to today)",
+        # This is the only place a user finds out Korean words work, so they
+        # belong here and not just in the README.
+        when="오늘 / 내일 / 모레 / today / tomorrow / 2026-08-15 / 08-15 (default: today)",
     )
     async def add_cmd(
         interaction: discord.Interaction, task: str, when: str | None = None
