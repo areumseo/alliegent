@@ -13,6 +13,7 @@ from discord import app_commands
 
 from .. import reports
 from ..agenda import AgendaService, ProjectService
+from ..chat import ChatAgent, strip_mentions
 from ..config import Config, Secrets
 from ..jobs import Jobs
 
@@ -28,9 +29,16 @@ class AlliegentBot(discord.Client):
         projects: ProjectService | None,
         secrets: Secrets,
         guild_id: int = 0,
+        enable_chat: bool = True,
     ) -> None:
-        # Slash commands need no privileged intents; message content is never read.
-        super().__init__(intents=discord.Intents.default())
+        # message_content is a privileged intent, needed to read what someone
+        # says when they mention the bot. It has to be enabled in the Discord
+        # developer portal too; without it messages arrive with empty content
+        # and the bot looks like it is ignoring you.
+        chat_on = enable_chat and bool(secrets.anthropic_api_key)
+        intents = discord.Intents.default()
+        intents.message_content = chat_on
+        super().__init__(intents=intents)
         self.config = config
         self.agenda = agenda
         self.projects = projects
@@ -38,6 +46,9 @@ class AlliegentBot(discord.Client):
         self.guild_id = guild_id
         self.tree = app_commands.CommandTree(self)
         self._tasks: set[asyncio.Task[None]] = set()
+        self.chat = (
+            ChatAgent(secrets.anthropic_api_key, agenda, config) if chat_on else None
+        )
         self.jobs = Jobs(
             agenda,
             projects,
@@ -60,6 +71,30 @@ class AlliegentBot(discord.Client):
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s", self.user)
+
+    async def on_message(self, message: discord.Message) -> None:
+        """Answer when mentioned. Only when mentioned: reacting to everything
+        would talk over conversations and bill for the privilege."""
+        if self.chat is None or self.user is None:
+            return
+        if message.author.bot or not self.user.mentioned_in(message):
+            return
+        # @everyone / @here mention the bot too, and are not addressed to it.
+        if message.mention_everyone:
+            return
+
+        text = strip_mentions(message.content, self.user.id)
+        if not text:
+            return
+
+        async with message.channel.typing():
+            try:
+                reply = await self.chat.respond(message.channel.id, text)
+            except Exception as exc:
+                log.exception("chat failed")
+                reply = f"⚠️ Something went wrong: {type(exc).__name__}"
+        for part in reports.chunk(reply):
+            await message.reply(part, mention_author=False)
 
     async def notify(self, message: str, kind: str = "agenda") -> None:
         """Push a scheduled message to the channel configured for `kind`."""
