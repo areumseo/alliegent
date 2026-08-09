@@ -83,6 +83,12 @@ uv run python -m alliegent.cli brief
 
 Jobs: `brief`, `incomplete`, `planning`, `scaffold`, `stale`, `review`.
 
+Add `--send` to actually post the result to the Discord channel that job uses. This checks the bot token, the channel IDs, and the bot's channel permissions in one go, rather than waiting until 08:00 to discover one of them is wrong:
+
+```bash
+uv run python -m alliegent.cli brief --send
+```
+
 `scaffold` is the only job that writes to Notion, so it previews by default and needs `--commit` to actually create rows:
 
 ```bash
