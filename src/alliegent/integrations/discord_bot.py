@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Coroutine
 from datetime import date, datetime, timedelta
+from typing import Any
 
 import discord
 from discord import app_commands
@@ -34,6 +37,7 @@ class AlliegentBot(discord.Client):
         self.secrets = secrets
         self.guild_id = guild_id
         self.tree = app_commands.CommandTree(self)
+        self._tasks: set[asyncio.Task[None]] = set()
         self.jobs = Jobs(
             agenda,
             projects,
@@ -80,6 +84,17 @@ class AlliegentBot(discord.Client):
 
     def today(self) -> date:
         return datetime.now(self.config.tz).date()
+
+    def spawn(self, coro: Coroutine[Any, Any, None]) -> None:
+        """Run a slow command in the background.
+
+        The task is held in a set until it finishes: asyncio only keeps a weak
+        reference, so a task nothing holds can be garbage-collected mid-flight
+        and simply never complete.
+        """
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
 
 async def _reply(interaction: discord.Interaction, message: str) -> None:
@@ -238,16 +253,26 @@ def _register(bot: AlliegentBot) -> None:
 
     @tree.command(name="news", description="Fetch today's AI news digest now")
     async def news_cmd(interaction: discord.Interaction) -> None:
-        # Searching and summarising takes well over Discord's 3s window, which
-        # the earlier defer() already covers.
-        await interaction.response.defer()
-        digest = await bot.jobs.build_ai_news()
-        if digest is None:
-            await interaction.followup.send(
-                "⚠️ Couldn't fetch the news digest — check the logs."
-            )
-            return
-        await _deliver(bot, interaction, digest, "news")
+        # Searching the web and writing ten summaries takes minutes, not
+        # seconds. Waiting on it would leave the invoker watching a spinner
+        # with no idea whether anything is happening, so acknowledge now and
+        # let the digest arrive in its channel when it's ready.
+        await interaction.response.send_message(
+            "🔎 Searching — the digest will land in the news channel shortly.",
+            ephemeral=True,
+        )
+
+        async def run() -> None:
+            digest = await bot.jobs.build_ai_news()
+            if digest is None:
+                await interaction.followup.send(
+                    "⚠️ Couldn't fetch the news digest — check the logs.",
+                    ephemeral=True,
+                )
+                return
+            await bot.notify(digest, "news")
+
+        bot.spawn(run())
 
     @tree.error
     async def on_error(
