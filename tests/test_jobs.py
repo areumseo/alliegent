@@ -74,7 +74,7 @@ async def test_weekly_planning_sends_even_when_next_week_is_empty():
     jobs, sent, _ = build()
     await jobs.run_weekly_planning()
     assert len(sent) == 1
-    assert "아직 없습니다" in sent[0][0]
+    assert "Nothing scheduled for next week yet." in sent[0][0]
 
 
 async def test_weekly_planning_reports_what_is_already_scheduled():
@@ -83,8 +83,8 @@ async def test_weekly_planning_reports_what_is_already_scheduled():
     )
     await jobs.run_weekly_planning()
     message = sent[0][0]
-    assert "등록된 항목 1건" in message
-    assert "8/10(월)" in message  # 8/11 has an item, so 8/10 is listed as empty
+    assert "1 item(s) scheduled" in message
+    assert "Mon 8/10" in message  # 8/11 has an item, so 8/10 is listed as empty
 
 
 async def test_scaffold_says_nothing_when_the_week_is_already_set_up():

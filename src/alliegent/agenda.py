@@ -80,7 +80,7 @@ class AgendaService:
         p = self.props
         return AgendaItem(
             id=page["id"],
-            title=n.read_title(page, p.title) or "(제목 없음)",
+            title=n.read_title(page, p.title) or "(untitled)",
             day=n.read_date(page, p.date),
             status=n.read_status(page, p.status),
             done=n.is_done(page, p.status, self._cfg.agenda.status_values["done"]),
@@ -223,7 +223,7 @@ class ProjectService:
         p = self.props
         return Project(
             id=page["id"],
-            title=n.read_title(page, p.title) or "(이름 없음)",
+            title=n.read_title(page, p.title) or "(untitled)",
             status=n.read_status(page, p.status) if p.status else None,
             next_action=n.read_text(page, p.next_action) if p.next_action else "",
             url=n.page_url(page),

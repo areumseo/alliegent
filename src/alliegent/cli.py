@@ -61,7 +61,7 @@ async def send_to_discord(secrets, kind: str, message: str) -> None:
             )
             for part in reports.chunk(message):
                 await channel.send(part)
-            print(f"\n디스코드 전송 완료 → #{getattr(channel, 'name', channel_id)}")
+            print(f"\nSent to Discord → #{getattr(channel, 'name', channel_id)}")
         except Exception as exc:  # surfaced after the client shuts down
             failure = exc
         finally:
@@ -103,12 +103,12 @@ async def _run(name: str, commit: bool, send: bool) -> int:
         elif name == "scaffold":
             message = await jobs.week_scaffold(commit=commit)
             if not commit:
-                print("(미리보기 — 실제로 생성하려면 --commit)\n")
+                print("(preview only — pass --commit to actually create rows)\n")
         else:  # pragma: no cover - argparse restricts choices
             raise ValueError(name)
     except NotionError as exc:
-        print(f"\nNotion 오류: {exc}")
-        print("scripts/inspect_notion.py 로 스키마를 확인하고 alliegent.toml을 맞춰주세요.")
+        print(f"\nNotion error: {exc}")
+        print("Run scripts/inspect_notion.py and fix the mappings in alliegent.toml.")
         return 1
     except RuntimeError as exc:
         print(f"\n{exc}")
@@ -116,11 +116,11 @@ async def _run(name: str, commit: bool, send: bool) -> int:
     finally:
         await client.aclose()
 
-    print(message if message is not None else "(알릴 내용 없음)")
+    print(message if message is not None else "(nothing to report)")
 
     if send:
         if message is None:
-            print("\n알릴 내용이 없어 전송하지 않았습니다.")
+            print("\nNothing to report, so nothing was sent.")
             return 0
         try:
             await send_to_discord(secrets, JOB_CHANNEL[name], message)
@@ -128,8 +128,8 @@ async def _run(name: str, commit: bool, send: bool) -> int:
             print(f"\n{exc}")
             return 1
         except Exception as exc:
-            print(f"\n디스코드 전송 실패: {type(exc).__name__}: {exc}")
-            print("봇이 해당 채널에 접근·쓰기 권한이 있는지 확인해주세요.")
+            print(f"\nDiscord send failed: {type(exc).__name__}: {exc}")
+            print("Check that the bot can view and post in that channel.")
             return 1
     return 0
 
@@ -140,12 +140,12 @@ def main() -> int:
     parser.add_argument(
         "--commit",
         action="store_true",
-        help="scaffold 잡에서 실제로 노션에 행을 생성합니다",
+        help="for the scaffold job, actually create the rows in Notion",
     )
     parser.add_argument(
         "--send",
         action="store_true",
-        help="결과를 해당 잡의 디스코드 채널로 실제 전송합니다",
+        help="post the result to the Discord channel this job uses",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()

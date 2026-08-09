@@ -45,7 +45,7 @@ async def test_items_on_reads_titles_and_status():
 async def test_untitled_rows_get_a_placeholder_not_an_empty_string():
     _, svc = service([make_page("p1", "", day="2026-08-08")])
     items = await svc.items_on(TODAY)
-    assert items[0].title == "(제목 없음)"
+    assert items[0].title == "(untitled)"
 
 
 async def test_overdue_excludes_completed_items():

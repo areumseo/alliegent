@@ -17,8 +17,8 @@ def item(title, *, done=False, day=TODAY):
     )
 
 
-def test_fmt_date_uses_korean_weekday():
-    assert reports.fmt_date(TODAY) == "8/8(토)"
+def test_fmt_date_shows_weekday_and_day():
+    assert reports.fmt_date(TODAY) == "Sat 8/8"
 
 
 def test_daily_brief_lists_pending_and_overdue():
@@ -54,7 +54,7 @@ def test_done_items_stay_marked_where_they_mix_with_pending():
 
 def test_daily_brief_handles_an_empty_day():
     text = reports.daily_brief(TODAY, [], [], [])
-    assert "등록된 항목이 없습니다" in text
+    assert "nothing scheduled" in text
 
 
 def test_incomplete_alert_is_silent_when_nothing_is_pending():
@@ -80,7 +80,7 @@ def test_week_scaffold_groups_created_items_by_day():
         ],
     )
     assert text is not None
-    assert "8/11(화)" in text and "8/13(목)" in text
+    assert "Tue 8/11" in text and "Thu 8/13" in text
     assert text.count("Ballet 7:10PM") == 2
 
 
@@ -90,7 +90,7 @@ def test_weekly_review_computes_completion_rate():
         TODAY,
         [item("a", done=True), item("b", done=True), item("c"), item("d")],
     )
-    assert "완료 2 / 전체 4건" in text
+    assert "Done 2 of 4" in text
     assert "50%" in text
 
 
@@ -105,20 +105,20 @@ def test_weekly_planning_lists_empty_days():
         [item("Ballet", day=date(2026, 8, 11))],
         [],
     )
-    assert "등록된 항목 1건" in text
-    assert "8/11(화)" not in text.split("비어 있는 날")[1]
+    assert "1 item(s) scheduled" in text
+    assert "Tue 8/11" not in text.split("Empty days")[1]
 
 
 def test_weekly_planning_prompts_when_the_week_is_empty():
     text = reports.weekly_planning(date(2026, 8, 10), [], [])
-    assert "아직 없습니다" in text
+    assert "Nothing scheduled for next week yet." in text
 
 
 def test_weekly_planning_surfaces_overdue_carryover():
     text = reports.weekly_planning(
         date(2026, 8, 10), [], [item("밀린 것", day=date(2026, 8, 3))]
     )
-    assert "넘어온 것" in text and "밀린 것" in text
+    assert "Carrying over" in text and "밀린 것" in text
 
 
 def test_stale_projects_is_silent_when_none():
@@ -132,8 +132,8 @@ def test_stale_projects_distinguishes_no_activity_from_old_activity():
             (Project("b", "기록 없음", None, "", ""), None),
         ]
     )
-    assert "마지막 활동 7/1" in text
-    assert "관련 활동 기록 없음" in text
+    assert "last activity Wed 7/1" in text
+    assert "no linked activity" in text
 
 
 # -- chunking --------------------------------------------------------------
@@ -177,5 +177,5 @@ def test_parse_day(text, expected):
 
 
 def test_parse_day_rejects_garbage_with_a_helpful_message():
-    with pytest.raises(ValueError, match="날짜를 이해하지 못했습니다"):
+    with pytest.raises(ValueError, match="Couldn't read that date"):
         parse_day("다음주 언젠가", TODAY)
