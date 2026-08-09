@@ -197,6 +197,17 @@ class NotionClient:
             "PATCH", f"/pages/{page_id}", json={"properties": properties}
         )
 
+    async def trash_page(self, page_id: str) -> dict[str, Any]:
+        """Move a page to Notion's trash.
+
+        Not a permanent delete — the row is recoverable from the trash for 30
+        days, which is what makes exposing this to the bot reasonable at all.
+        The flag is `in_trash`; it was renamed from `archived` in 2026-03-11.
+        """
+        return await self._request(
+            "PATCH", f"/pages/{page_id}", json={"in_trash": True}
+        )
+
 
 def _safe_json(resp: httpx.Response) -> dict[str, Any]:
     try:

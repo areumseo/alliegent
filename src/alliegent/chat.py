@@ -43,12 +43,16 @@ no preamble.
 Use the tools rather than guessing. If you are asked what is on a day, look it
 up; never answer from memory or assumption.
 
-Before adding or completing anything, be sure you have the right item and the
-right date — ask if it is ambiguous. After a write, say plainly what you did.
-If a request would change several items at once, confirm first.
+Before adding, completing, or deleting anything, be sure you have the right
+item and the right date — ask if it is ambiguous. After a write, say plainly
+what you did. If a request would change several items at once, confirm first.
 
-You cannot delete items or change dates; say so if asked, and suggest doing it
-in Notion.\
+Deleting moves the item to Notion's trash, where it can be restored; say that
+when you delete something. Never delete when the person asked to complete
+something, or the reverse.
+
+You cannot change an item's date; say so if asked, and suggest doing it in
+Notion.\
 """
 
 TOOLS = [
@@ -84,6 +88,22 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "title": {"type": "string", "description": "What to add."},
+                "day": {"type": "string", "description": "The date as YYYY-MM-DD."},
+            },
+            "required": ["title", "day"],
+        },
+    },
+    {
+        "name": "delete_item",
+        "description": (
+            "Move one item to Notion's trash. Recoverable there, not a permanent "
+            "delete. Call list_agenda first and pass the title exactly as it "
+            "appears."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "The item's exact title."},
                 "day": {"type": "string", "description": "The date as YYYY-MM-DD."},
             },
             "required": ["title", "day"],
@@ -145,7 +165,7 @@ class ChatAgent:
                 item = await self._agenda.add_item(args["title"], day)
                 return f"Added '{item.title}' on {day.isoformat()}."
 
-            if name == "complete_item":
+            if name in ("complete_item", "delete_item"):
                 day = date.fromisoformat(args["day"])
                 items = await self._agenda.items_on(day)
                 match = next(
@@ -157,6 +177,9 @@ class ChatAgent:
                         f"No item titled '{args['title']}' on {day.isoformat()}. "
                         f"Items that day: {titles}."
                     )
+                if name == "delete_item":
+                    await self._agenda.trash(match.id)
+                    return f"Moved '{match.title}' to the trash in Notion."
                 if match.done:
                     return f"'{match.title}' was already done."
                 await self._agenda.set_done(match.id)

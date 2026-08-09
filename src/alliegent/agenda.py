@@ -156,6 +156,10 @@ class AgendaService:
         )
         await self._client.update_page(page_id, {self.props.status: payload})
 
+    async def trash(self, page_id: str) -> None:
+        """Move an item to Notion's trash — recoverable, not a hard delete."""
+        await self._client.trash_page(page_id)
+
     async def reschedule(self, page_id: str, day: date) -> None:
         await self._client.update_page(page_id, {self.props.date: n.date_prop(day)})
 
