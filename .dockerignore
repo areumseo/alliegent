@@ -1,0 +1,38 @@
+# flyctl launch added from .gitignore
+# Secrets — this repo is public. Never commit real credentials.
+**/.env
+**/.env.*
+!**/.env.example
+
+# Python
+**/__pycache__
+**/*.py[cod]
+**/.venv
+**/venv
+**/*.egg-info
+**/dist
+**/build
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.coverage
+**/htmlcov
+
+# Local state
+**/data
+**/*.sqlite3
+
+# macOS
+**/.DS_Store
+
+# flyctl launch added from .pytest_cache/.gitignore
+# Created by pytest automatically.
+.pytest_cache/**/*
+
+# flyctl launch added from .ruff_cache/.gitignore
+# Automatically created by ruff.
+.ruff_cache/**/*
+
+# flyctl launch added from .venv/.gitignore
+.venv/**/*
+fly.toml
