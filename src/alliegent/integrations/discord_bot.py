@@ -191,6 +191,55 @@ def parse_day(text: str | None, today: date) -> date:
     )
 
 
+def parse_numbers(text: str) -> list[int]:
+    """Parse "3", "3,5", "3 5", or "3, 5" into [3, 5].
+
+    Duplicates are dropped and the order the user typed is kept, so the reply
+    reads back in the order they asked for.
+    """
+    seen: list[int] = []
+    for chunk in text.replace(",", " ").split():
+        try:
+            value = int(chunk)
+        except ValueError as exc:
+            raise ValueError(f"Not a number: {chunk!r}") from exc
+        if value not in seen:
+            seen.append(value)
+    if not seen:
+        raise ValueError("Give at least one number.")
+    return seen
+
+
+async def _resolve(
+    bot: AlliegentBot, interaction: discord.Interaction, numbers: str
+) -> list | None:
+    """Map typed numbers onto today's items, against a single snapshot.
+
+    One fetch for the whole command: resolving each number separately would
+    let an earlier completion or deletion shift the list under the later ones,
+    so `/delete 3,5` would remove item 3 and then whatever slid into 5.
+    """
+    try:
+        wanted = parse_numbers(numbers)
+    except ValueError as exc:
+        await interaction.followup.send(f"⚠️ {exc}")
+        return None
+
+    items = await bot.agenda.items_on(bot.today())
+    if not items:
+        await interaction.followup.send("⚠️ Nothing scheduled today.")
+        return None
+
+    bad = [n for n in wanted if not 1 <= n <= len(items)]
+    if bad:
+        listed = ", ".join(str(n) for n in bad)
+        await interaction.followup.send(
+            f"⚠️ Out of range: {listed}. Pick between 1 and {len(items)}."
+        )
+        return None
+    return [items[n - 1] for n in wanted]
+
+
 def _register(bot: AlliegentBot) -> None:
     tree = bot.tree
 
@@ -244,48 +293,44 @@ def _register(bot: AlliegentBot) -> None:
             f"✅ Added — **{item.title}** ({reports.fmt_date(day)})"
         )
 
-    @tree.command(name="done", description="Mark an item done by its number in /today")
-    @app_commands.describe(number="The number shown in /today")
-    async def done_cmd(interaction: discord.Interaction, number: int) -> None:
+    @tree.command(name="done", description="Mark items done by their number in /today")
+    @app_commands.describe(numbers="Number(s) from /today, e.g. 3 or 3,5")
+    async def done_cmd(interaction: discord.Interaction, numbers: str) -> None:
         await interaction.response.defer()
-        day = bot.today()
-        # Re-fetch in the same order /today uses, so the numbers still line up
-        # without keeping hidden state between commands.
-        items = await bot.agenda.items_on(day)
-        if not 1 <= number <= len(items):
-            hint = (
-                f"⚠️ Pick a number between 1 and {len(items)}."
-                if items
-                else "⚠️ Nothing scheduled today."
-            )
-            await interaction.followup.send(hint)
+        chosen = await _resolve(bot, interaction, numbers)
+        if chosen is None:
             return
-        item = items[number - 1]
-        await bot.agenda.set_done(item.id)
-        await interaction.followup.send(f"✅ Done — **{item.title}**")
+
+        already = [i.title for i in chosen if i.done]
+        marked = []
+        for item in chosen:
+            if item.done:
+                continue
+            await bot.agenda.set_done(item.id)
+            marked.append(item.title)
+
+        lines = []
+        if marked:
+            lines.append("✅ Done — " + ", ".join(f"**{t}**" for t in marked))
+        if already:
+            lines.append("Already done — " + ", ".join(already))
+        await interaction.followup.send("\n".join(lines))
 
     @tree.command(
-        name="delete", description="Move an item to Notion's trash by its number in /today"
+        name="delete", description="Move items to Notion's trash by their number in /today"
     )
-    @app_commands.describe(number="The number shown in /today")
-    async def delete_cmd(interaction: discord.Interaction, number: int) -> None:
+    @app_commands.describe(numbers="Number(s) from /today, e.g. 3 or 3,5")
+    async def delete_cmd(interaction: discord.Interaction, numbers: str) -> None:
         await interaction.response.defer()
-        day = bot.today()
-        # Same list and same order as /today, so the number the user read is
-        # the row that goes.
-        items = await bot.agenda.items_on(day)
-        if not 1 <= number <= len(items):
-            hint = (
-                f"⚠️ Pick a number between 1 and {len(items)}."
-                if items
-                else "⚠️ Nothing scheduled today."
-            )
-            await interaction.followup.send(hint)
+        chosen = await _resolve(bot, interaction, numbers)
+        if chosen is None:
             return
-        item = items[number - 1]
-        await bot.agenda.trash(item.id)
+
+        for item in chosen:
+            await bot.agenda.trash(item.id)
+        titles = ", ".join(f"**{i.title}**" for i in chosen)
         await interaction.followup.send(
-            f"🗑️ Moved to trash — **{item.title}** (recoverable in Notion)"
+            f"🗑️ Moved to trash — {titles} (recoverable in Notion)"
         )
 
     @tree.command(name="overdue", description="Show overdue, unfinished items")

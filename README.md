@@ -26,14 +26,16 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/tomorrow` | Show tomorrow's agenda (unnumbered — `/done` applies to today) |
 | `/status` | Today's and this week's completion, plus what's left today |
 | `/add <task> [when]` | Add an item. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow`, `2026-08-15`, `08-15`, or `08/15`; defaults to today |
-| `/done <number>` | Complete an item by its number in `/today` |
-| `/delete <number>` | Move an item to Notion's trash by its number in `/today` — recoverable there |
+| `/done <numbers>` | Complete items by their number in `/today` — one or several (`3` or `3,5`) |
+| `/delete <numbers>` | Move items to Notion's trash by number — recoverable there |
 | `/overdue` | Overdue, unfinished items |
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
 | `/news` | Fetch the AI news digest now |
 
 Everything the bot shows in Discord is English, so nothing needs an input-method switch. Korean date words are still accepted as `when` values.
+
+`/done` and `/delete` take several numbers at once (`3,5` or `3 5`) and resolve them against a single snapshot of the day. Running them one at a time would not be equivalent: completing or trashing item 3 shortens the list, so the item that was 5 becomes 4 and the next command would hit the wrong row.
 
 **Commands post to the same channel their scheduled equivalent uses**, wherever you invoke them from — agenda commands to the agenda channel, `/projects` to the projects channel, `/news` to the news channel. Run one from somewhere else and you get a one-line "Posted to #channel" instead, so the archive never splits across whichever channel you happened to be in. Run it from the destination channel and it just answers in place. `/add` and `/done` are the exception: they answer where you typed them, since routing a one-line confirmation would turn every write into two messages.
 
