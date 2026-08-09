@@ -85,7 +85,8 @@ async def _reply(interaction: discord.Interaction, message: str) -> None:
 
 
 def parse_day(text: str | None, today: date) -> date:
-    """Accept '오늘', '내일', '모레', 'MM-DD', or 'YYYY-MM-DD'."""
+    """Accept 'today', 'tomorrow', 'MM-DD', 'YYYY-MM-DD', or the Korean
+    equivalents, which are shorter to type on a Korean keyboard."""
     if not text:
         return today
     value = text.strip()
@@ -103,25 +104,25 @@ def parse_day(text: str | None, today: date) -> date:
             return datetime.strptime(candidate, fmt).date()
         except ValueError:
             continue
-    raise ValueError(f"날짜를 이해하지 못했습니다: {text!r} (예: 오늘, 내일, 2026-08-15, 08-15)")
+    raise ValueError(
+        f"Couldn't read that date: {text!r} — try today, tomorrow, 2026-08-15, or 08-15"
+    )
 
 
 def _register(bot: AlliegentBot) -> None:
     tree = bot.tree
 
-    # Command names are English so they can be typed without switching input
-    # method; descriptions stay Korean.
-    @tree.command(name="today", description="오늘 아젠다를 보여줍니다")
+    @tree.command(name="today", description="Show today's agenda")
     async def today_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         day = bot.today()
         items = await bot.agenda.items_on(day)
         await _reply(interaction, reports.today_list(day, items))
 
-    @tree.command(name="add", description="아젠다에 할 일을 추가합니다")
+    @tree.command(name="add", description="Add an item to the agenda")
     @app_commands.describe(
-        task="추가할 할 일",
-        when="오늘 / 내일 / 2026-08-15 / 08-15 (생략하면 오늘)",
+        task="What to add",
+        when="today / tomorrow / 2026-08-15 / 08-15 (defaults to today)",
     )
     async def add_cmd(
         interaction: discord.Interaction, task: str, when: str | None = None
@@ -134,53 +135,46 @@ def _register(bot: AlliegentBot) -> None:
             return
         item = await bot.agenda.add_item(task, day)
         await interaction.followup.send(
-            f"✅ 추가했습니다 — **{item.title}** ({reports.fmt_date(day)})"
+            f"✅ Added — **{item.title}** ({reports.fmt_date(day)})"
         )
 
-    @tree.command(name="done", description="오늘 목록의 번호로 완료 처리합니다")
-    @app_commands.describe(number="`/today` 목록에 표시된 번호")
+    @tree.command(name="done", description="Mark an item done by its number in /today")
+    @app_commands.describe(number="The number shown in /today")
     async def done_cmd(interaction: discord.Interaction, number: int) -> None:
         await interaction.response.defer()
         day = bot.today()
-        # Re-fetch in the same order /오늘 uses, so the numbers still line up
+        # Re-fetch in the same order /today uses, so the numbers still line up
         # without keeping hidden state between commands.
         items = await bot.agenda.items_on(day)
         if not 1 <= number <= len(items):
             hint = (
-                f"⚠️ 1~{len(items)} 사이의 번호를 입력해주세요."
+                f"⚠️ Pick a number between 1 and {len(items)}."
                 if items
-                else "⚠️ 오늘 항목이 없습니다."
+                else "⚠️ Nothing scheduled today."
             )
             await interaction.followup.send(hint)
             return
         item = items[number - 1]
         await bot.agenda.set_done(item.id)
-        await interaction.followup.send(f"✅ 완료 — **{item.title}**")
+        await interaction.followup.send(f"✅ Done — **{item.title}**")
 
-    @tree.command(name="overdue", description="기한이 지난 미완료 항목을 보여줍니다")
+    @tree.command(name="overdue", description="Show overdue, unfinished items")
     async def overdue_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         items = await bot.agenda.overdue(bot.today())
-        if not items:
-            await interaction.followup.send("🎉 밀린 항목이 없습니다.")
-            return
-        lines = [f"**밀린 항목 ({len(items)}건)**"]
-        for item in items:
-            when = reports.fmt_date(item.day) if item.day else "날짜 없음"
-            lines.append(f"⚠️ {item.title} — {when}")
-        await _reply(interaction, "\n".join(lines))
+        await _reply(interaction, reports.overdue_list(items))
 
-    @tree.command(name="projects", description="진행 중인 프로젝트를 보여줍니다")
+    @tree.command(name="projects", description="Show active projects")
     async def projects_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         if bot.projects is None:
             await interaction.followup.send(
-                "⚠️ 프로젝트 DB가 설정되지 않았습니다 (NOTION_PROJECTS_DB_ID)."
+                "⚠️ No projects database configured (NOTION_PROJECTS_DB_ID)."
             )
             return
         await _reply(interaction, reports.project_list(await bot.projects.active()))
 
-    @tree.command(name="brief", description="데일리 브리핑을 지금 실행합니다")
+    @tree.command(name="brief", description="Run the daily brief now")
     async def brief_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         await _reply(interaction, await bot.jobs.build_daily_brief())
@@ -190,7 +184,7 @@ def _register(bot: AlliegentBot) -> None:
         interaction: discord.Interaction, error: app_commands.AppCommandError
     ) -> None:
         log.exception("Command failed", exc_info=error)
-        message = f"⚠️ 처리 중 오류가 발생했습니다.\n```{error}```"
+        message = f"⚠️ Something went wrong.\n```{error}```"
         if interaction.response.is_done():
             await interaction.followup.send(message)
         else:

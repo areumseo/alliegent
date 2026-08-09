@@ -22,13 +22,13 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | Command | Description |
 | --- | --- |
 | `/today` | Show today's agenda |
-| `/add <task> [when]` | Add an item; `when` accepts `오늘`, `내일`, `모레`, `2026-08-15`, or `08-15` |
+| `/add <task> [when]` | Add an item; `when` accepts `today`, `tomorrow`, `2026-08-15`, `08-15`, or the Korean `오늘` / `내일` / `모레` |
 | `/done <number>` | Complete an item by its number in `/today` |
 | `/overdue` | Overdue, unfinished items |
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
 
-Names are English so they can be typed without switching input method; the descriptions Discord shows are Korean.
+Everything the bot shows in Discord is English, so nothing needs an input-method switch. Korean date words are still accepted as `when` values.
 
 Commands work in any channel the bot can see, regardless of the notification routing below.
 

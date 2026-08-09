@@ -4,8 +4,7 @@ discord.py validates slash-command names and option names at registration
 time, against Discord's own rules. Building the bot here means a bad command
 name fails in CI rather than on first deploy.
 """
-# Names are English so they can be typed without an input-method switch;
-# descriptions are Korean.
+# The whole Discord-facing surface is English: names, descriptions, replies.
 
 from __future__ import annotations
 
@@ -56,10 +55,11 @@ def test_add_command_options():
     assert {p.display_name for p in add.parameters} == {"task", "when"}
 
 
-def test_descriptions_stay_korean():
-    """English names are for typing; the help text should still read naturally."""
-    today = next(c for c in make_bot().tree.get_commands() if c.name == "today")
-    assert not today.description.isascii()
+def test_descriptions_are_english_too():
+    for cmd in make_bot().tree.get_commands():
+        assert cmd.description.isascii(), cmd.description
+        for param in cmd.parameters:
+            assert param.description.isascii(), param.description
 
 
 def test_bot_shares_its_notifier_with_the_jobs():
