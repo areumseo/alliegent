@@ -138,12 +138,19 @@ def _clean(text: str) -> str:
     while lines and not lines[-1].startswith("KO:"):
         lines.pop()
 
-    # The labels are scaffolding, not content: they make the boundaries above
-    # unambiguous, and a reader can tell English from Korean at a glance.
-    lines = [
-        line[3:].lstrip() if line.startswith(("EN:", "KO:")) else line for line in lines
-    ]
-    return "\n".join(lines).strip()
+    # The EN:/KO: labels are scaffolding for the parsing above, not something
+    # the reader needs. Swap them for flags, and give the Korean summary its
+    # own paragraph so the two don't read as one wall of text.
+    rendered: list[str] = []
+    for line in lines:
+        if line.startswith("EN:"):
+            rendered.append(f"🇺🇸 {line[3:].lstrip()}")
+        elif line.startswith("KO:"):
+            rendered.append("")
+            rendered.append(f"🇰🇷 {line[3:].lstrip()}")
+        else:
+            rendered.append(line)
+    return "\n".join(rendered).strip()
 
 
 async def fetch_ai_news(api_key: str, today: date, count: int = 10) -> str:

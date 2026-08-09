@@ -18,12 +18,13 @@ RAW_ITEM = (
     "KO: 무슨 일이 있었습니다."
 )
 
-# What the reader sees: labels stripped, since English and Korean are obvious.
+# What the reader sees: labels swapped for flags, Korean on its own paragraph.
 ITEM = (
     "**1. A real headline**\n"
     "https://example.com/a\n"
-    "What happened.\n"
-    "무슨 일이 있었습니다."
+    "🇺🇸 What happened.\n"
+    "\n"
+    "🇰🇷 무슨 일이 있었습니다."
 )
 
 
@@ -49,7 +50,7 @@ def test_citation_line_breaks_are_folded_back():
         "EN: \nGPT-5.6 becomes the default\n.\n"
         "KO: 기본 모델이 됐다."
     )
-    assert "GPT-5.6 becomes the default." in _clean(text)
+    assert "🇺🇸 GPT-5.6 becomes the default." in _clean(text)
 
 
 def test_blank_lines_inside_a_summary_are_folded_too():
@@ -67,10 +68,10 @@ def test_blank_lines_inside_a_summary_are_folded_too():
     )
     cleaned = _clean(text)
     assert (
-        "First sentence. Second sentence, cut off mid-thought; "
+        "🇺🇸 First sentence. Second sentence, cut off mid-thought; "
         "and the rest of it. Third sentence." in cleaned
     )
-    assert cleaned.endswith("한국어 요약입니다.")
+    assert cleaned.endswith("🇰🇷 한국어 요약입니다.")
 
 
 def test_blank_lines_between_items_are_preserved():
@@ -83,7 +84,7 @@ def test_multiple_items_survive_intact():
     cleaned = _clean(f"{RAW_ITEM}\n\n{second}")
     assert cleaned.startswith("**1.")
     assert "**2." in cleaned
-    assert cleaned.endswith("무슨 일이 있었습니다.")
+    assert cleaned.endswith("🇰🇷 무슨 일이 있었습니다.")
 
 
 def test_urls_are_never_folded_into_the_previous_line():
