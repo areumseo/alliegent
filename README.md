@@ -23,6 +23,8 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | Command | Description |
 | --- | --- |
 | `/today` | Show today's agenda |
+| `/tomorrow` | Show tomorrow's agenda (unnumbered — `/done` applies to today) |
+| `/status` | Today's and this week's completion, plus what's left today |
 | `/add <task> [when]` | Add an item; `when` accepts `today`, `tomorrow`, `2026-08-15`, `08-15`, or the Korean `오늘` / `내일` / `모레` |
 | `/done <number>` | Complete an item by its number in `/today` |
 | `/overdue` | Overdue, unfinished items |
