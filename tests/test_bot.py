@@ -4,6 +4,8 @@ discord.py validates slash-command names and option names at registration
 time, against Discord's own rules. Building the bot here means a bad command
 name fails in CI rather than on first deploy.
 """
+# Names are English so they can be typed without an input-method switch;
+# descriptions are Korean.
 
 from __future__ import annotations
 
@@ -13,7 +15,7 @@ from alliegent.integrations.discord_bot import AlliegentBot
 
 from .conftest import FakeNotionClient
 
-EXPECTED = {"오늘", "추가", "완료", "밀린것", "프로젝트", "브리핑"}
+EXPECTED = {"today", "add", "done", "overdue", "projects", "brief"}
 
 
 def make_bot() -> AlliegentBot:
@@ -28,9 +30,17 @@ def make_bot() -> AlliegentBot:
     )
 
 
-def test_korean_command_names_pass_discord_validation():
+def test_command_names_pass_discord_validation():
     bot = make_bot()
     assert {cmd.name for cmd in bot.tree.get_commands()} == EXPECTED
+
+
+def test_command_names_need_no_input_method_switch():
+    """Typing a slash command should never require switching to a Korean IME."""
+    for cmd in make_bot().tree.get_commands():
+        assert cmd.name.isascii(), cmd.name
+        for param in cmd.parameters:
+            assert param.display_name.isascii(), param.display_name
 
 
 def test_every_command_has_a_description():
@@ -40,10 +50,16 @@ def test_every_command_has_a_description():
         assert len(cmd.description) <= 100
 
 
-def test_renamed_options_are_valid():
+def test_add_command_options():
     bot = make_bot()
-    add = next(c for c in bot.tree.get_commands() if c.name == "추가")
-    assert {p.display_name for p in add.parameters} == {"할일", "날짜"}
+    add = next(c for c in bot.tree.get_commands() if c.name == "add")
+    assert {p.display_name for p in add.parameters} == {"task", "when"}
+
+
+def test_descriptions_stay_korean():
+    """English names are for typing; the help text should still read naturally."""
+    today = next(c for c in make_bot().tree.get_commands() if c.name == "today")
+    assert not today.description.isascii()
 
 
 def test_bot_shares_its_notifier_with_the_jobs():
