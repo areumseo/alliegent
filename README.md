@@ -143,7 +143,9 @@ Mention the bot and it answers, using the same agenda underneath:
 
 It can read any day, list what's overdue, add items, mark them done, and move them to Notion's trash. Deleting is a trash move, not a hard delete — the row is recoverable in Notion, which is what makes it safe to expose. Changing an item's date is not exposed: a silently moved item is hard to notice and hard to undo, unlike a trashed one you can see in the trash.
 
-Only mentions trigger it. Replying to everything would talk over conversations and bill for the privilege. Context is kept per channel for about six exchanges, so follow-ups ("그럼 그건 모레로") resolve without repeating yourself.
+It answers in English whichever language you ask in, matching the rest of the Discord surface — but item titles are quoted back exactly as they appear in Notion, since a translated title no longer names the row it refers to.
+
+Only mentions trigger it. Replying to everything would talk over conversations and bill for the privilege. Context is kept per channel for about six exchanges, so follow-ups ("then move that one to Wednesday") resolve without repeating yourself.
 
 Runs on Sonnet 5 at low effort — chat is latency-sensitive and each turn is small. Roughly $1–2/month at twenty messages a day.
 
