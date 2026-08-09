@@ -20,6 +20,8 @@ def configure_logging() -> None:
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
     logging.getLogger("discord").setLevel(logging.WARNING)
+    # Text-only bot; the missing-voice-support warning is noise.
+    logging.getLogger("discord.client").setLevel(logging.ERROR)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
