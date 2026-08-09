@@ -66,10 +66,29 @@ def test_add_command_options():
 
 
 def test_descriptions_are_english_too():
+    """One exception: /add's `when` lists the Korean date words it accepts.
+    That description is the only place a user learns they work, so the values
+    have to appear there — spelling them out is not the same as writing the
+    interface in Korean."""
     for cmd in make_bot().tree.get_commands():
         assert cmd.description.isascii(), cmd.description
         for param in cmd.parameters:
+            if (cmd.name, param.display_name) == ("add", "when"):
+                continue
             assert param.description.isascii(), param.description
+
+
+def test_add_advertises_the_korean_date_words():
+    add = next(c for c in make_bot().tree.get_commands() if c.name == "add")
+    when = next(p for p in add.parameters if p.display_name == "when")
+    for word in ("오늘", "내일", "모레"):
+        assert word in when.description
+
+
+def test_option_descriptions_fit_discords_limit():
+    for cmd in make_bot().tree.get_commands():
+        for param in cmd.parameters:
+            assert len(param.description) <= 100, (cmd.name, param.display_name)
 
 
 def test_bot_shares_its_notifier_with_the_jobs():
