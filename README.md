@@ -1,6 +1,6 @@
 # alliegent
 
-A personal agent that keeps a Notion Weekly Agenda up to date, tracks personal projects, and reports to Discord.
+A personal agent that keeps a Notion Weekly Agenda up to date, digests the day's AI news, and reports to Discord. Ask it in plain language or drive it with slash commands.
 
 The Discord bot and the job scheduler share a single asyncio loop, so the whole thing runs as one process on one small machine.
 
@@ -13,10 +13,10 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | Incomplete alert | 21:00 daily | Today's unfinished items and anything past its date |
 | Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
 | Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
-| Stale project nudge | Wed 10:00 | Projects with no linked agenda activity for N days |
+| Stale project nudge | Wed 10:00 | Projects with no linked agenda activity for N days. Off until a projects database exists |
 | Weekly review | Sun 21:00 | Completion stats for the past week as a review draft |
 
-The evening alert stays silent when there is nothing pending. A daily "all clear" ping trains you to ignore the channel, so only the morning brief is unconditional.
+The evening alert stays silent when there is nothing pending. A daily "all clear" ping trains you to ignore the channel, so only the morning brief is unconditional — and it distinguishes a day you finished from a day with nothing on it, rather than reporting both as empty.
 
 ### Slash commands
 
@@ -31,15 +31,15 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/overdue` | Overdue, unfinished items |
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
-| `/news` | Fetch the AI news digest now |
+| `/news` | Fetch the AI news digest now — acknowledges immediately and posts to the news channel when ready (2–3 min) |
 
 Everything the bot shows in Discord is English, so nothing needs an input-method switch. Korean date words are still accepted as `when` values.
 
 `/done` and `/delete` take several numbers at once (`3,5` or `3 5`) and resolve them against a single snapshot of the day. Running them one at a time would not be equivalent: completing or trashing item 3 shortens the list, so the item that was 5 becomes 4 and the next command would hit the wrong row.
 
-**Commands post to the same channel their scheduled equivalent uses**, wherever you invoke them from — agenda commands to the agenda channel, `/projects` to the projects channel, `/news` to the news channel. Run one from somewhere else and you get a one-line "Posted to #channel" instead, so the archive never splits across whichever channel you happened to be in. Run it from the destination channel and it just answers in place. `/add` and `/done` are the exception: they answer where you typed them, since routing a one-line confirmation would turn every write into two messages.
+**Commands post to the same channel their scheduled equivalent uses**, wherever you invoke them from — agenda commands to the agenda channel, `/projects` to the projects channel, `/news` to the news channel. Run one from somewhere else and you get a one-line "Posted to #channel" instead, so the archive never splits across whichever channel you happened to be in. Run it from the destination channel and it just answers in place.
 
-Commands work in any channel the bot can see, regardless of the notification routing below.
+`/add`, `/done`, and `/delete` are the exception: they answer where you typed them, since routing a one-line confirmation would turn every write into two messages.
 
 ## Setup
 
@@ -57,13 +57,16 @@ Commands work in any channel the bot can see, regardless of the notification rou
 1. Go to <https://discord.com/developers/applications> → **New Application**
 2. **Bot** → **Reset Token** → copy the token
 3. **Installation** → add the `bot` and `applications.commands` scopes → open the generated URL to invite it to your server
-4. Enable **Developer Mode** (Settings → Advanced), then right-click your server icon → **Copy Server ID**, and each channel → **Copy Channel ID**
+4. **Bot** → **Privileged Gateway Intents** → enable **MESSAGE CONTENT INTENT**, if you want the bot to answer when mentioned (see [Talking to it](#talking-to-it))
+5. Enable **Developer Mode** (Settings → Advanced), then right-click your server icon → **Copy Server ID**, and each channel → **Copy Channel ID**
+
+Inviting the bot to a server does not give it access to private channels — add it to each one individually (**Edit Channel** → **Permissions**), or its messages fail with `50001`.
 
 Each job posts to the channel matching its kind:
 
 | Variable | Receives |
 | --- | --- |
-| `DISCORD_AGENDA_CHANNEL_ID` | Daily brief, incomplete alert, week scaffolding |
+| `DISCORD_AGENDA_CHANNEL_ID` | Daily brief, incomplete alert, weekly planning, week scaffolding |
 | `DISCORD_PROJECTS_CHANNEL_ID` | Stale project nudges |
 | `DISCORD_REVIEW_CHANNEL_ID` | Weekly review (falls back to the agenda channel) |
 | `DISCORD_NEWS_CHANNEL_ID` | Daily AI news digest |
@@ -85,7 +88,7 @@ Fill in `.env`, then dump your real Notion schema:
 uv run python scripts/inspect_notion.py
 ```
 
-It prints every property with its type, plus a ready-to-paste TOML block. Copy that into the `[agenda.props]` and `[projects.props]` tables in `alliegent.toml`. **The mappings shipped in that file are guesses** — nothing works until they match your actual property names.
+It prints every property with its type, plus a ready-to-paste TOML block. Copy that into the `[agenda.props]` and `[projects.props]` tables in `alliegent.toml` — nothing works until those names match the properties your databases actually have. The agenda mappings shipped in the file match the schema documented below; the projects ones are untested, since no projects database exists yet.
 
 Preview any job in the terminal without posting to Discord:
 
@@ -93,7 +96,7 @@ Preview any job in the terminal without posting to Discord:
 uv run python -m alliegent.cli brief
 ```
 
-Jobs: `brief`, `incomplete`, `planning`, `scaffold`, `stale`, `review`.
+Jobs: `brief`, `news`, `incomplete`, `planning`, `scaffold`, `stale`, `review`.
 
 Add `--send` to actually post the result to the Discord channel that job uses. This checks the bot token, the channel IDs, and the bot's channel permissions in one go, rather than waiting until 08:00 to discover one of them is wrong:
 
@@ -121,15 +124,23 @@ fly launch --no-deploy --copy-config
 
 Secrets go to Fly, never into the repo:
 
+Rather than retyping them, pipe the filled-in `.env`:
+
 ```bash
-fly secrets set NOTION_TOKEN=... NOTION_AGENDA_DB_ID=... NOTION_PROJECTS_DB_ID=... DISCORD_BOT_TOKEN=... DISCORD_GUILD_ID=... DISCORD_AGENDA_CHANNEL_ID=... DISCORD_PROJECTS_CHANNEL_ID=...
+grep -E '^[A-Z_]+=.+' .env | fly secrets import
 ```
 
 ```bash
-fly deploy
+fly deploy && fly status
 ```
 
-The machine must not auto-stop. A Discord gateway connection is long-lived and takes no inbound HTTP, so `fly.toml` deliberately has no `[http_service]` — if the machine suspends, the bot goes offline and scheduled jobs never fire.
+The machine must not auto-stop. A Discord gateway connection is long-lived and takes no inbound HTTP, so `fly.toml` deliberately has no `[http_service]` — if the machine suspends, the bot goes offline and scheduled jobs never fire. `fly launch` re-adds that block every time it runs; remove it again.
+
+**That is also why `fly status` belongs in the deploy command.** With no HTTP service, Fly has no reason to start a stopped machine, so deploying onto one succeeds with no error and leaves the bot down. If the state is `stopped`, start it:
+
+```bash
+fly machine start <machine-id>
+```
 
 ## Talking to it
 
@@ -225,6 +236,10 @@ PYTHONPATH=src uv run python -m alliegent.cli brief
 **`403 Forbidden (error code: 50001): Missing Access` when sending** — the bot is in the server but cannot see that channel. Inviting the bot to a server does not grant access to private channels. Right-click the channel → **Edit Channel** → **Permissions** → **Add members or roles** → pick the bot → allow **View Channel** and **Send Messages**. The channel ID is not the problem.
 
 **Notion returns 404 for a database that exists** — the token has not been given access to it. Open the database → `···` → **Connections** → add your integration. A valid token alone grants nothing.
+
+**Deploy succeeded but the bot is offline** — check `fly status`. With no `[http_service]`, `fly deploy` will not start a machine that was stopped when the deploy began; it reports success and leaves the new version stopped. `fly machine start <id>`.
+
+**The bot ignores mentions** — either `ANTHROPIC_API_KEY` is unset, or the Message Content intent is off in the developer portal. `fly logs` says which: a missing intent is logged explicitly at startup, and the bot keeps running without the chat feature rather than failing to connect.
 
 ## Development
 
