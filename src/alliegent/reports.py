@@ -16,11 +16,17 @@ def fmt_date(day: date) -> str:
 
 
 def _bullets(items: list[AgendaItem], *, numbered: bool = False) -> list[str]:
+    """Render items without an empty-checkbox marker.
+
+    An unchecked box carries no information in a list that is already all
+    unfinished work, and repeating it on every line just adds noise. Only
+    completion is marked, and only where done and pending items are mixed.
+    """
     lines = []
     for idx, item in enumerate(items, start=1):
-        mark = "✅" if item.done else "⬜"
-        prefix = f"`{idx}.` " if numbered else ""
-        lines.append(f"{prefix}{mark} {item.title}")
+        prefix = f"`{idx}.` " if numbered else "• "
+        mark = "✅ " if item.done else ""
+        lines.append(f"{prefix}{mark}{item.title}")
     return lines
 
 
@@ -168,7 +174,7 @@ def weekly_review(start: date, end: date, items: list[AgendaItem]) -> str:
         out.append("")
     if undone:
         out.append("**넘어가는 것**")
-        out += [f"⬜ {i.title}" for i in undone[:15]]
+        out += [f"• {i.title}" for i in undone[:15]]
         if len(undone) > 15:
             out.append(f"…외 {len(undone) - 15}건")
         out.append("")
