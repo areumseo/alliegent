@@ -52,10 +52,23 @@ def test_done_items_stay_marked_where_they_mix_with_pending():
     assert "✅ 남은 것" not in text
 
 
-def test_day_list_can_omit_numbers():
-    """Tomorrow's list is unnumbered — /done resolves against today."""
-    text = reports.day_list(TODAY, [item("내일 할 것")], numbered=False)
-    assert "내일 할 것" in text
+def test_a_future_day_is_numbered_and_says_which_day():
+    """Numbers are per-day and /done takes the day, so a list for another day
+    carries the argument you need with it."""
+    tomorrow = date(2026, 8, 9)
+    text = reports.day_list(tomorrow, [item("내일 할 것")], today=TODAY)
+    assert "`1.` 내일 할 것" in text
+    assert "/done <n> 2026-08-09" in text
+
+
+def test_todays_list_carries_no_such_hint():
+    text = reports.day_list(TODAY, [item("오늘 할 것")], today=TODAY)
+    assert "`1.` 오늘 할 것" in text
+    assert "/done <n>" not in text
+
+
+def test_day_list_can_still_omit_numbers():
+    text = reports.day_list(TODAY, [item("x")], numbered=False)
     assert "`1.`" not in text
 
 

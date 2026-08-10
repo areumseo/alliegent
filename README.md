@@ -23,11 +23,11 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | Command | Description |
 | --- | --- |
 | `/today` | Show today's agenda |
-| `/tomorrow` | Show tomorrow's agenda (unnumbered — `/done` applies to today) |
+| `/tomorrow` | Show tomorrow's agenda, numbered |
 | `/status` | Today's and this week's completion, plus what's left today |
 | `/add <task> [when]` | Add an item; its Category is inferred from history. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow` / `tmr` (any capitalisation), `2026-08-15`, `08-15`, or `08/15`; defaults to today |
-| `/done <numbers>` | Complete items by their number in `/today` — one or several (`3` or `3,5`) |
-| `/delete <numbers>` | Move items to Notion's trash by number — recoverable there |
+| `/done <numbers> [when]` | Complete items by their listed number — one or several (`3` or `3,5`). `when` picks the day, defaulting to today |
+| `/delete <numbers> [when]` | Move items to Notion's trash by number — recoverable there. Takes `when` the same way |
 | `/overdue` | Overdue, unfinished items |
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
@@ -36,6 +36,8 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 Everything the bot shows in Discord is English, so nothing needs an input-method switch. Korean date words are still accepted as `when` values.
 
 Every message that lists today's unfinished work numbers it the way `/today` does — counting completed rows too, so the numbers are gaps rather than 1,2,3. That is deliberate: `/done` and `/delete` resolve a number against the full day, so renumbering the unfinished subset would make "2" mean a different row depending on which message you read it in.
+
+Numbers are per-day, and `/done` and `/delete` take the day as an argument (`/done 2 tomorrow`), so any day's list can be numbered and acted on. Their confirmations name the date, which is what makes a wrong day obvious immediately. A list for a day other than today repeats the argument you'd need.
 
 `/done` and `/delete` take several numbers at once (`3,5` or `3 5`) and resolve them against a single snapshot of the day. Running them one at a time would not be equivalent: completing or trashing item 3 shortens the list, so the item that was 5 becomes 4 and the next command would hit the wrong row.
 
