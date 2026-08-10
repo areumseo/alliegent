@@ -133,6 +133,9 @@ class Schedule(BaseModel):
 class AgendaConfig(BaseModel):
     scaffold_days: int = 7
     scaffold_from_recurring: bool = True
+    # How far back to look when inferring a new item's category from how the
+    # same activity was filed before.
+    category_lookback_days: int = 120
     props: AgendaProps = Field(default_factory=AgendaProps)
     status_values: dict[str, str] = Field(
         default_factory=lambda: {

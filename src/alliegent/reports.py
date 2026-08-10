@@ -31,6 +31,21 @@ def _bullets(items: list[AgendaItem], *, numbered: bool = False) -> list[str]:
     return lines
 
 
+def pending_lines(todays: list[AgendaItem]) -> list[str]:
+    """The unfinished items, numbered against the *whole* day.
+
+    /done and /delete resolve a number the way /today prints it, which counts
+    completed rows too. Renumbering just the unfinished ones from 1 gives a
+    list where "2" means a different row depending on which message you read
+    it in — and completes the wrong task.
+    """
+    return [
+        f"`{idx}.` {item.title}"
+        for idx, item in enumerate(todays, start=1)
+        if not item.done
+    ]
+
+
 def _dated(items: list[AgendaItem], marker: str = "⚠️") -> list[str]:
     """List items with their date, truncating rather than flooding the channel."""
     lines = []
@@ -67,10 +82,10 @@ def daily_brief(
     # to-do list has to fit around it.
     out += calendar_block(events or [])
 
-    pending = [i for i in todays if not i.done]
+    pending = pending_lines(todays)
     if pending:
         out.append(f"**Today ({len(pending)})**")
-        out += _bullets(pending, numbered=True)
+        out += pending
     elif todays:
         # An empty day and a finished one both leave nothing to list, but
         # telling someone who cleared seven items that nothing was scheduled
@@ -99,14 +114,14 @@ def incomplete_alert(
 ) -> str | None:
     """Return None when there is nothing to nag about — a silent evening is the
     correct output, not an 'all clear' ping."""
-    pending = [i for i in todays if not i.done]
+    pending = pending_lines(todays)
     if not pending and not overdue:
         return None
 
     out = [f"🌙 **End of day — {fmt_date(today)}**", ""]
     if pending:
         out.append(f"**Still open ({len(pending)})**")
-        out += _bullets(pending, numbered=True)
+        out += pending
         out.append("")
     if overdue:
         out.append(f"**Past due ({len(overdue)})**")
@@ -259,14 +274,7 @@ def status(
     if overdue:
         out.append(f"Overdue — {len(overdue)}")
 
-    # Number against the full day, not against the filtered pending list —
-    # /done resolves numbers the way /today prints them, so renumbering here
-    # would complete the wrong row.
-    pending = [
-        f"`{idx}.` {item.title}"
-        for idx, item in enumerate(todays, start=1)
-        if not item.done
-    ]
+    pending = pending_lines(todays)
     if pending:
         out += ["", f"**Left today ({len(pending)})**", *pending]
     elif todays:

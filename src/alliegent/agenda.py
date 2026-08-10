@@ -7,6 +7,8 @@ agenda items and projects so the jobs and Discord commands stay readable.
 from __future__ import annotations
 
 import logging
+import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -15,6 +17,19 @@ from .integrations import notion as n
 from .integrations.notion import NotionClient
 
 log = logging.getLogger(__name__)
+
+
+def normalise_title(title: str) -> str:
+    """Reduce a title to what identifies the activity, dropping the specifics.
+
+    Titles carry their time: "Karrot 6PM", "Karrot 11AM", "Ballet 7:10PM".
+    Matching on the raw string would treat every one of those as a new kind of
+    task, so the clock time and any bare numbers come off before comparing.
+    """
+    text = re.sub(r"\b\d{1,2}(:\d{2})?\s*(am|pm)\b", " ", title, flags=re.IGNORECASE)
+    text = re.sub(r"\b\d{1,2}:\d{2}\b", " ", text)
+    text = re.sub(r"[^\w가-힣]+", " ", text)
+    return " ".join(text.split()).casefold()
 
 
 @dataclass(frozen=True)
@@ -124,6 +139,37 @@ class AgendaService:
 
     # -- writes ------------------------------------------------------------
 
+    async def guess_category(self, title: str, today: date) -> str | None:
+        """Infer a category from how the same activity was filed before.
+
+        Deliberately history-based rather than a model call: the categories
+        that matter are this person's own, and "Karrot" meaning Work is a fact
+        about their past entries, not something to reason about. It also costs
+        one query instead of an API round trip on every add.
+
+        Returns None when nothing matches — better an empty Category than a
+        confidently wrong one, which is invisible until it skews a filter.
+        """
+        if not self.props.category:
+            return None
+
+        key = normalise_title(title)
+        if not key:
+            return None
+
+        lookback = self._cfg.agenda.category_lookback_days
+        past = await self.items_between(today - timedelta(days=lookback), today)
+        seen = [
+            i.category
+            for i in past
+            if i.category and normalise_title(i.title) == key
+        ]
+        if not seen:
+            return None
+        # Most common wins, and ties go to whichever appeared most recently,
+        # since Counter keeps insertion order and the query is date-ascending.
+        return Counter(reversed(seen)).most_common(1)[0][0]
+
     async def add_item(
         self,
         title: str,
@@ -132,8 +178,11 @@ class AgendaService:
         project_id: str | None = None,
         recurring: bool = False,
         category: str | None = None,
+        infer_category: bool = False,
     ) -> AgendaItem:
         p = self.props
+        if category is None and infer_category:
+            category = await self.guess_category(title, day)
         properties = {
             p.title: n.title(title),
             p.date: n.date_prop(day),

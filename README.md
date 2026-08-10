@@ -25,7 +25,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/today` | Show today's agenda |
 | `/tomorrow` | Show tomorrow's agenda (unnumbered — `/done` applies to today) |
 | `/status` | Today's and this week's completion, plus what's left today |
-| `/add <task> [when]` | Add an item. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow`, `2026-08-15`, `08-15`, or `08/15`; defaults to today |
+| `/add <task> [when]` | Add an item; its Category is inferred from history. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow`, `2026-08-15`, `08-15`, or `08/15`; defaults to today |
 | `/done <numbers>` | Complete items by their number in `/today` — one or several (`3` or `3,5`) |
 | `/delete <numbers>` | Move items to Notion's trash by number — recoverable there |
 | `/overdue` | Overdue, unfinished items |
@@ -34,6 +34,8 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/news` | Fetch the AI news digest now — acknowledges immediately and posts to the news channel when ready (2–3 min) |
 
 Everything the bot shows in Discord is English, so nothing needs an input-method switch. Korean date words are still accepted as `when` values.
+
+Every message that lists today's unfinished work numbers it the way `/today` does — counting completed rows too, so the numbers are gaps rather than 1,2,3. That is deliberate: `/done` and `/delete` resolve a number against the full day, so renumbering the unfinished subset would make "2" mean a different row depending on which message you read it in.
 
 `/done` and `/delete` take several numbers at once (`3,5` or `3 5`) and resolve them against a single snapshot of the day. Running them one at a time would not be equivalent: completing or trashing item 3 shortens the list, so the item that was 5 becomes 4 and the next command would hit the wrong row.
 
@@ -200,12 +202,16 @@ The Weekly Agenda is a Notion database, one row per item:
 | `Date` | date | Which day it belongs to |
 | `Status` | status | `Not started` / `In progress` / `Done` |
 | `Recurring` | checkbox | Repeats weekly — the scaffolding job uses these as its template |
-| `Category` | select | Lesson / Work / Exercise / Study / Contact / Personal / Admin |
+| `Category` | select | Lesson / Work / Exercise / Study / Contact / Personal / Admin — filled in automatically on `/add`, see below |
 | `Note` | text | Optional |
 
 A database rather than a hand-built page means past weeks accumulate instead of being overwritten, which is what makes the weekly review possible at all. It also means there is no week to "set up" — a date view draws the days on its own.
 
 `Recurring` is unused for now, since nothing in the agenda repeats on a fixed weekly slot. If that changes, tick it on the rows that come back every week and give `week_scaffold_time` a value in `alliegent.toml`; the job then recreates them on the same weekday without retyping. Scaffolded rows stay ticked, so the following week works from them in turn, and re-running never duplicates because it matches on title and date.
+
+`Category` is inferred when you add an item, from how the same activity was filed before. Titles carry their time — "Karrot 6PM", "Karrot 11AM" — so the clock is stripped before comparing and both count as the same activity; a "— Prep" suffix still separates preparation from the lesson itself. The most common past category wins, and an unrecognised activity gets none: an empty Category is obvious, while a confidently wrong one stays invisible until it skews a filter.
+
+This is a history lookup, not a model call. Which categories exist and what belongs in them are facts about these entries, not something to reason about — and it costs one query rather than an API round trip on every add. The lookback is `category_lookback_days` in `alliegent.toml`.
 
 Any job can be switched off the same way: blank its time in `alliegent.toml`.
 

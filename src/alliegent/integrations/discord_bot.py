@@ -290,9 +290,10 @@ def _register(bot: AlliegentBot) -> None:
         except ValueError as exc:
             await interaction.followup.send(f"⚠️ {exc}")
             return
-        item = await bot.agenda.add_item(task, day)
+        item = await bot.agenda.add_item(task, day, infer_category=True)
+        filed = f" · {item.category}" if item.category else ""
         await interaction.followup.send(
-            f"✅ Added — **{item.title}** ({reports.fmt_date(day)})"
+            f"✅ Added — **{item.title}** ({reports.fmt_date(day)}{filed})"
         )
 
     @tree.command(name="done", description="Mark items done by their number in /today")

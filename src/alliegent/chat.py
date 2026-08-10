@@ -165,8 +165,11 @@ class ChatAgent:
 
             if name == "add_item":
                 day = date.fromisoformat(args["day"])
-                item = await self._agenda.add_item(args["title"], day)
-                return f"Added '{item.title}' on {day.isoformat()}."
+                item = await self._agenda.add_item(
+                    args["title"], day, infer_category=True
+                )
+                filed = f" (filed under {item.category})" if item.category else ""
+                return f"Added '{item.title}' on {day.isoformat()}{filed}."
 
             if name in ("complete_item", "delete_item"):
                 day = date.fromisoformat(args["day"])

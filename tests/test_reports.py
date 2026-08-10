@@ -105,6 +105,44 @@ def test_status_handles_a_completely_empty_day():
     assert "Nothing left today" not in text  # nothing was scheduled to finish
 
 
+# -- numbering -------------------------------------------------------------
+# Every message that numbers today's unfinished items has to number them the
+# way /today prints them, because that is what /done and /delete resolve
+# against. Numbering the pending subset from 1 makes "2" mean a different row
+# depending on which message you happened to read it in.
+
+MIXED = [item("first", done=True), item("second"), item("third", done=True), item("fourth")]
+
+
+def test_the_brief_numbers_against_the_whole_day():
+    text = reports.daily_brief(TODAY, MIXED, [], [])
+    assert "`2.` second" in text
+    assert "`4.` fourth" in text
+    assert "`1.` second" not in text
+
+
+def test_the_evening_alert_numbers_against_the_whole_day():
+    text = reports.incomplete_alert(TODAY, MIXED, [])
+    assert text is not None
+    assert "`2.` second" in text
+    assert "`4.` fourth" in text
+
+
+def test_status_numbers_the_same_way():
+    text = reports.status(TODAY, MIXED, [], MIXED)
+    assert "`2.` second" in text
+    assert "`4.` fourth" in text
+
+
+def test_all_three_agree_on_the_numbers():
+    """The real requirement: read a number anywhere, /done it safely."""
+    brief = reports.daily_brief(TODAY, MIXED, [], [])
+    alert = reports.incomplete_alert(TODAY, MIXED, [])
+    stat = reports.status(TODAY, MIXED, [], MIXED)
+    for line in reports.pending_lines(MIXED):
+        assert line in brief and line in alert and line in stat
+
+
 def test_daily_brief_handles_an_empty_day():
     text = reports.daily_brief(TODAY, [], [], [])
     assert "nothing scheduled" in text
