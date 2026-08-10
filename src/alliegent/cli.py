@@ -88,7 +88,7 @@ async def _run(name: str, commit: bool, send: bool) -> int:
         if secrets.notion_projects_db_id
         else None
     )
-    from .integrations.calendar import parse_urls
+    from .integrations.calendar import make_source
 
     jobs = Jobs(
         agenda,
@@ -96,7 +96,7 @@ async def _run(name: str, commit: bool, send: bool) -> int:
         config,
         printer,
         anthropic_api_key=secrets.anthropic_api_key,
-        calendar_urls=parse_urls(secrets.calendar_ics_urls),
+        calendar_source=make_source(secrets),
     )
 
     try:

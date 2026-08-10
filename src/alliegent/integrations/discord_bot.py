@@ -16,7 +16,7 @@ from ..agenda import AgendaService, ProjectService
 from ..chat import ChatAgent, strip_mentions
 from ..config import Config, Secrets
 from ..jobs import Jobs
-from .calendar import parse_urls
+from .calendar import make_source
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ class AlliegentBot(discord.Client):
             config,
             self.notify,
             anthropic_api_key=secrets.anthropic_api_key,
-            calendar_urls=parse_urls(secrets.calendar_ics_urls),
+            calendar_source=make_source(secrets),
         )
         _register(self)
 
@@ -173,10 +173,24 @@ def parse_day(text: str | None, today: date) -> date:
     equivalents, which are shorter to type on a Korean keyboard."""
     if not text:
         return today
-    value = text.strip()
-    relative = {"오늘": 0, "내일": 1, "모레": 2, "today": 0, "tomorrow": 1}
-    if value in relative:
-        return today + timedelta(days=relative[value])
+    # Trailing punctuation and capitalisation both come free from phone
+    # keyboards; "Tomorrow." should not be a parse error.
+    value = text.strip().strip(".!,").strip()
+    relative = {
+        "오늘": 0,
+        "내일": 1,
+        "모레": 2,
+        "내일모레": 2,
+        "today": 0,
+        "tod": 0,
+        "tomorrow": 1,
+        "tmr": 1,
+        "tmrw": 1,
+        "day after tomorrow": 2,
+    }
+    key = value.casefold()
+    if key in relative:
+        return today + timedelta(days=relative[key])
     # Year-less input is assumed to mean the current year, so it is filled in
     # before parsing rather than after (strptime defaults to 1900 otherwise).
     for fmt, candidate in (

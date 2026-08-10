@@ -27,9 +27,18 @@ class Secrets(BaseSettings):
 
     anthropic_api_key: str = ""
 
-    # One or more ICS subscription URLs, separated by commas or whitespace.
-    # These are unauthenticated links: anyone holding one can read that
-    # calendar, so they are secrets even though they look like plain URLs.
+    # Preferred calendar source: authenticated, nothing published. The
+    # password is an app-specific one from appleid.apple.com, revocable on its
+    # own without touching the account password.
+    icloud_username: str = ""
+    icloud_app_password: str = ""
+    # Optional: only read these calendars, by name. Empty means all of them.
+    icloud_calendars: str = ""
+
+    # Fallback source. ICS subscription links are unauthenticated — anyone
+    # holding one can read that calendar — so they are secrets despite looking
+    # like ordinary URLs, and an iCloud one can only be revoked by
+    # unpublishing the calendar. Prefer CalDAV above.
     calendar_ics_urls: str = ""
 
     discord_bot_token: str = ""
