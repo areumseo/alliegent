@@ -48,7 +48,9 @@ class AlliegentBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self._tasks: set[asyncio.Task[None]] = set()
         self.chat = (
-            ChatAgent(secrets.anthropic_api_key, agenda, config) if chat_on else None
+            ChatAgent(secrets.anthropic_api_key, agenda, config, secrets)
+            if chat_on
+            else None
         )
         self.jobs = Jobs(
             agenda,

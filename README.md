@@ -154,7 +154,9 @@ Mention the bot and it answers, using the same agenda underneath:
 @alliegent Diary 끝냈어
 ```
 
-It can read any day, list what's overdue, add items, mark them done, and move them to Notion's trash. Deleting is a trash move, not a hard delete — the row is recoverable in Notion, which is what makes it safe to expose. Changing an item's date is not exposed: a silently moved item is hard to notice and hard to undo, unlike a trashed one you can see in the trash.
+It can read any day, list what's overdue, add items, mark them done, move them to Notion's trash, and create calendar events. Deleting is a trash move, not a hard delete — the row is recoverable in Notion, which is what makes it safe to expose. Changing an item's date is not exposed: a silently moved item is hard to notice and hard to undo, unlike a trashed one you can see in the trash.
+
+Tasks and events go to different places, and it decides which: something happening at a set time ("dentist at 3pm tomorrow") becomes a calendar event, while something to get done ("book a dentist appointment") becomes an agenda item. When a request could be either, it asks.
 
 It answers in English whichever language you ask in, matching the rest of the Discord surface — but item titles are quoted back exactly as they appear in Notion, since a translated title no longer names the row it refers to.
 
@@ -165,6 +167,16 @@ Runs on Sonnet 5 at low effort — chat is latency-sensitive and each turn is sm
 **This needs the Message Content intent**, which is privileged: discord.com/developers → your app → **Bot** → **Privileged Gateway Intents** → enable **MESSAGE CONTENT INTENT**. Without it, messages arrive with empty content and the bot looks like it's ignoring you. If the app requests the intent without it being enabled, Discord refuses the connection outright — so when that happens the bot logs the fix, drops the chat feature, and starts anyway rather than taking the scheduled jobs down with it.
 
 Chat is skipped entirely when `ANTHROPIC_API_KEY` is unset, and the intent isn't requested at all.
+
+## The calendar
+
+Read over CalDAV with an app-specific password, not an ICS subscription link. An ICS link is unauthenticated — anyone holding it can read that calendar, and an iCloud one is revocable only by unpublishing the calendar — whereas an app password publishes nothing and can be revoked on its own from the Apple ID account page. ICS feeds still work as a fallback (`CALENDAR_ICS_URLS`) and log a warning when used.
+
+Today's events appear at the top of the daily brief, above the to-do list: that part of the day is already committed, and the tasks have to fit around it. All calendars are read and merged into one time-ordered list, with all-day events first; the same event in two calendars prints once. Reminder lists are skipped — they hold no events.
+
+Recurring events are expanded client-side by the same code for both sources, rather than trusting whatever a server chose to expand, so "every Tue and Thu at 19:10" and the weeks that were cancelled behave identically either way.
+
+Writing is opt-in and narrow. `ICLOUD_WRITE_CALENDAR` names the one calendar new events go into and has no default — writing into whichever calendar came back first is not a guess worth making on a real calendar. The bot can create events but not edit or delete them: a created event is easy to spot and remove, while a misread request that alters an existing one is not.
 
 ## The AI news digest
 

@@ -34,6 +34,10 @@ class Secrets(BaseSettings):
     icloud_app_password: str = ""
     # Optional: only read these calendars, by name. Empty means all of them.
     icloud_calendars: str = ""
+    # Which calendar new events go into. Deliberately has no default: writing
+    # into whichever calendar happened to come back first is not a guess worth
+    # making on someone's real calendar.
+    icloud_write_calendar: str = ""
 
     # Fallback source. ICS subscription links are unauthenticated — anyone
     # holding one can read that calendar — so they are secrets despite looking

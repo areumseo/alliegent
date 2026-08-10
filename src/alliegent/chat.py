@@ -13,7 +13,7 @@ registration doesn't fit, and this path runs on every mention.
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime, time, timedelta
 
 from .agenda import AgendaService
 from .config import Config
@@ -55,7 +55,15 @@ when you delete something. Never delete when the person asked to complete
 something, or the reverse.
 
 You cannot change an item's date; say so if asked, and suggest doing it in
-Notion.\
+Notion.
+
+Two different places things go. Something happening at a set time — an
+appointment, a class, a meeting — is a calendar event: use add_calendar_event.
+Something to get done, with or without a day attached, is an agenda item: use
+add_item. "Dentist at 3pm tomorrow" is an event; "book a dentist appointment"
+is an item. When it could be either, ask rather than guessing.
+
+You can create calendar events but not change or delete them; say so if asked.\
 """
 
 TOOLS = [
@@ -97,6 +105,29 @@ TOOLS = [
         },
     },
     {
+        "name": "add_calendar_event",
+        "description": (
+            "Create an event in the calendar, for something happening at a set "
+            "time. Not for tasks — use add_item for those."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string", "description": "The event title."},
+                "day": {"type": "string", "description": "The date as YYYY-MM-DD."},
+                "start_time": {
+                    "type": "string",
+                    "description": "Start time as HH:MM, 24-hour.",
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "End time as HH:MM. Defaults to an hour after the start.",
+                },
+            },
+            "required": ["summary", "day", "start_time"],
+        },
+    },
+    {
         "name": "delete_item",
         "description": (
             "Move one item to Notion's trash. Recoverable there, not a permanent "
@@ -131,15 +162,20 @@ TOOLS = [
 
 
 class ChatAgent:
-    def __init__(self, api_key: str, agenda: AgendaService, config: Config) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        agenda: AgendaService,
+        config: Config,
+        secrets=None,
+    ) -> None:
         self._api_key = api_key
         self._agenda = agenda
         self._config = config
+        self._secrets = secrets
         self._history: dict[int, list[dict]] = {}
 
     def _today(self) -> date:
-        from datetime import datetime
-
         return datetime.now(self._config.tz).date()
 
     async def _run_tool(self, name: str, args: dict) -> str:
@@ -170,6 +206,38 @@ class ChatAgent:
                 )
                 filed = f" (filed under {item.category})" if item.category else ""
                 return f"Added '{item.title}' on {day.isoformat()}{filed}."
+
+            if name == "add_calendar_event":
+                if self._secrets is None:
+                    return "Calendar writing isn't configured."
+                from .integrations.calendar import CalendarWriteError, create_event
+
+                day = date.fromisoformat(args["day"])
+                start = datetime.combine(
+                    day,
+                    time.fromisoformat(args["start_time"]),
+                    tzinfo=self._config.tz,
+                )
+                end_raw = args.get("end_time")
+                end = (
+                    datetime.combine(day, time.fromisoformat(end_raw), tzinfo=self._config.tz)
+                    if end_raw
+                    else start + timedelta(hours=1)
+                )
+                if end <= start:
+                    # Crossing midnight is the only sane reading of an end
+                    # before its start.
+                    end += timedelta(days=1)
+                try:
+                    where = await create_event(
+                        self._secrets, args["summary"], start, end
+                    )
+                except CalendarWriteError as exc:
+                    return str(exc)
+                return (
+                    f"Created '{args['summary']}' in the {where} calendar, "
+                    f"{start:%Y-%m-%d %H:%M}–{end:%H:%M}."
+                )
 
             if name in ("complete_item", "delete_item"):
                 day = date.fromisoformat(args["day"])
