@@ -24,6 +24,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -128,6 +129,100 @@ async def events_from_feeds(urls: list[str], day: date, tz: ZoneInfo) -> list[Ev
 CALDAV_URL = "https://caldav.icloud.com"
 
 
+def _display_name(calendar) -> str:
+    try:
+        return str(calendar.get_display_name() or "")
+    except Exception:
+        return ""
+
+
+def _event_calendars(client) -> list:
+    """Calendars that hold events.
+
+    An iCloud account also exposes reminder lists, which accept VTODO only —
+    searching or writing events against those is meaningless.
+    """
+    keep = []
+    for calendar in client.principal().calendars():
+        try:
+            supported = calendar.get_supported_components()
+        except Exception:
+            supported = ["VEVENT"]  # assume usable rather than skip silently
+        if "VEVENT" in supported:
+            keep.append(calendar)
+    return keep
+
+
+class CalendarWriteError(RuntimeError):
+    """The event could not be created; the caller should say so plainly."""
+
+
+def _caldav_create(
+    url: str,
+    username: str,
+    password: str,
+    calendar_name: str,
+    summary: str,
+    start: datetime,
+    end: datetime,
+) -> str:
+    import caldav
+    from icalendar import Calendar as VCalendar
+    from icalendar import Event as VEvent
+
+    with caldav.DAVClient(url=url, username=username, password=password) as client:
+        calendars = _event_calendars(client)
+        target = next(
+            (c for c in calendars if _display_name(c) == calendar_name), None
+        )
+        if target is None:
+            available = ", ".join(sorted(_display_name(c) for c in calendars))
+            raise CalendarWriteError(
+                f"No calendar named {calendar_name!r}. Available: {available}"
+            )
+
+        vcal = VCalendar()
+        vcal.add("prodid", "-//alliegent//EN")
+        vcal.add("version", "2.0")
+        event = VEvent()
+        event.add("summary", summary)
+        event.add("dtstart", start)
+        event.add("dtend", end)
+        event.add("dtstamp", datetime.now(start.tzinfo))
+        event.add("uid", f"{uuid4()}@alliegent")
+        vcal.add_component(event)
+
+        target.save_event(vcal.to_ical().decode())
+    return calendar_name
+
+
+async def create_event(
+    secrets,
+    summary: str,
+    start: datetime,
+    end: datetime,
+    url: str = CALDAV_URL,
+) -> str:
+    """Create one event. Returns the calendar it landed in."""
+    if not (secrets.icloud_username and secrets.icloud_app_password):
+        raise CalendarWriteError("Calendar writing needs ICLOUD_USERNAME and ICLOUD_APP_PASSWORD.")
+    if not secrets.icloud_write_calendar:
+        raise CalendarWriteError(
+            "No calendar is set to write to. Set ICLOUD_WRITE_CALENDAR to the "
+            "name of the calendar new events should go in."
+        )
+    return await asyncio.to_thread(
+        _caldav_create,
+        url,
+        secrets.icloud_username,
+        secrets.icloud_app_password,
+        secrets.icloud_write_calendar,
+        summary,
+        start,
+        end,
+    )
+
+
 def make_source(secrets) -> CalendarSource | None:
     """Pick the configured calendar source, CalDAV first.
 
@@ -170,8 +265,8 @@ def _caldav_fetch(
 
     events: list[Event] = []
     with caldav.DAVClient(url=url, username=username, password=password) as client:
-        for calendar in client.principal().calendars():
-            if names and str(calendar.name or "") not in names:
+        for calendar in _event_calendars(client):
+            if names and _display_name(calendar) not in names:
                 continue
             try:
                 found = calendar.search(start=start, end=end, event=True)
