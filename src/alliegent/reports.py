@@ -234,17 +234,22 @@ def weekly_review(start: date, end: date, items: list[AgendaItem]) -> str:
     return "\n".join(out).strip()
 
 
-def day_list(day: date, items: list[AgendaItem], *, numbered: bool = True) -> str:
-    """One day's items.
+def day_list(
+    day: date, items: list[AgendaItem], *, numbered: bool = True, today: date | None = None
+) -> str:
+    """One day's items, numbered so they can be acted on.
 
-    `numbered` is off for any day other than today: /done resolves numbers
-    against today's list, so numbering a future day invites completing the
-    wrong row.
+    Numbers are per-day, and /done and /delete take the day as an argument.
+    A list for anything other than today says so, since the number alone
+    doesn't carry which day it belongs to.
     """
     if not items:
         return f"{fmt_date(day)} — nothing scheduled."
     header = f"**{fmt_date(day)} — {len(items)} item(s)**"
-    return "\n".join([header, *_bullets(items, numbered=numbered)])
+    lines = [header, *_bullets(items, numbered=numbered)]
+    if numbered and today is not None and day != today:
+        lines.append(f"_`/done <n> {day.isoformat()}` to tick one off._")
+    return "\n".join(lines)
 
 
 def today_list(today: date, items: list[AgendaItem]) -> str:

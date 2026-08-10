@@ -229,9 +229,9 @@ def parse_numbers(text: str) -> list[int]:
 
 
 async def _resolve(
-    bot: AlliegentBot, interaction: discord.Interaction, numbers: str
-) -> list | None:
-    """Map typed numbers onto today's items, against a single snapshot.
+    bot: AlliegentBot, interaction: discord.Interaction, numbers: str, when: str | None
+) -> tuple[list, date] | None:
+    """Map typed numbers onto one day's items, against a single snapshot.
 
     One fetch for the whole command: resolving each number separately would
     let an earlier completion or deletion shift the list under the later ones,
@@ -243,19 +243,28 @@ async def _resolve(
         await interaction.followup.send(f"⚠️ {exc}")
         return None
 
-    items = await bot.agenda.items_on(bot.today())
+    try:
+        day = parse_day(when, bot.today())
+    except ValueError as exc:
+        await interaction.followup.send(f"⚠️ {exc}")
+        return None
+
+    items = await bot.agenda.items_on(day)
     if not items:
-        await interaction.followup.send("⚠️ Nothing scheduled today.")
+        await interaction.followup.send(
+            f"⚠️ Nothing scheduled on {reports.fmt_date(day)}."
+        )
         return None
 
     bad = [n for n in wanted if not 1 <= n <= len(items)]
     if bad:
         listed = ", ".join(str(n) for n in bad)
         await interaction.followup.send(
-            f"⚠️ Out of range: {listed}. Pick between 1 and {len(items)}."
+            f"⚠️ Out of range: {listed}. {reports.fmt_date(day)} has "
+            f"{len(items)} item(s)."
         )
         return None
-    return [items[n - 1] for n in wanted]
+    return [items[n - 1] for n in wanted], day
 
 
 def _register(bot: AlliegentBot) -> None:
@@ -273,9 +282,11 @@ def _register(bot: AlliegentBot) -> None:
         await interaction.response.defer()
         day = bot.today() + timedelta(days=1)
         items = await bot.agenda.items_on(day)
-        # Unnumbered: /done applies to today, so numbers here would mislead.
         await _deliver(
-            bot, interaction, reports.day_list(day, items, numbered=False), "agenda"
+            bot,
+            interaction,
+            reports.day_list(day, items, today=bot.today()),
+            "agenda",
         )
 
     @tree.command(name="status", description="Today's and this week's progress")
@@ -312,13 +323,19 @@ def _register(bot: AlliegentBot) -> None:
             f"✅ Added — **{item.title}** ({reports.fmt_date(day)}{filed})"
         )
 
-    @tree.command(name="done", description="Mark items done by their number in /today")
-    @app_commands.describe(numbers="Number(s) from /today, e.g. 3 or 3,5")
-    async def done_cmd(interaction: discord.Interaction, numbers: str) -> None:
+    @tree.command(name="done", description="Mark items done by their listed number")
+    @app_commands.describe(
+        numbers="Number(s) from the list, e.g. 3 or 3,5",
+        when="Which day's list, e.g. tomorrow or 08-15 (defaults to today)",
+    )
+    async def done_cmd(
+        interaction: discord.Interaction, numbers: str, when: str | None = None
+    ) -> None:
         await interaction.response.defer()
-        chosen = await _resolve(bot, interaction, numbers)
-        if chosen is None:
+        resolved = await _resolve(bot, interaction, numbers, when)
+        if resolved is None:
             return
+        chosen, day = resolved
 
         already = [i.title for i in chosen if i.done]
         marked = []
@@ -328,28 +345,38 @@ def _register(bot: AlliegentBot) -> None:
             await bot.agenda.set_done(item.id)
             marked.append(item.title)
 
+        # The date goes in the confirmation: numbers are per-day, so naming the
+        # day is what makes a wrong one obvious straight away.
         lines = []
         if marked:
-            lines.append("✅ Done — " + ", ".join(f"**{t}**" for t in marked))
+            titles = ", ".join(f"**{t}**" for t in marked)
+            lines.append(f"✅ Done — {titles} ({reports.fmt_date(day)})")
         if already:
             lines.append("Already done — " + ", ".join(already))
         await interaction.followup.send("\n".join(lines))
 
     @tree.command(
-        name="delete", description="Move items to Notion's trash by their number in /today"
+        name="delete", description="Move items to Notion's trash by their listed number"
     )
-    @app_commands.describe(numbers="Number(s) from /today, e.g. 3 or 3,5")
-    async def delete_cmd(interaction: discord.Interaction, numbers: str) -> None:
+    @app_commands.describe(
+        numbers="Number(s) from the list, e.g. 3 or 3,5",
+        when="Which day's list, e.g. tomorrow or 08-15 (defaults to today)",
+    )
+    async def delete_cmd(
+        interaction: discord.Interaction, numbers: str, when: str | None = None
+    ) -> None:
         await interaction.response.defer()
-        chosen = await _resolve(bot, interaction, numbers)
-        if chosen is None:
+        resolved = await _resolve(bot, interaction, numbers, when)
+        if resolved is None:
             return
+        chosen, day = resolved
 
         for item in chosen:
             await bot.agenda.trash(item.id)
         titles = ", ".join(f"**{i.title}**" for i in chosen)
         await interaction.followup.send(
-            f"🗑️ Moved to trash — {titles} (recoverable in Notion)"
+            f"🗑️ Moved to trash — {titles} ({reports.fmt_date(day)}, "
+            "recoverable in Notion)"
         )
 
     @tree.command(name="overdue", description="Show overdue, unfinished items")
