@@ -336,6 +336,15 @@ def test_chunk_hard_splits_a_single_overlong_line():
         ("12-25", date(2026, 12, 25)),
         ("12/25", date(2026, 12, 25)),
         ("  내일  ", date(2026, 8, 9)),
+        # Phone keyboards capitalise the first word and add punctuation; both
+        # used to be parse errors.
+        ("Tomorrow", date(2026, 8, 9)),
+        ("TOMORROW", date(2026, 8, 9)),
+        ("Tomorrow.", date(2026, 8, 9)),
+        ("Today", date(2026, 8, 8)),
+        ("tmr", date(2026, 8, 9)),
+        ("day after tomorrow", date(2026, 8, 10)),
+        ("내일모레", date(2026, 8, 10)),
     ],
 )
 def test_parse_day(text, expected):

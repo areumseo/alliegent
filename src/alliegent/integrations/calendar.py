@@ -1,4 +1,10 @@
-"""Read-only view of one or more iCalendar (ICS) feeds.
+"""Read-only view of the calendar, over CalDAV or plain ICS feeds.
+
+CalDAV is the preferred source. An ICS subscription link is unauthenticated:
+anyone holding it can read that calendar, and an iCloud one can only be
+revoked by unpublishing and republishing. CalDAV authenticates with an
+app-specific password instead — nothing is published, and the password can be
+revoked on its own from the Apple ID account page.
 
 Calendar events stay in the calendar; the agenda database stays for tasks.
 Nothing is written to Notion, so there is no sync problem to solve — a moved
@@ -15,8 +21,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -26,6 +33,10 @@ import recurring_ical_events
 log = logging.getLogger(__name__)
 
 FETCH_TIMEOUT = 20.0
+
+# What the jobs are handed: "give me one day's events", with the source of
+# those events already decided.
+CalendarSource = Callable[["date", "ZoneInfo"], Awaitable[list["Event"]]]
 
 
 @dataclass(frozen=True)
@@ -89,8 +100,14 @@ def _events_from(ics: bytes, day: date, tz: ZoneInfo) -> list[Event]:
     return events
 
 
-async def events_on(urls: list[str], day: date, tz: ZoneInfo) -> list[Event]:
-    """Every event on one day, across all feeds, ordered for reading."""
+def _dedupe(events: list[Event]) -> list[Event]:
+    """Two calendars carrying the same event would otherwise print twice."""
+    unique = {(e.summary, e.start, e.all_day): e for e in events}
+    return sorted(unique.values(), key=Event.sort_key)
+
+
+async def events_from_feeds(urls: list[str], day: date, tz: ZoneInfo) -> list[Event]:
+    """Every event on one day, across all ICS feeds."""
     if not urls:
         return []
 
@@ -105,7 +122,84 @@ async def events_on(urls: list[str], day: date, tz: ZoneInfo) -> list[Event]:
             events.extend(_events_from(payload, day, tz))
         except Exception:
             log.exception("could not parse a calendar feed")
+    return _dedupe(events)
 
-    # Two calendars subscribed to the same event would otherwise print twice.
-    unique = {(e.summary, e.start, e.all_day): e for e in events}
-    return sorted(unique.values(), key=Event.sort_key)
+
+CALDAV_URL = "https://caldav.icloud.com"
+
+
+def make_source(secrets) -> CalendarSource | None:
+    """Pick the configured calendar source, CalDAV first.
+
+    Returns None when neither is configured, so the caller can skip the
+    calendar entirely rather than calling something that always returns [].
+    """
+    if secrets.icloud_username and secrets.icloud_app_password:
+        names = [n.strip() for n in secrets.icloud_calendars.split(",") if n.strip()]
+
+        async def caldav_source(day: date, tz: ZoneInfo) -> list[Event]:
+            return await events_from_caldav(
+                secrets.icloud_username, secrets.icloud_app_password, day, tz, names
+            )
+
+        return caldav_source
+
+    urls = parse_urls(secrets.calendar_ics_urls)
+    if urls:
+        log.warning(
+            "Using ICS feeds: these links are unauthenticated. CalDAV "
+            "(ICLOUD_USERNAME + ICLOUD_APP_PASSWORD) publishes nothing."
+        )
+
+        async def ics_source(day: date, tz: ZoneInfo) -> list[Event]:
+            return await events_from_feeds(urls, day, tz)
+
+        return ics_source
+
+    return None
+
+
+def _caldav_fetch(
+    url: str, username: str, password: str, day: date, tz: ZoneInfo, names: list[str]
+) -> list[Event]:
+    """Blocking CalDAV read. Runs in a thread; the library is synchronous."""
+    import caldav
+
+    start = datetime.combine(day, time.min, tzinfo=tz)
+    end = start + timedelta(days=1)
+
+    events: list[Event] = []
+    with caldav.DAVClient(url=url, username=username, password=password) as client:
+        for calendar in client.principal().calendars():
+            if names and str(calendar.name or "") not in names:
+                continue
+            try:
+                found = calendar.search(start=start, end=end, event=True)
+            except Exception:
+                log.exception("CalDAV search failed for calendar %r", calendar.name)
+                continue
+            for obj in found:
+                # Expand each object with the same code the ICS path uses, so
+                # recurrence, EXDATE and timezone handling stay identical
+                # rather than depending on what the server chose to expand.
+                try:
+                    events.extend(_events_from(obj.data.encode(), day, tz))
+                except Exception:
+                    log.exception("could not parse a CalDAV event")
+    return events
+
+
+async def events_from_caldav(
+    username: str,
+    password: str,
+    day: date,
+    tz: ZoneInfo,
+    names: list[str] | None = None,
+    url: str = CALDAV_URL,
+) -> list[Event]:
+    if not (username and password):
+        return []
+    events = await asyncio.to_thread(
+        _caldav_fetch, url, username, password, day, tz, names or []
+    )
+    return _dedupe(events)

@@ -34,9 +34,9 @@ class Jobs:
         notify: Notifier,
         clock: Callable[[], date] | None = None,
         anthropic_api_key: str = "",
-        calendar_urls: list[str] | None = None,
+        calendar_source: Callable | None = None,
     ) -> None:
-        self.calendar_urls = calendar_urls or []
+        self.calendar_source = calendar_source
         self.agenda = agenda
         self.projects = projects
         self.config = config
@@ -59,12 +59,10 @@ class Jobs:
         A calendar outage should cost the brief its calendar block, not the
         whole brief.
         """
-        if not self.calendar_urls:
+        if self.calendar_source is None:
             return []
-        from .integrations.calendar import events_on
-
         try:
-            return await events_on(self.calendar_urls, day, self.config.tz)
+            return await self.calendar_source(day, self.config.tz)
         except Exception:
             log.exception("calendar lookup failed")
             return []

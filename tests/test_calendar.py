@@ -126,6 +126,56 @@ def test_a_cancelled_occurrence_disappears():
 # -- ordering --------------------------------------------------------------
 
 
+# -- source selection ------------------------------------------------------
+# CalDAV wins when configured: an ICS link is unauthenticated and an iCloud
+# one can only be revoked by unpublishing the calendar.
+
+
+def test_caldav_is_preferred_when_both_are_configured():
+    from alliegent.config import Secrets
+    from alliegent.integrations.calendar import make_source
+
+    source = make_source(
+        Secrets(
+            icloud_username="me@example.com",
+            icloud_app_password="abcd-efgh",
+            calendar_ics_urls="https://a/x.ics",
+        )
+    )
+    assert source.__name__ == "caldav_source"
+
+
+def test_ics_is_used_only_as_a_fallback():
+    from alliegent.config import Secrets
+    from alliegent.integrations.calendar import make_source
+
+    source = make_source(Secrets(calendar_ics_urls="https://a/x.ics"))
+    assert source.__name__ == "ics_source"
+
+
+def test_half_configured_caldav_does_not_count():
+    """A username with no password would fail on every lookup; fall through."""
+    from alliegent.config import Secrets
+    from alliegent.integrations.calendar import make_source
+
+    source = make_source(
+        Secrets(icloud_username="me@example.com", calendar_ics_urls="https://a/x.ics")
+    )
+    assert source.__name__ == "ics_source"
+
+
+def test_nothing_configured_yields_no_source():
+    """None rather than a source that always returns [] — the caller skips
+    the calendar entirely instead of calling something pointless."""
+    from alliegent.config import Secrets
+    from alliegent.integrations.calendar import make_source
+
+    assert make_source(Secrets()) is None
+
+
+# -- ordering --------------------------------------------------------------
+
+
 def test_all_day_events_sort_ahead_of_timed_ones():
     timed = Event("Ballet", datetime(2026, 8, 10, 19, 10, tzinfo=SEOUL), all_day=False)
     morning = Event("Call", datetime(2026, 8, 10, 9, 30, tzinfo=SEOUL), all_day=False)
