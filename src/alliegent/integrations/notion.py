@@ -104,6 +104,8 @@ class NotionClient:
         )
 
     # -- databases / data sources -----------------------------------------
+    async def get_page(self, page_id: str) -> dict[str, Any]:
+        return await self._request("GET", f"/pages/{page_id}")
 
     async def get_database(self, database_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/databases/{database_id}")
