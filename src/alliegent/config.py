@@ -125,7 +125,7 @@ class ProjectProps(BaseModel):
     status: str = "Status"
     next_action: str = "Next action"
     last_activity: str = ""
-
+    related_schedule: str = ""
 
 class Schedule(BaseModel):
     daily_brief: str = "08:00"

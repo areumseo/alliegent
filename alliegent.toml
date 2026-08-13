@@ -41,9 +41,9 @@ scaffold_days = 7
 title = "Name"          # title property
 date = "Date"           # date property
 status = "Status"       # status OR select OR checkbox — auto-detected
-recurring = "Recurring" # checkbox marking items that repeat weekly
+recurring = "" # checkbox marking items that repeat weekly
 category = "Category"   # select; copied onto scaffolded items
-project = ""            # relation to a projects DB; none exists yet
+project = "Project DB"            # relation to a projects DB; none exists yet
 
 [agenda.status_values]
 # Used when `status` is a status/select property. Ignored for checkbox.
@@ -58,8 +58,9 @@ stale_after_days = 7
 [projects.props]
 title = "Name"
 status = "Status"
-next_action = "Next action"   # optional; "" to disable
-last_activity = ""            # optional date prop; "" = derive from agenda rows
+next_action = ""   # optional; "" to disable
+last_activity = "Last Active"            # optional date prop; "" = derive from agenda rows
+related_schedule = "Related Schedule"
 
 [projects.status_values]
 active = "In progress"
