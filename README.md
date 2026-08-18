@@ -122,7 +122,29 @@ Start the bot:
 uv run alliegent
 ```
 
-### 4. Deploy to Fly.io
+### 4. Run it on the Mac mini
+
+The bot runs at `~/work/alliegent` on the mini (`a-mini-server`, reachable over Tailscale) under launchd, as `com.areumseo.alliegent`. To install or restart:
+
+```bash
+cp scripts/com.areumseo.alliegent-update.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.areumseo.alliegent-update.plist
+```
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.areumseo.alliegent
+```
+
+Logs are in `~/Library/Logs/alliegent/` — `stderr.log` for the bot, `update.log` for the updater.
+
+**Staying current.** The code is edited on the laptop and runs on the mini, so the two drift apart with every push. `scripts/self_update.sh` runs every 15 minutes: it fetches `main`, runs the test suite, and restarts the bot only if the tests pass. A commit that fails is reset back to the previous one, so a bad push leaves the running version serving rather than taking the bot down, and the next good push recovers on its own without anyone logging in.
+
+It skips entirely when the working tree on the mini is dirty. Editing directly on the server and auto-pulling do conflict, and of the two failures, losing work in progress is the one that can't be undone by rerunning.
+
+### 5. Deploy to Fly.io
+
+Fly is no longer where this runs — the mini replaced it, and the machine is scaled to zero (`fly scale count 0`). Kept for reference in case it moves back.
+
 
 ```bash
 fly launch --no-deploy --copy-config
