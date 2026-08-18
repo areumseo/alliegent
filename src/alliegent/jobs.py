@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 
 from . import reports
 from .agenda import AgendaService, ProjectService
-from .config import Config
+from .config import Config, Secrets
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +35,7 @@ class Jobs:
         clock: Callable[[], date] | None = None,
         anthropic_api_key: str = "",
         calendar_source: Callable | None = None,
+        secrets: Secrets | None = None,
     ) -> None:
         self.calendar_source = calendar_source
         self.agenda = agenda
@@ -42,6 +43,7 @@ class Jobs:
         self.config = config
         self.notify = notify
         self._anthropic_api_key = anthropic_api_key
+        self._secrets = secrets
         # Injectable so tests can pin a date instead of drifting with the
         # calendar; production leaves it as the configured timezone's today.
         self._clock = clock
@@ -162,7 +164,29 @@ class Jobs:
         await self._send(await self.build_stale_projects(), "projects")
 
     async def run_ai_news(self) -> None:
-        await self._send(await self.build_ai_news(), "news")
+        message = await self.build_ai_news()
+        await self._send(message, "news")
+
+        if (
+            message is None
+            or self._secrets is None
+            or not self._secrets.ai_news_email_to
+        ):
+            return
+
+        from .integrations.email import send_ai_news_email
+
+        subject = f"Alliegent AI News — {self.today().isoformat()}"
+
+        try:
+            await send_ai_news_email(self._secrets, subject, message)
+            log.info(
+                "AI news email sent to %s",
+                self._secrets.ai_news_email_to,
+            )
+        except Exception:
+            # Email failure must not prevent or undo Discord delivery.
+            log.exception("AI news email delivery failed")
 
     async def run_weekly_planning(self) -> None:
         await self._send(await self.build_weekly_planning(), "agenda")

@@ -59,6 +59,7 @@ class AlliegentBot(discord.Client):
             self.notify,
             anthropic_api_key=secrets.anthropic_api_key,
             calendar_source=make_source(secrets),
+            secrets=secrets,
         )
         _register(self)
 
