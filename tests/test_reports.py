@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -100,6 +100,30 @@ def test_status_celebrates_a_finished_day():
     todays = [item("a", done=True)]
     text = reports.status(TODAY, todays, [], todays)
     assert "Nothing left today" in text
+
+
+def test_status_for_another_day_says_which_day_it_means():
+    """A status for a day that isn't today can't say "Today" -- the numbers
+    below it are only valid with that date on /done."""
+    other = TODAY + timedelta(days=2)
+    todays = [item("a", done=True), item("b")]
+    text = reports.status(other, todays, [], todays, today=TODAY)
+    assert "Today —" not in text
+    assert f"{reports.fmt_date(other)} — 1 of 2 done (50%)" in text
+    assert "That week —" in text
+
+
+def test_status_for_another_day_carries_the_date_hint():
+    other = TODAY + timedelta(days=2)
+    text = reports.status(other, [item("b")], [], [item("b")], today=TODAY)
+    assert f"/done <n> {other.isoformat()}" in text
+
+
+def test_status_for_today_stays_worded_as_today():
+    text = reports.status(TODAY, [item("b")], [], [item("b")], today=TODAY)
+    assert "Today — 0 of 1 done" in text
+    assert "This week —" in text
+    assert "/done <n>" not in text  # today's numbers need no date
 
 
 def test_status_omits_overdue_when_there_is_none():
