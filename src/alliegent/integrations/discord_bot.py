@@ -290,16 +290,25 @@ def _register(bot: AlliegentBot) -> None:
             "agenda",
         )
 
-    @tree.command(name="status", description="Today's and this week's progress")
-    async def status_cmd(interaction: discord.Interaction) -> None:
+    @tree.command(name="status", description="Progress for a day and its week")
+    @app_commands.describe(when="Which day (defaults to today)")
+    async def status_cmd(interaction: discord.Interaction, when: str | None = None) -> None:
         await interaction.response.defer()
-        day = bot.today()
+        today = bot.today()
+        try:
+            day = parse_day(when, today)
+        except ValueError as exc:
+            await interaction.followup.send(f"⚠️ {exc}")
+            return
         monday = day - timedelta(days=day.weekday())
         todays = await bot.agenda.items_on(day)
         overdue = await bot.agenda.overdue(day)
         week = await bot.agenda.items_between(monday, monday + timedelta(days=6))
         await _deliver(
-            bot, interaction, reports.status(day, todays, overdue, week), "agenda"
+            bot,
+            interaction,
+            reports.status(day, todays, overdue, week, today=today),
+            "agenda",
         )
 
     @tree.command(name="add", description="Add an item to the agenda")

@@ -257,12 +257,20 @@ def today_list(today: date, items: list[AgendaItem]) -> str:
 
 
 def status(
-    today: date,
+    day: date,
     todays: list[AgendaItem],
     overdue: list[AgendaItem],
     week: list[AgendaItem],
+    *,
+    today: date | None = None,
 ) -> str:
-    """A numbers-first snapshot: how today and this week are actually going."""
+    """A numbers-first snapshot: how a day and its week are actually going.
+
+    `day` is the day being reported on, which need not be today; `today` is
+    the real current date, used only to word things and to say which day the
+    numbers belong to.
+    """
+    is_today = today is None or day == today
 
     def ratio(items: list[AgendaItem]) -> str:
         done = sum(1 for i in items if i.done)
@@ -270,20 +278,27 @@ def status(
             return "nothing scheduled"
         return f"{done} of {len(items)} done ({round(done / len(items) * 100)}%)"
 
+    label = "Today" if is_today else fmt_date(day)
+    week_label = "This week" if is_today else "That week"
     out = [
-        f"📊 **Status — {fmt_date(today)}**",
+        f"📊 **Status — {fmt_date(day)}**",
         "",
-        f"Today — {ratio(todays)}",
-        f"This week — {ratio(week)}",
+        f"{label} — {ratio(todays)}",
+        f"{week_label} — {ratio(week)}",
     ]
     if overdue:
+        # Unfinished and dated before the day in question -- for a future day
+        # that includes everything still open between now and then.
         out.append(f"Overdue — {len(overdue)}")
 
     pending = pending_lines(todays)
+    left = "Left today" if is_today else f"Left on {fmt_date(day)}"
     if pending:
-        out += ["", f"**Left today ({len(pending)})**", *pending]
+        out += ["", f"**{left} ({len(pending)})**", *pending]
+        if not is_today:
+            out.append(f"_`/done <n> {day.isoformat()}` to tick one off._")
     elif todays:
-        out += ["", "Nothing left today. 🎉"]
+        out += ["", f"Nothing left {'today' if is_today else 'that day'}. 🎉"]
     return "\n".join(out)
 
 

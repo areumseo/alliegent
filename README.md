@@ -24,7 +24,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | --- | --- |
 | `/today` | Show today's agenda |
 | `/tomorrow` | Show tomorrow's agenda, numbered |
-| `/status` | Today's and this week's completion, plus what's left today |
+| `/status [when]` | Completion for a day and the week containing it, plus what's left on it. `when` defaults to today |
 | `/add <task> [when]` | Add an item; its Category is inferred from history. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow` / `tmr` (any capitalisation), `2026-08-15`, `08-15`, or `08/15`; defaults to today |
 | `/done <numbers> [when]` | Complete items by their listed number — one or several (`3` or `3,5`). `when` picks the day, defaulting to today |
 | `/delete <numbers> [when]` | Move items to Notion's trash by number — recoverable there. Takes `when` the same way |
