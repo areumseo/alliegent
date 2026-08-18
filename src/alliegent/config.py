@@ -125,6 +125,9 @@ class AgendaProps(BaseModel):
     status: str = "Status"
     recurring: str = "Recurring"
     category: str = "Category"
+    # Number property that fixes the within-a-day order. Without it the rows
+    # come back in whatever order Notion returns, which /reorder cannot change.
+    order: str = "Order"
     project: str = ""
 
 
@@ -142,13 +145,6 @@ class Schedule(BaseModel):
     # one at night to close it out. A single string is still accepted, so an
     # older alliegent.toml keeps working.
     incomplete_alert: list[str] = Field(default_factory=lambda: ["15:00", "21:00"])
-
-    @field_validator("incomplete_alert", mode="before")
-    @classmethod
-    def _times(cls, value: object) -> object:
-        if isinstance(value, str):
-            return [t.strip() for t in value.split(",") if t.strip()]
-        return value
     weekly_planning_weekday: str = "sat"
     weekly_planning_time: str = "10:00"
     week_scaffold_weekday: str = "mon"
@@ -159,6 +155,14 @@ class Schedule(BaseModel):
     stale_project_time: str = "10:00"
     weekly_review_weekday: str = "sun"
     weekly_review_time: str = "21:00"
+
+    @field_validator("incomplete_alert", mode="before")
+    @classmethod
+    def _times(cls, value: object) -> object:
+        """Accept a bare string as well as a list, so an older config works."""
+        if isinstance(value, str):
+            return [t.strip() for t in value.split(",") if t.strip()]
+        return value
 
 
 class AgendaConfig(BaseModel):

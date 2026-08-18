@@ -18,6 +18,7 @@ def make_page(
     projects: list[str] | None = None,
     recurring: bool | None = None,
     category: str | None = None,
+    order: float | None = None,
     in_trash: bool = False,
 ) -> dict[str, Any]:
     """Build a Notion page object shaped the way the API returns it."""
@@ -42,6 +43,8 @@ def make_page(
         props["Recurring"] = {"type": "checkbox", "checkbox": recurring}
     if category is not None:
         props["Category"] = {"type": "select", "select": {"name": category}}
+    if order is not None:
+        props["Order"] = {"type": "number", "number": order}
     return {
         "object": "page",
         "id": page_id,
@@ -116,11 +119,24 @@ class FakeNotionClient:
         # different date ranges and compares them, so a fake that ignored
         # filters would make those tests meaningless.
         bounds = _date_bounds(filter)
+        matched = []
         for page in self.pages.get(data_source_id, []):
             if page.get("in_trash"):
                 continue
             if bounds and not _within(page, bounds):
                 continue
+            matched.append(page)
+
+        if sorts and any(s.get("property") == "Order" for s in sorts):
+            # Notion sorts unset numbers last; mirror that or the reorder
+            # tests would pass against ordering the real API never produces.
+            matched.sort(
+                key=lambda pg: (
+                    (pg.get("properties", {}).get("Order") or {}).get("number") is None,
+                    (pg.get("properties", {}).get("Order") or {}).get("number") or 0,
+                )
+            )
+        for page in matched:
             yield page
 
     async def create_page(self, data_source_id, properties, *, children=None):

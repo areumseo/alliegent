@@ -29,6 +29,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/done <numbers> [when]` | Complete items by their listed number — one or several (`3` or `3,5`). `when` picks the day, defaulting to today |
 | `/delete <numbers> [when]` | Move items to Notion's trash by number — recoverable there. Takes `when` the same way |
 | `/move <numbers> <to> [from]` | Move items to another day. `from` defaults to today |
+| `/reorder <order> [when]` | Rearrange a day, e.g. `3,1,2`. Numbers you leave out keep their relative order behind the ones you name |
 | `/overdue` | Overdue, unfinished items |
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
@@ -218,6 +219,7 @@ The Weekly Agenda is a Notion database, one row per item:
 | `Status` | status | `Not started` / `In progress` / `Done` |
 | `Recurring` | checkbox | Repeats weekly — the scaffolding job uses these as its template |
 | `Category` | select | Lesson / Work / Exercise / Study / Contact / Personal / Admin — filled in automatically on `/add`, see below |
+| `Order` | number | Position within a day, set by `/reorder` |
 | `Note` | text | Optional |
 
 A database rather than a hand-built page means past weeks accumulate instead of being overwritten, which is what makes the weekly review possible at all. It also means there is no week to "set up" — a date view draws the days on its own.
@@ -227,6 +229,8 @@ A database rather than a hand-built page means past weeks accumulate instead of 
 `Category` is inferred when you add an item, from how the same activity was filed before. Titles carry their time — "Karrot 6PM", "Karrot 11AM" — so the clock is stripped before comparing and both count as the same activity; a "— Prep" suffix still separates preparation from the lesson itself. The most common past category wins, and an unrecognised activity gets none: an empty Category is obvious, while a confidently wrong one stays invisible until it skews a filter.
 
 This is a history lookup, not a model call. Which categories exist and what belongs in them are facts about these entries, not something to reason about — and it costs one query rather than an API round trip on every add. The lookback is `category_lookback_days` in `alliegent.toml`.
+
+Notion exposes no row order through its API — a view's order is either a sort rule or a manual arrangement, and neither is reachable. `Order` is how a day gets an order at all: every listing sorts by date and then by it, so the numbers read off one message and typed into another point at the same rows. Items with no `Order` sort after those that have one, which puts newly added items at the end of the day rather than ahead of things placed deliberately. `/reorder` renumbers the whole day contiguously, writing only the rows that actually move.
 
 Any job can be switched off the same way: blank its time in `alliegent.toml`.
 

@@ -45,6 +45,7 @@ date = "Date"           # date property
 status = "Status"       # status OR select OR checkbox — auto-detected
 recurring = "" # checkbox marking items that repeat weekly
 category = "Category"   # select; copied onto scaffolded items
+order = "Order"         # number; sets the order within a day ("" to disable)
 project = "Project DB"            # relation to a projects DB; none exists yet
 
 [agenda.status_values]
