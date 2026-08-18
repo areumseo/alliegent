@@ -45,6 +45,14 @@ class Secrets(BaseSettings):
     # unpublishing the calendar. Prefer CalDAV above.
     calendar_ics_urls: str = ""
 
+    # Optional Gmail delivery for the daily AI news digest.
+    ai_news_email_to: str = ""
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+
     discord_bot_token: str = ""
     discord_guild_id: int = 0
 
@@ -123,7 +131,7 @@ class AgendaProps(BaseModel):
 class ProjectProps(BaseModel):
     title: str = "Name"
     status: str = "Status"
-    next_action: str = "Next action"
+    next_action: str = ""
     last_activity: str = ""
     related_schedule: str = ""
 
