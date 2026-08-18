@@ -200,7 +200,8 @@ def test_scheduler_registers_the_enabled_jobs():
     assert ids == {
         "daily_brief",
         "ai_news",
-        "incomplete_alert",
+        "incomplete_alert@15:00",
+        "incomplete_alert@21:00",
         "weekly_planning",
         "stale_projects",
         "weekly_review",
@@ -213,6 +214,27 @@ def test_an_empty_time_disables_a_job():
     config.schedule.daily_brief = ""
     ids = {job.id for job in build_scheduler(jobs, config).get_jobs()}
     assert "daily_brief" not in ids
+
+
+def test_each_reminder_time_gets_its_own_job():
+    """Two runs of the same alert would collide on a single id."""
+    jobs, _, _ = build()
+    config = Config()
+    config.schedule.incomplete_alert = ["09:00", "15:00", "21:00"]
+    ids = {job.id for job in build_scheduler(jobs, config).get_jobs()}
+    assert {"incomplete_alert@09:00", "incomplete_alert@15:00",
+            "incomplete_alert@21:00"} <= ids
+
+
+def test_a_single_reminder_time_still_works():
+    """An older alliegent.toml has a bare string here."""
+    from alliegent.config import Schedule
+
+    assert Schedule(incomplete_alert="21:00").incomplete_alert == ["21:00"]
+    assert Schedule(incomplete_alert="15:00, 21:00").incomplete_alert == [
+        "15:00",
+        "21:00",
+    ]
 
 
 def test_setting_a_time_enables_week_scaffolding_again():

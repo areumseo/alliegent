@@ -10,7 +10,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | --- | --- | --- |
 | Daily brief | 08:00 daily | Today's items, anything overdue, and active projects, in one message |
 | AI news digest | 09:00 daily | Up to 10 AI stories from the last 24h — English headline and link, three-sentence summary in English and Korean |
-| Incomplete alert | 21:00 daily | Today's unfinished items and anything past its date |
+| Incomplete alert | 15:00 and 21:00 daily | Today's unfinished items and anything past its date. Two runs: one while the day can still change, one to close it out |
 | Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
 | Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
 | Stale project nudge | Wed 10:00 | Projects with no linked agenda activity for N days. Off until a projects database exists |
@@ -28,6 +28,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/add <task> [when]` | Add an item; its Category is inferred from history. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow` / `tmr` (any capitalisation), `2026-08-15`, `08-15`, or `08/15`; defaults to today |
 | `/done <numbers> [when]` | Complete items by their listed number — one or several (`3` or `3,5`). `when` picks the day, defaulting to today |
 | `/delete <numbers> [when]` | Move items to Notion's trash by number — recoverable there. Takes `when` the same way |
+| `/move <numbers> <to> [from]` | Move items to another day. `from` defaults to today |
 | `/overdue` | Overdue, unfinished items |
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |

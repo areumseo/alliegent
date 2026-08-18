@@ -46,7 +46,10 @@ def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
 
     add("daily_brief", jobs.run_daily_brief, time=sched.daily_brief)
     add("ai_news", jobs.run_ai_news, time=sched.ai_news)
-    add("incomplete_alert", jobs.run_incomplete_alert, time=sched.incomplete_alert)
+    # One job per configured time; the id carries the time so two runs of the
+    # same alert don't collide on a single id.
+    for when in sched.incomplete_alert:
+        add(f"incomplete_alert@{when}", jobs.run_incomplete_alert, time=when)
     add(
         "weekly_planning",
         jobs.run_weekly_planning,
