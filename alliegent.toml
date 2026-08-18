@@ -12,7 +12,9 @@ timezone = "Asia/Seoul"
 # 24h local time in `timezone` above.
 daily_brief = "08:00"          # morning briefing to Discord
 ai_news = "09:00"              # daily AI news digest
-incomplete_alert = "21:00"     # nudge about today's unfinished items
+# Nudge about today's unfinished items. One in the afternoon while the day
+# can still change, one at night to close it out. Silent when nothing is left.
+incomplete_alert = ["15:00", "21:00"]
 
 # Prompt to plan the coming week, with what is already in it.
 weekly_planning_weekday = "sat"

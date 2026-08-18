@@ -23,6 +23,7 @@ EXPECTED = {
     "add",
     "done",
     "delete",
+    "move",
     "overdue",
     "projects",
     "brief",
@@ -187,7 +188,7 @@ COMMAND_CHANNELS = {
 
 # Short write confirmations answer in place: routing a one-line "Added — X"
 # would turn every write into two messages.
-INLINE_COMMANDS = {"add", "done", "delete"}
+INLINE_COMMANDS = {"add", "done", "delete", "move"}
 
 
 def test_every_command_either_routes_or_is_deliberately_inline():

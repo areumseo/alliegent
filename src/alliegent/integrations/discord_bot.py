@@ -380,6 +380,46 @@ def _register(bot: AlliegentBot) -> None:
             "recoverable in Notion)"
         )
 
+    @tree.command(name="move", description="Move items to another day by their listed number")
+    @app_commands.describe(
+        numbers="Number(s) from the list, e.g. 3 or 3,5",
+        to="Where to move them, e.g. tomorrow or 08-20",
+        frm="Which day they're on now (defaults to today)",
+    )
+    @app_commands.rename(frm="from")
+    async def move_cmd(
+        interaction: discord.Interaction,
+        numbers: str,
+        to: str,
+        frm: str | None = None,
+    ) -> None:
+        await interaction.response.defer()
+        resolved = await _resolve(bot, interaction, numbers, frm)
+        if resolved is None:
+            return
+        chosen, source = resolved
+
+        try:
+            target = parse_day(to, bot.today())
+        except ValueError as exc:
+            await interaction.followup.send(f"⚠️ {exc}")
+            return
+        if target == source:
+            await interaction.followup.send(
+                f"⚠️ They're already on {reports.fmt_date(target)}."
+            )
+            return
+
+        for item in chosen:
+            await bot.agenda.reschedule(item.id, target)
+        titles = ", ".join(f"**{i.title}**" for i in chosen)
+        # Both dates: moving is the one write whose result is invisible on the
+        # day you ran it from, so the message has to say where things went.
+        await interaction.followup.send(
+            f"📅 Moved {titles} — {reports.fmt_date(source)} → "
+            f"{reports.fmt_date(target)}"
+        )
+
     @tree.command(name="overdue", description="Show overdue, unfinished items")
     async def overdue_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.defer()
