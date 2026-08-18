@@ -300,6 +300,14 @@ def is_done(page: dict[str, Any], prop: str, done_value: str) -> bool:
     return name is not None and name.casefold() == done_value.casefold()
 
 
+def number(value: float | None) -> dict[str, Any]:
+    return {"number": value}
+
+
+def read_number(page: dict[str, Any], prop: str) -> float | None:
+    return (page.get("properties", {}).get(prop) or {}).get("number")
+
+
 def read_checkbox(page: dict[str, Any], prop: str) -> bool:
     return bool((page.get("properties", {}).get(prop) or {}).get("checkbox"))
 

@@ -43,6 +43,7 @@ class AgendaItem:
     project_ids: tuple[str, ...] = ()
     recurring: bool = False
     category: str | None = None
+    order: float | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,18 @@ class AgendaService:
 
     # -- reads -------------------------------------------------------------
 
+    def _sorts(self) -> list[dict]:
+        """Date first, then the manual Order within a day.
+
+        Every listing shares this, because the numbers people read off one
+        message and type into another only line up if the order is the same
+        everywhere.
+        """
+        sorts = [{"property": self.props.date, "direction": "ascending"}]
+        if self.props.order:
+            sorts.append({"property": self.props.order, "direction": "ascending"})
+        return sorts
+
     def _to_item(self, page: dict) -> AgendaItem:
         p = self.props
         return AgendaItem(
@@ -103,6 +116,7 @@ class AgendaService:
             project_ids=tuple(n.read_relation_ids(page, p.project)) if p.project else (),
             recurring=n.read_checkbox(page, p.recurring) if p.recurring else False,
             category=n.read_select(page, p.category) if p.category else None,
+            order=n.read_number(page, p.order) if p.order else None,
         )
 
     async def items_between(self, start: date, end: date) -> list[AgendaItem]:
@@ -114,11 +128,9 @@ class AgendaService:
                 {"property": self.props.date, "date": {"on_or_before": end.isoformat()}},
             ]
         }
-        sorts = [{"property": self.props.date, "direction": "ascending"}]
-        return [
-            self._to_item(page)
-            async for page in self._client.query(ds, filter=query_filter, sorts=sorts)
-        ]
+        return [self._to_item(page) async for page in self._client.query(
+            ds, filter=query_filter, sorts=self._sorts()
+        )]
 
     async def items_on(self, day: date) -> list[AgendaItem]:
         return await self.items_between(day, day)
@@ -130,11 +142,9 @@ class AgendaService:
             "property": self.props.date,
             "date": {"before": today.isoformat()},
         }
-        sorts = [{"property": self.props.date, "direction": "ascending"}]
-        items = [
-            self._to_item(page)
-            async for page in self._client.query(ds, filter=query_filter, sorts=sorts)
-        ]
+        items = [self._to_item(page) async for page in self._client.query(
+            ds, filter=query_filter, sorts=self._sorts()
+        )]
         return [i for i in items if not i.done]
 
     # -- writes ------------------------------------------------------------
@@ -204,6 +214,40 @@ class AgendaService:
             done=done,
         )
         await self._client.update_page(page_id, {self.props.status: payload})
+
+    async def reorder(self, day: date, sequence: list[int]) -> list[AgendaItem]:
+        """Rearrange one day, given positions in its current order.
+
+        A partial sequence is allowed: the positions named move to the front in
+        the order given, and everything else keeps its relative order behind
+        them. `/reorder 5,1` means "these two first" rather than requiring the
+        whole day be retyped.
+
+        Every row is renumbered from 1, including the untouched ones, so the
+        day ends up with a contiguous order rather than a mix of set and unset
+        values that sort unpredictably.
+        """
+        if not self.props.order:
+            raise RuntimeError(
+                "No Order property configured. Add a number property to the "
+                "database and set [agenda.props] order in alliegent.toml."
+            )
+
+        items = await self.items_on(day)
+        picked = [items[position - 1] for position in sequence]
+        chosen = {item.id for item in picked}
+        rest = [item for item in items if item.id not in chosen]
+
+        arranged = picked + rest
+        for index, item in enumerate(arranged, start=1):
+            if item.order != index:
+                await self.set_order(item.id, index)
+        return arranged
+
+    async def set_order(self, page_id: str, position: int) -> None:
+        await self._client.update_page(
+            page_id, {self.props.order: n.number(position)}
+        )
 
     async def trash(self, page_id: str) -> None:
         """Move an item to Notion's trash — recoverable, not a hard delete."""

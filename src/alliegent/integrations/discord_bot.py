@@ -420,6 +420,31 @@ def _register(bot: AlliegentBot) -> None:
             f"{reports.fmt_date(target)}"
         )
 
+    @tree.command(name="reorder", description="Rearrange a day by listed numbers")
+    @app_commands.describe(
+        order="New order, e.g. 3,1,2. Numbers you leave out keep their relative order",
+        when="Which day (defaults to today)",
+    )
+    async def reorder_cmd(
+        interaction: discord.Interaction, order: str, when: str | None = None
+    ) -> None:
+        await interaction.response.defer()
+        resolved = await _resolve(bot, interaction, order, when)
+        if resolved is None:
+            return
+        _, day = resolved
+
+        try:
+            sequence = parse_numbers(order)
+        except ValueError as exc:
+            await interaction.followup.send(f"⚠️ {exc}")
+            return
+
+        arranged = await bot.agenda.reorder(day, sequence)
+        await _deliver(
+            bot, interaction, reports.day_list(day, arranged, today=bot.today()), "agenda"
+        )
+
     @tree.command(name="overdue", description="Show overdue, unfinished items")
     async def overdue_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.defer()

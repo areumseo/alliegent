@@ -24,6 +24,7 @@ EXPECTED = {
     "done",
     "delete",
     "move",
+    "reorder",
     "overdue",
     "projects",
     "brief",
@@ -184,6 +185,7 @@ COMMAND_CHANNELS = {
     "brief": "agenda",
     "projects": "projects",
     "news": "news",
+    "reorder": "agenda",
 }
 
 # Short write confirmations answer in place: routing a one-line "Added — X"
