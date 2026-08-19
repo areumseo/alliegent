@@ -147,7 +147,9 @@ Fly is no longer where this runs — the mini replaced it, and the machines were
 
 **Only ever run one instance.** Two copies of the bot both hold a gateway connection and both run the scheduler, so every scheduled message is posted twice and slash commands race: whichever loses the race logs `404 (10062) Unknown interaction` followed by `400 (40060) Interaction has already been acknowledged`. That pair in the log means a second instance is running somewhere, not a bug in the command.
 
-This is exactly how the mini migration went wrong: `fly scale count 0` was run, but machines were present and `started` afterwards, and Fly kept serving alongside the mini until the duplicate posts gave it away. `fly status` is the check — not the fact that a scale command was issued.
+This is exactly how the mini migration went wrong, twice. `fly scale count 0` was run, but machines were present and `started` afterwards, and Fly kept serving alongside the mini until the duplicate posts gave it away. Destroying them didn't hold either: `.github/workflows/fly-deploy.yml` deployed on every push to `main`, so the next commit rebuilt the machines within a minute — including the commit that documented them as destroyed.
+
+That workflow is now `workflow_dispatch` only. With the mini pulling `main` itself, a push is already a deploy, and a second automatic one lands a second bot. `fly status` showing no machines is the check — not that a scale or destroy command was issued at some point.
 
 
 ```bash
