@@ -102,6 +102,8 @@ class Jobs:
         from .integrations.claude import NewsUnavailable, fetch_ai_news
 
         today = self.today()
+        # The one job that costs money per run, so the call is on the record.
+        log.info("requesting the AI news digest")
         try:
             body = await fetch_ai_news(
                 self._anthropic_api_key, today, count=self.config.news.count
@@ -153,6 +155,12 @@ class Jobs:
             log.info("nothing to report for %s; staying quiet", kind)
             return
         await self.notify(message, kind)
+        # Logged on every send so "did this go out once or twice?" is a
+        # question the log can answer. A second instance is invisible from
+        # inside either one -- each looks perfectly healthy -- and for the
+        # news digest a duplicate is a duplicate model call, so the count
+        # is worth being able to check.
+        log.info("sent %s to the %s channel", kind, kind)
 
     async def run_daily_brief(self) -> None:
         await self._send(await self.build_daily_brief(), "agenda")

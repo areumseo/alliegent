@@ -13,6 +13,7 @@ lives in the prompt and nothing here can fail to parse.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import date
@@ -21,10 +22,14 @@ log = logging.getLogger(__name__)
 
 ITEM_START = re.compile(r"^\*\*\d+\.", re.MULTILINE)
 
-MODEL = "claude-opus-5"
+MODEL = "claude-sonnet-5"
 # Ten items at two or three sentences each, in two languages, plus the model's
 # own thinking — 8000 truncated the list mid-item.
 MAX_TOKENS = 16000
+# A ceiling on the whole call, searches included. Nothing downstream waits on
+# this -- a missing digest is a non-event -- so it is better to give up than to
+# keep a paid request alive indefinitely.
+TIMEOUT_SECONDS = 15 * 60
 
 SYSTEM = """\
 You produce a daily AI news digest for one reader, delivered to Discord.
@@ -157,22 +162,32 @@ async def fetch_ai_news(api_key: str, today: date, count: int = 10) -> str:
     """Return the digest body, or raise NewsUnavailable."""
     from anthropic import AsyncAnthropic
 
-    client = AsyncAnthropic(api_key=api_key)
+    # No retries. A retry here is not a cheap repeat: it re-runs the searches
+    # and rewrites the digest, at full price, for a job whose whole output is
+    # one message that nobody is waiting on. Failing once and staying quiet is
+    # the cheaper wrong answer.
+    client = AsyncAnthropic(api_key=api_key, max_retries=0)
     try:
-        response = await client.beta.messages.create(
+        # Streamed, because a non-streaming request this size sits on one open
+        # HTTP connection until the whole digest is written -- twenty searches
+        # plus ten two-language summaries -- and runs into the SDK's ten-minute
+        # timeout. The SDK then retries twice, so a job that looked merely slow
+        # was really one request billed three times over half an hour.
+        async with asyncio.timeout(TIMEOUT_SECONDS), client.messages.stream(
             model=MODEL,
             max_tokens=MAX_TOKENS,
             system=SYSTEM.format(count=count),
             # Routine daily summarisation; the selection judgement matters more
             # than reasoning depth, and this runs every morning.
             output_config={"effort": "medium"},
-            # Finding ten stories worth reporting takes more than a handful of
-            # searches; too low a cap silently yields a short digest.
-            tools=[{"type": "web_search_20260209", "name": "web_search", "max_uses": 20}],
-            # Opus 5's safety classifiers can decline a request outright; this
-            # re-runs it on the recommended fallback instead of returning nothing.
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
+            # Enough searches to find the stories, capped so a bad search day
+            # cannot spend the morning looking.
+            tools=[
+                {"type": "web_search_20260209", "name": "web_search", "max_uses": 12}
+            ],
+            # No `fallbacks` here: Sonnet 5 rejects the parameter outright
+            # (400), so a refusal just means no digest today -- which the
+            # stop_reason check below turns into silence rather than a crash.
             messages=[
                 {
                     "role": "user",
@@ -181,11 +196,20 @@ async def fetch_ai_news(api_key: str, today: date, count: int = 10) -> str:
                     ),
                 }
             ],
-        )
+        ) as stream:
+            response = await stream.get_final_message()
+    except TimeoutError as exc:
+        raise NewsUnavailable(f"timed out after {TIMEOUT_SECONDS}s") from exc
     except Exception as exc:  # network, auth, rate limit
         raise NewsUnavailable(f"{type(exc).__name__}: {exc}") from exc
     finally:
         await client.close()
+
+    log.info(
+        "news digest: %s in, %s out",
+        response.usage.input_tokens,
+        response.usage.output_tokens,
+    )
 
     # Check stop_reason before reading content — a refusal returns HTTP 200
     # with empty or partial content, so indexing content[0] would break here.
