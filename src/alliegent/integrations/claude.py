@@ -42,7 +42,8 @@ Link to reporting, not to changelogs. A vendor's release-notes page, a docs
 page, or an aggregator listing is not a story: if the news is a product
 release, find an article about it, and only fall back to the vendor's own
 announcement post if no coverage exists. A title like "Release Notes" or
-"Latest Updates" means you picked the wrong page — search again.
+"Latest Updates" means you picked the wrong page — search again. Two items must never share a
+URL: one link covering two stories means it is a listing page, not reporting.
 
 Select the {count} most significant items. Significance means: it changes what
 someone building with AI can do, how much it costs, or what the competitive
@@ -177,13 +178,18 @@ async def fetch_ai_news(api_key: str, today: date, count: int = 10) -> str:
             model=MODEL,
             max_tokens=MAX_TOKENS,
             system=SYSTEM.format(count=count),
-            # Routine daily summarisation; the selection judgement matters more
-            # than reasoning depth, and this runs every morning.
-            output_config={"effort": "medium"},
+            # Low effort: choosing and summarising the day's stories is not a
+            # reasoning problem. Measured at ~50s against 18+ minutes on medium
+            # with twice the searches, for the same digest.
+            output_config={"effort": "low"},
             # Enough searches to find the stories, capped so a bad search day
             # cannot spend the morning looking.
+            # Searches are what this job costs: each one pours a page of
+            # results into the input, and a measured run spent 89k input
+            # tokens against 1.4k of output. Eight buys usable links without
+            # the runaway -- twelve did not finish inside eighteen minutes.
             tools=[
-                {"type": "web_search_20260209", "name": "web_search", "max_uses": 12}
+                {"type": "web_search_20260209", "name": "web_search", "max_uses": 8}
             ],
             # No `fallbacks` here: Sonnet 5 rejects the parameter outright
             # (400), so a refusal just means no digest today -- which the
