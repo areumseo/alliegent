@@ -143,7 +143,11 @@ It skips entirely when the working tree on the mini is dirty. Editing directly o
 
 ### 5. Deploy to Fly.io
 
-Fly is no longer where this runs — the mini replaced it, and the machine is scaled to zero (`fly scale count 0`). Kept for reference in case it moves back.
+Fly is no longer where this runs — the mini replaced it, and the machines were destroyed on 2026-08-19. The app and its secrets still exist, so `fly deploy` would bring it back; these notes are kept for that case.
+
+**Only ever run one instance.** Two copies of the bot both hold a gateway connection and both run the scheduler, so every scheduled message is posted twice and slash commands race: whichever loses the race logs `404 (10062) Unknown interaction` followed by `400 (40060) Interaction has already been acknowledged`. That pair in the log means a second instance is running somewhere, not a bug in the command.
+
+This is exactly how the mini migration went wrong: `fly scale count 0` was run, but machines were present and `started` afterwards, and Fly kept serving alongside the mini until the duplicate posts gave it away. `fly status` is the check — not the fact that a scale command was issued.
 
 
 ```bash
