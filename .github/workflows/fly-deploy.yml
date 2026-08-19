@@ -1,11 +1,12 @@
 # See https://fly.io/docs/app-guides/continuous-deployment-with-github-actions/
 
 name: Fly Deploy
+# Manual only. This bot runs on the Mac mini, which pulls main itself, so
+# deploying on push would put a second instance on Fly -- and two instances
+# post every scheduled message twice. Run this from the Actions tab only if
+# Fly is deliberately taking over again, and stop the mini first.
 on:
-  push:
-    branches:
-      - main
-      - master
+  workflow_dispatch:
 jobs:
   deploy:
     name: Deploy app
