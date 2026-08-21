@@ -33,7 +33,7 @@ weekly_review_time = "21:00"
 [news]
 # How many stories the digest aims for. The model returns fewer when fewer
 # clear its significance bar, which is intended — padding is worse.
-count = 7
+count = 5
 
 [agenda]
 # Length of the week the scaffolding job fills in.

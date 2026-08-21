@@ -90,7 +90,7 @@ class Jobs:
         return reports.stale_projects(stale)
 
     async def build_ai_news(self) -> str | None:
-        """Fetch and format today's AI news digest.
+        """Collect yesterday's AI articles and write the digest.
 
         Returns None when the digest can't be produced. A missing morning
         digest is a non-event; a stack trace in the news channel is not.
@@ -99,19 +99,30 @@ class Jobs:
             log.warning("ANTHROPIC_API_KEY not set — AI news is disabled")
             return None
 
-        from .integrations.claude import NewsUnavailable, fetch_ai_news
+        from .integrations.claude import NewsUnavailable, write_digest
+        from .integrations.news_feeds import entries_for, recent_window, stale_feeds
 
-        today = self.today()
+        # Yesterday, not today: at nine in the morning the day's own stories
+        # have barely been filed, and the reader wants the day they just had.
+        day = recent_window(self.today())
+        entries = await entries_for(day, self.config.tz)
+
+        quiet = stale_feeds(entries)
+        if quiet:
+            # A feed that moves or dies goes silent rather than failing, and
+            # the digest stays plausible while quietly losing a publication.
+            log.warning("no articles from: %s", ", ".join(quiet))
+
         # The one job that costs money per run, so the call is on the record.
-        log.info("requesting the AI news digest")
+        log.info("writing the AI news digest from %d articles", len(entries))
         try:
-            body = await fetch_ai_news(
-                self._anthropic_api_key, today, count=self.config.news.count
+            body = await write_digest(
+                self._anthropic_api_key, day, entries, count=self.config.news.count
             )
         except NewsUnavailable as exc:
             log.error("AI news unavailable: %s", exc)
             return None
-        return reports.ai_news(today, body)
+        return reports.ai_news(day, body)
 
     async def build_weekly_planning(self) -> str:
         """Nudge to plan the coming week, with what is already in it.

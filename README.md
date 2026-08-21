@@ -212,29 +212,24 @@ Writing is opt-in and narrow. `ICLOUD_WRITE_CALENDAR` names the one calendar new
 
 ## The AI news digest
 
-Claude searches the web itself (the server-side `web_search` tool) rather than reading a curated RSS list — there is no feed set to maintain, no dedup or ranking code, and no feed that can die quietly. One API call covers finding, selecting, summarising, and translating.
+At 09:00 the digest covers **yesterday** — at nine in the morning the day's own stories have barely been filed, and the day that just finished is the one worth reading about.
 
-Each story gets its English headline, the link, and a three-sentence summary in English and again in Korean:
+Stories come from the feeds listed in `news_feeds.py` (TechCrunch, The Verge, Ars Technica, VentureBeat, MIT Technology Review). The model picks five and writes them up in English and Korean; it does not go looking for news itself.
 
-```
-**1. OpenAI says it slowed Astra model development over security concerns**
-https://techcrunch.com/2026/08/07/...
-🇺🇸 OpenAI said it deliberately slowed development and release of its next
-major model after internal evaluations flagged it as potentially reaching
-"critical" capability in cybersecurity. …
+**It used to search, and that is worth knowing about before changing it back.** Letting the model search read well, but every search result stayed in its context and was re-read on each following step, so the input grew with roughly the square of the search count. One digest measured anywhere from 89k to 437k input tokens with no way to predict which, and on 2026-08-21 the call ran past its fifteen-minute ceiling and delivered nothing at all. Below about seven searches the model would rather stop than guess, and it started citing "top AI news today" roundups instead of articles.
 
-🇰🇷 OpenAI가 차기 주력 모델의 개발과 공개를 의도적으로 늦췄다고 밝혔습니다. …
-```
+Reading feeds instead fixes those by construction rather than by tuning:
 
-The model is asked for `EN:` / `KO:` labels — they make the field boundaries unambiguous for the cleanup below — and they are swapped for flags before sending, with the Korean summary on its own paragraph so the two don't read as one block.
+| | Search | Feeds |
+| --- | --- | --- |
+| Input tokens | 89k–437k, unpredictable | ~1.2k |
+| Time | 5–15+ min, sometimes never | under a minute |
+| "Yesterday" | an instruction to honour | a filter on the feed's own date |
+| Links | sometimes roundup pages | always the article |
 
-The model returns the finished message rather than JSON. Structured outputs are incompatible with the citations the search tool produces, and a parse failure at 09:00 would mean no digest at all, so the format lives in the prompt (`src/alliegent/integrations/claude.py`). To change how the digest reads — length, tone, what counts as significant — edit the prompt.
+The cost is a list to maintain. A feed that moves or dies goes quiet rather than failing, so any feed contributing nothing is named in a `no articles from:` warning — worth reading if the digest starts looking thin.
 
-What the prompt asks for is not left to trust. `_clean()` drops anything before the first item and after the last summary, so a stray "I'll search for the latest AI news." can't survive at the top of every morning's digest, and folds back the line breaks that citations insert mid-sentence.
-
-This is the only feature that needs `ANTHROPIC_API_KEY`. Leave it unset and the job is skipped with a warning; everything else still runs. Cost is roughly $8/month on Opus 5 at one digest a day, plus web search usage — the input side dominates, since the search results are far larger than the summary.
-
-When the digest can't be produced — no key, rate limit, refusal — nothing is posted. A missing digest is a non-event; a stack trace in the news channel is not.
+Delivery is Discord, plus Gmail if `AI_NEWS_EMAIL_TO` is set.
 
 ## The agenda database
 
