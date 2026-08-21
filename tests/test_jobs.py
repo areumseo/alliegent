@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
+from alliegent import reports
 from alliegent.agenda import AgendaService, ProjectService
 from alliegent.config import Config
+from alliegent.integrations import news_feeds
 from alliegent.jobs import Jobs
 from alliegent.scheduler import build_scheduler
 
@@ -76,6 +78,25 @@ async def test_scaffold_commit_writes_rows():
     assert len(client.created) == 1
 
 
+def _entry(title: str = "A thing shipped", url: str = "https://example.com/a"):
+    return news_feeds.Entry(
+        title=title,
+        url=url,
+        source="example.com",
+        published=datetime(2026, 8, 8, 9, 0, tzinfo=UTC),
+        summary="Details.",
+    )
+
+
+def _stub_feeds(monkeypatch, entries=None):
+    """Keep the news tests off the network -- feeds are covered separately."""
+
+    async def entries_for(day, tz, **kwargs):
+        return entries if entries is not None else [_entry()]
+
+    monkeypatch.setattr(news_feeds, "entries_for", entries_for)
+
+
 async def test_ai_news_stays_silent_without_an_api_key():
     """No key means the feature is off, not that the channel gets an error."""
     jobs, sent, _ = build()
@@ -90,7 +111,8 @@ async def test_ai_news_stays_silent_when_the_digest_fails(monkeypatch):
     async def boom(*args, **kwargs):
         raise claude.NewsUnavailable("rate limited")
 
-    monkeypatch.setattr(claude, "fetch_ai_news", boom)
+    monkeypatch.setattr(claude, "write_digest", boom)
+    _stub_feeds(monkeypatch)
     jobs, sent, _ = build(anthropic_api_key="sk-test")
     await jobs.run_ai_news()
     assert sent == []
@@ -99,10 +121,11 @@ async def test_ai_news_stays_silent_when_the_digest_fails(monkeypatch):
 async def test_ai_news_posts_to_the_news_channel(monkeypatch):
     from alliegent.integrations import claude
 
-    async def digest(api_key, today, count=10):
+    async def digest(api_key, day, entries, count=5):
         return "**1. Something happened**\nhttps://example.com\nEN: x\nKO: x"
 
-    monkeypatch.setattr(claude, "fetch_ai_news", digest)
+    monkeypatch.setattr(claude, "write_digest", digest)
+    _stub_feeds(monkeypatch)
     jobs, sent, _ = build(anthropic_api_key="sk-test")
     await jobs.run_ai_news()
     message, kind = sent[0]
@@ -111,16 +134,54 @@ async def test_ai_news_posts_to_the_news_channel(monkeypatch):
     assert "AI News" in message
 
 
+async def test_ai_news_is_dated_the_day_it_covers(monkeypatch):
+    """The digest reports yesterday, so the header must say yesterday -- a
+    09:00 digest headed with today would read as stale news, not fresh."""
+    from alliegent.integrations import claude
+
+    async def digest(api_key, day, entries, count=5):
+        return f"**1. On {day.isoformat()}**\nhttps://example.com\nEN: x\nKO: x"
+
+    monkeypatch.setattr(claude, "write_digest", digest)
+    _stub_feeds(monkeypatch)
+    jobs, sent, _ = build(anthropic_api_key="sk-test")
+    await jobs.run_ai_news()
+    yesterday = jobs.today() - timedelta(days=1)
+    assert yesterday.isoformat() in sent[0][0]
+    assert reports.fmt_date(yesterday) in sent[0][0]
+
+
+async def test_ai_news_asks_the_feeds_for_yesterday(monkeypatch):
+    from alliegent.integrations import claude
+
+    asked = {}
+
+    async def entries_for(day, tz, **kwargs):
+        asked["day"] = day
+        return [_entry()]
+
+    monkeypatch.setattr(news_feeds, "entries_for", entries_for)
+
+    async def digest(api_key, day, entries, count=5):
+        return "body"
+
+    monkeypatch.setattr(claude, "write_digest", digest)
+    jobs, _, _ = build(anthropic_api_key="sk-test")
+    await jobs.run_ai_news()
+    assert asked["day"] == jobs.today() - timedelta(days=1)
+
+
 async def test_ai_news_passes_the_configured_count(monkeypatch):
     from alliegent.integrations import claude
 
     seen = {}
 
-    async def digest(api_key, today, count=10):
+    async def digest(api_key, day, entries, count=5):
         seen["count"] = count
         return "body"
 
-    monkeypatch.setattr(claude, "fetch_ai_news", digest)
+    monkeypatch.setattr(claude, "write_digest", digest)
+    _stub_feeds(monkeypatch)
     jobs, _, _ = build(anthropic_api_key="sk-test")
     jobs.config.news.count = 5
     await jobs.run_ai_news()

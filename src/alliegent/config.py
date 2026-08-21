@@ -190,7 +190,9 @@ class ProjectsConfig(BaseModel):
 
 
 class NewsConfig(BaseModel):
-    count: int = 10
+    # Five items of three sentences in two languages is most of the output
+    # tokens this job spends, and the digest is read on a phone.
+    count: int = 5
 
 
 class Config(BaseModel):

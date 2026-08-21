@@ -1,14 +1,18 @@
-"""Daily AI news digest, via Claude with the server-side web search tool.
+"""Turn a day's collected articles into the Discord news digest.
 
-Why search rather than RSS: a feed list has to be curated, deduplicated, and
-ranked by hand, and a dead feed fails silently. Letting the model search means
-one API call covers finding, selecting, summarising, and translating — and
-there is no feed list to rot.
+The articles are gathered from publication feeds (see `news_feeds`) rather
+than found by the model. Search cost between 89k and 437k input tokens per
+run, varied without warning, and some mornings never finished; a feed list
+costs about 1.2k input tokens and the article's own publication date decides
+what counts as yesterday.
+
+So the model's job here is judgement and language, not retrieval: pick the
+items that matter out of a supplied list, and write them up in English and
+Korean. It cannot invent a link, because it never goes looking for one.
 
 The model returns the finished Discord message rather than JSON. Structured
-outputs are incompatible with citations, which the web search tool produces,
-and a parse failure at 09:00 would mean no digest at all — so the formatting
-lives in the prompt and nothing here can fail to parse.
+outputs would add a parse step whose failure at 09:00 means no digest at all,
+so the formatting lives in the prompt and nothing here can fail to parse.
 """
 
 from __future__ import annotations
@@ -16,7 +20,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Sequence
 from datetime import date
+
+from .news_feeds import Entry
 
 log = logging.getLogger(__name__)
 
@@ -34,16 +41,9 @@ TIMEOUT_SECONDS = 15 * 60
 SYSTEM = """\
 You produce a daily AI news digest for one reader, delivered to Discord.
 
-Search the web for the most significant AI news from the last 24 hours. Prefer
-English-language sources — they publish earlier and in more depth than Korean
-coverage of the same stories.
-
-Link to reporting, not to changelogs. A vendor's release-notes page, a docs
-page, or an aggregator listing is not a story: if the news is a product
-release, find an article about it, and only fall back to the vendor's own
-announcement post if no coverage exists. A title like "Release Notes" or
-"Latest Updates" means you picked the wrong page — search again. Two items must never share a
-URL: one link covering two stories means it is a listing page, not reporting.
+You are given every AI article published on {day} by a handful of technology
+publications. Work only from that list. Do not add stories from memory, and do
+not alter a headline or a URL -- both are quoted from the article itself.
 
 Select the {count} most significant items. Significance means: it changes what
 someone building with AI can do, how much it costs, or what the competitive
@@ -55,8 +55,8 @@ speculation with no new facts, and stories where the only news is that someone
 commented on an earlier story. Never include the same story twice from two
 outlets.
 
-Your entire reply is the digest itself. No preamble, no narration of your
-searching, no closing note about coverage or quota. Start at "**1." and stop
+Your entire reply is the digest itself. No preamble, no narration of how you
+chose, no closing note about coverage or quota. Start at "**1." and stop
 after the last KO line.
 
 Output format — plain text, exactly this shape for each item, separated by a
@@ -69,7 +69,10 @@ EN: <three sentences: what happened, the specifics that matter (numbers,
 KO: <the same content in Korean — not a shorter version>
 
 Rules:
-- Use the article's real headline and real URL. Never invent either.
+- Copy the headline and URL exactly as given. Never invent or edit either.
+- Work only from the supplied summaries. Where one is too thin to write three
+  sentences from, say what the article says and stop -- inventing the
+  specifics would be worse than a shorter entry.
 - Write enough that the reader does not need to open the link to know what
   happened. Include the concrete details — who, how much, when, what exactly
   shipped — rather than gesturing at them. A summary that could describe any
@@ -82,8 +85,8 @@ Rules:
   the plain 해라체 (-했다, -이다) that news articles use.
 - No markdown headers, no bullet characters, no numbered-list syntax beyond the
   bold number shown above.
-- If you find fewer than {count} items that clear the significance bar, return
-  fewer. Padding the list is worse than a short list.\
+- If fewer than {count} items clear the significance bar, return fewer.
+  Padding the list is worse than a short list.\
 """
 
 
@@ -159,38 +162,35 @@ def _clean(text: str) -> str:
     return "\n".join(rendered).strip()
 
 
-async def fetch_ai_news(api_key: str, today: date, count: int = 10) -> str:
-    """Return the digest body, or raise NewsUnavailable."""
+async def write_digest(
+    api_key: str, day: date, entries: Sequence[Entry], count: int = 5
+) -> str:
+    """Write the digest for `day` from articles already collected.
+
+    Raises NewsUnavailable rather than returning a partial digest: the caller
+    stays quiet, which is the right outcome for a message nobody is waiting on.
+    """
     from anthropic import AsyncAnthropic
 
-    # No retries. A retry here is not a cheap repeat: it re-runs the searches
-    # and rewrites the digest, at full price, for a job whose whole output is
-    # one message that nobody is waiting on. Failing once and staying quiet is
-    # the cheaper wrong answer.
+    if not entries:
+        raise NewsUnavailable(f"no articles published {day.isoformat()}")
+
+    # No retries. A retry rewrites the whole digest at full price for a message
+    # nobody is waiting on; failing once and staying quiet is cheaper.
     client = AsyncAnthropic(api_key=api_key, max_retries=0)
+    article_list = "\n".join(entry.as_prompt_line() for entry in entries)
     try:
-        # Streamed, because a non-streaming request this size sits on one open
-        # HTTP connection until the whole digest is written -- twenty searches
-        # plus ten two-language summaries -- and runs into the SDK's ten-minute
-        # timeout. The SDK then retries twice, so a job that looked merely slow
-        # was really one request billed three times over half an hour.
+        # Streamed: the digest itself is thousands of output tokens, and a
+        # non-streaming request that size sat on one connection until it hit
+        # the SDK's ten-minute timeout -- which the SDK then retried twice,
+        # billing one digest three times and delivering none of them.
         async with asyncio.timeout(TIMEOUT_SECONDS), client.messages.stream(
             model=MODEL,
             max_tokens=MAX_TOKENS,
-            system=SYSTEM.format(count=count),
-            # Low effort: choosing and summarising the day's stories is not a
-            # reasoning problem. Measured at ~50s against 18+ minutes on medium
-            # with twice the searches, for the same digest.
+            system=SYSTEM.format(count=count, day=day.isoformat()),
+            # Choosing five stories from a list and writing them up is a
+            # judgement and language task, not a reasoning one.
             output_config={"effort": "low"},
-            # Enough searches to find the stories, capped so a bad search day
-            # cannot spend the morning looking.
-            # Searches are what this job costs: each one pours a page of
-            # results into the input, and a measured run spent 89k input
-            # tokens against 1.4k of output. Eight buys usable links without
-            # the runaway -- twelve did not finish inside eighteen minutes.
-            tools=[
-                {"type": "web_search_20260209", "name": "web_search", "max_uses": 8}
-            ],
             # No `fallbacks` here: Sonnet 5 rejects the parameter outright
             # (400), so a refusal just means no digest today -- which the
             # stop_reason check below turns into silence rather than a crash.
@@ -198,7 +198,9 @@ async def fetch_ai_news(api_key: str, today: date, count: int = 10) -> str:
                 {
                     "role": "user",
                     "content": (
-                        f"Today is {today.isoformat()}. Give me today's AI news digest."
+                        f"Articles published {day.isoformat()} "
+                        f"({len(entries)} total):\n\n{article_list}\n\n"
+                        f"Write the digest."
                     ),
                 }
             ],
