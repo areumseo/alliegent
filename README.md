@@ -9,7 +9,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | Job | Default time (Asia/Seoul) | Description |
 | --- | --- | --- |
 | Daily brief | 08:00 daily | Today's items, anything overdue, and active projects, in one message |
-| AI news digest | 09:00 daily | Up to 10 AI stories from the last 24h — English headline and link, three-sentence summary in English and Korean |
+| AI news digest | 09:00 daily | Five of yesterday's AI stories, read from publication feeds — headline and link, three-sentence summary in English and Korean |
 | Incomplete alert | 15:00 and 21:00 daily | Today's unfinished items and anything past its date. Two runs: one while the day can still change, one to close it out |
 | Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
 | Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
@@ -33,7 +33,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/overdue` | Overdue, unfinished items |
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
-| `/news` | Fetch the AI news digest now — acknowledges immediately and posts to the news channel when ready (2–3 min) |
+| `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
 
 Everything the bot shows in Discord is English, so nothing needs an input-method switch. Korean date words are still accepted as `when` values.
 
