@@ -307,3 +307,19 @@ uv run pytest
 ```bash
 uv run ruff check .
 ```
+
+### Secrets and personal data
+
+This repo is public. Enable the hooks once per clone:
+
+```bash
+./scripts/install_hooks.sh
+```
+
+`scripts/check_secrets.sh` then runs before every commit and refuses one that contains a credential-shaped string, an email address, a phone number, a Discord/Notion id, an `.env`/key file, or — the strongest check, and only possible locally — any value that is actually in your `.env`. Run it with `all` to check the whole tree instead of what is staged. It never prints a matched value; scrollback and CI logs are places a secret would spread to.
+
+Two things worth being explicit about:
+
+- **A leaked API token is not protected by the account's passkey or MFA.** The token *is* the authentication, so account-level protection does nothing here. That is why the check runs before the commit rather than in CI: once pushed, a secret is public immediately and stays in the history after any later fix.
+- **Agenda item names are personal data.** A week of them says where someone is and when. Examples and fixtures use invented ones for that reason.
+
