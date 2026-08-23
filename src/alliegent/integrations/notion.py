@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from datetime import date
+from datetime import UTC, date, datetime, time, tzinfo
 from typing import Any
 
 import httpx
@@ -232,8 +232,22 @@ def rich_text(text: str) -> dict[str, Any]:
     return {"rich_text": [{"type": "text", "text": {"content": text}}]}
 
 
-def date_prop(value: date, end: date | None = None) -> dict[str, Any]:
-    payload: dict[str, Any] = {"start": value.isoformat()}
+def date_prop(
+    value: date, end: date | None = None, *, at: time | None = None, tz: tzinfo | None = None
+) -> dict[str, Any]:
+    """A Notion date, with a clock time when the item has one.
+
+    The time is what orders a day, so it is written as a real timestamp with an
+    offset rather than folded into the title. Without `at` this stays a plain
+    date, which Notion shows without a time.
+    """
+    if at is None:
+        payload: dict[str, Any] = {"start": value.isoformat()}
+    else:
+        stamp = datetime.combine(value, at)
+        if tz is not None:
+            stamp = stamp.replace(tzinfo=tz)
+        payload = {"start": stamp.isoformat()}
     if end:
         payload["end"] = end.isoformat()
     return {"date": payload}
@@ -270,6 +284,35 @@ def read_text(page: dict[str, Any], prop: str) -> str:
     value = page.get("properties", {}).get(prop) or {}
     parts = value.get("rich_text") or value.get("title") or []
     return "".join(p.get("plain_text", "") for p in parts).strip()
+
+
+def read_time(page: dict[str, Any], prop: str) -> time | None:
+    """The clock time on a date property, or None when it is a plain date.
+
+    A day's order comes from this, so the distinction matters: no time is not
+    midnight, it means the item is not pinned to an hour.
+    """
+    value = (page.get("properties", {}).get(prop) or {}).get("date")
+    start = (value or {}).get("start") or ""
+    if len(start) <= 10:
+        return None
+    try:
+        return datetime.fromisoformat(start).timetz().replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def read_created(page: dict[str, Any]) -> datetime:
+    """When Notion created the page.
+
+    This is the last word on order within a day: it never changes, so items
+    without a time keep the order they were added in, however many are added
+    later. Notion sets it, so nothing has to be filled in by hand.
+    """
+    raw = page.get("created_time")
+    if not raw:
+        return datetime.min.replace(tzinfo=UTC)
+    return datetime.fromisoformat(raw.replace("Z", "+00:00"))
 
 
 def read_date(page: dict[str, Any], prop: str) -> date | None:

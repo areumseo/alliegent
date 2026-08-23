@@ -10,7 +10,7 @@ import logging
 import re
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 from .config import Config
 from .integrations import notion as n
@@ -43,7 +43,28 @@ class AgendaItem:
     project_ids: tuple[str, ...] = ()
     recurring: bool = False
     category: str | None = None
-    order: float | None = None
+    at: time | None = None
+    created: datetime | None = None
+
+    def sort_key(self) -> tuple:
+        """Where this item sits in its day.
+
+        The clock time decides, because that is the order the day actually
+        happens in, and it is the same value whether the item was added from
+        Notion or from Discord. Items with no time follow the timed ones in
+        the order they were added -- `created` never changes, so adding a task
+        cannot renumber the ones already there.
+
+        Notion cannot do this sort itself: its date sort compares full
+        timestamps, so a row with a time and a row without are never tied and
+        no second sort key is ever consulted.
+        """
+        return (
+            self.day or date.max,
+            self.at is None,
+            self.at or time.min,
+            self.created or datetime.min,
+        )
 
 
 @dataclass(frozen=True)
@@ -93,16 +114,14 @@ class AgendaService:
     # -- reads -------------------------------------------------------------
 
     def _sorts(self) -> list[dict]:
-        """Date first, then the manual Order within a day.
+        """Ask Notion for date order; the exact order is decided here.
 
-        Every listing shares this, because the numbers people read off one
-        message and type into another only line up if the order is the same
-        everywhere.
+        Every listing sorts through `AgendaItem.sort_key`, because the numbers
+        read off one message and typed into another only line up if every
+        message orders the day identically -- and Notion's own sort cannot
+        express "time, then insertion order".
         """
-        sorts = [{"property": self.props.date, "direction": "ascending"}]
-        if self.props.order:
-            sorts.append({"property": self.props.order, "direction": "ascending"})
-        return sorts
+        return [{"property": self.props.date, "direction": "ascending"}]
 
     def _to_item(self, page: dict) -> AgendaItem:
         p = self.props
@@ -116,21 +135,38 @@ class AgendaService:
             project_ids=tuple(n.read_relation_ids(page, p.project)) if p.project else (),
             recurring=n.read_checkbox(page, p.recurring) if p.recurring else False,
             category=n.read_select(page, p.category) if p.category else None,
-            order=n.read_number(page, p.order) if p.order else None,
+            at=n.read_time(page, p.date),
+            created=n.read_created(page),
         )
 
     async def items_between(self, start: date, end: date) -> list[AgendaItem]:
-        """All agenda items with a date in [start, end], inclusive."""
+        """All agenda items dated in [start, end], inclusive, by local date.
+
+        The query asks for a day either side of the range and the range is
+        applied here, because Notion compares date filters as timestamps in
+        UTC. An item at 06:30 on the 24th is 21:30 UTC on the 23rd, so a
+        filter for the 23rd returns it -- and a 06:00 item on the 23rd, being
+        the 22nd in UTC, is missed entirely. Both go unnoticed until items
+        start carrying times, which is exactly what orders a day now.
+        """
         ds = await self.data_source_id()
         query_filter = {
             "and": [
-                {"property": self.props.date, "date": {"on_or_after": start.isoformat()}},
-                {"property": self.props.date, "date": {"on_or_before": end.isoformat()}},
+                {
+                    "property": self.props.date,
+                    "date": {"on_or_after": (start - timedelta(days=1)).isoformat()},
+                },
+                {
+                    "property": self.props.date,
+                    "date": {"on_or_before": (end + timedelta(days=1)).isoformat()},
+                },
             ]
         }
-        return [self._to_item(page) async for page in self._client.query(
+        items = [self._to_item(page) async for page in self._client.query(
             ds, filter=query_filter, sorts=self._sorts()
         )]
+        inside = [i for i in items if i.day is not None and start <= i.day <= end]
+        return sorted(inside, key=AgendaItem.sort_key)
 
     async def items_on(self, day: date) -> list[AgendaItem]:
         return await self.items_between(day, day)
@@ -140,12 +176,15 @@ class AgendaService:
         ds = await self.data_source_id()
         query_filter = {
             "property": self.props.date,
-            "date": {"before": today.isoformat()},
+            # One day wide, then narrowed below: see items_between for why a
+            # timestamp filter cannot be trusted to mean a local date.
+            "date": {"before": (today + timedelta(days=1)).isoformat()},
         }
         items = [self._to_item(page) async for page in self._client.query(
             ds, filter=query_filter, sorts=self._sorts()
         )]
-        return [i for i in items if not i.done]
+        past = (i for i in items if not i.done and i.day is not None and i.day < today)
+        return sorted(past, key=AgendaItem.sort_key)
 
     # -- writes ------------------------------------------------------------
 
@@ -185,6 +224,7 @@ class AgendaService:
         title: str,
         day: date,
         *,
+        at: time | None = None,
         project_id: str | None = None,
         recurring: bool = False,
         category: str | None = None,
@@ -195,7 +235,7 @@ class AgendaService:
             category = await self.guess_category(title, day)
         properties = {
             p.title: n.title(title),
-            p.date: n.date_prop(day),
+            p.date: n.date_prop(day, at=at, tz=self._cfg.tz),
         }
         if project_id and p.project:
             properties[p.project] = n.relation([project_id])
@@ -215,46 +255,25 @@ class AgendaService:
         )
         await self._client.update_page(page_id, {self.props.status: payload})
 
-    async def reorder(self, day: date, sequence: list[int]) -> list[AgendaItem]:
-        """Rearrange one day, given positions in its current order.
+    async def set_time(self, page_id: str, day: date, at: time | None) -> None:
+        """Move an item to a clock time, which is what moves it in the day.
 
-        A partial sequence is allowed: the positions named move to the front in
-        the order given, and everything else keeps its relative order behind
-        them. `/reorder 5,1` means "these two first" rather than requiring the
-        whole day be retyped.
-
-        Every row is renumbered from 1, including the untouched ones, so the
-        day ends up with a contiguous order rather than a mix of set and unset
-        values that sort unpredictably.
+        `at=None` clears the time, sending the item to the end of the day
+        rather than to midnight.
         """
-        if not self.props.order:
-            raise RuntimeError(
-                "No Order property configured. Add a number property to the "
-                "database and set [agenda.props] order in alliegent.toml."
-            )
-
-        items = await self.items_on(day)
-        picked = [items[position - 1] for position in sequence]
-        chosen = {item.id for item in picked}
-        rest = [item for item in items if item.id not in chosen]
-
-        arranged = picked + rest
-        for index, item in enumerate(arranged, start=1):
-            if item.order != index:
-                await self.set_order(item.id, index)
-        return arranged
-
-    async def set_order(self, page_id: str, position: int) -> None:
         await self._client.update_page(
-            page_id, {self.props.order: n.number(position)}
+            page_id, {self.props.date: n.date_prop(day, at=at, tz=self._cfg.tz)}
         )
 
     async def trash(self, page_id: str) -> None:
         """Move an item to Notion's trash — recoverable, not a hard delete."""
         await self._client.trash_page(page_id)
 
-    async def reschedule(self, page_id: str, day: date) -> None:
-        await self._client.update_page(page_id, {self.props.date: n.date_prop(day)})
+    async def reschedule(self, page_id: str, day: date, at: time | None = None) -> None:
+        """Move an item to another day, keeping its time of day."""
+        await self._client.update_page(
+            page_id, {self.props.date: n.date_prop(day, at=at, tz=self._cfg.tz)}
+        )
 
     async def plan_week(self, week_start: date) -> list[tuple[str, date, str | None]]:
         """Work out which recurring items are missing from the given week.

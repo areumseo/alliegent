@@ -3,9 +3,12 @@ without touching Notion or Discord."""
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+import re
+from datetime import date, time, timedelta
 
 from .agenda import AgendaItem, Project
+
+TITLE_HAS_TIME = re.compile(r"\b\d{1,2}(:\d{2})?\s*[ap]m\b|\b\d{1,2}:\d{2}\b", re.IGNORECASE)
 
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 DISCORD_LIMIT = 2000
@@ -14,6 +17,21 @@ MAX_LISTED = 10
 
 def fmt_date(day: date) -> str:
     return f"{WEEKDAYS[day.weekday()]} {day.month}/{day.day}"
+
+
+def fmt_time(at: time) -> str:
+    return f"{at.hour:02d}:{at.minute:02d}"
+
+
+def _with_time(item: AgendaItem) -> str:
+    """The title, prefixed with its time unless the title already says it.
+
+    Times get typed into titles by habit ("Cafe shift 11AM"), and a line reading
+    "11:00 Cafe shift 11AM" is worse than either half alone.
+    """
+    if item.at is None or TITLE_HAS_TIME.search(item.title):
+        return item.title
+    return f"{fmt_time(item.at)} {item.title}"
 
 
 def _bullets(items: list[AgendaItem], *, numbered: bool = False) -> list[str]:
@@ -27,7 +45,7 @@ def _bullets(items: list[AgendaItem], *, numbered: bool = False) -> list[str]:
     for idx, item in enumerate(items, start=1):
         prefix = f"`{idx}.` " if numbered else "• "
         mark = "✅ " if item.done else ""
-        lines.append(f"{prefix}{mark}{item.title}")
+        lines.append(f"{prefix}{mark}{_with_time(item)}")
     return lines
 
 
@@ -40,7 +58,7 @@ def pending_lines(todays: list[AgendaItem]) -> list[str]:
     it in — and completes the wrong task.
     """
     return [
-        f"`{idx}.` {item.title}"
+        f"`{idx}.` {_with_time(item)}"
         for idx, item in enumerate(todays, start=1)
         if not item.done
     ]

@@ -25,11 +25,11 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/today` | Show today's agenda |
 | `/tomorrow` | Show tomorrow's agenda, numbered |
 | `/status [when]` | Completion for a day and the week containing it, plus what's left on it. `when` defaults to today |
-| `/add <task> [when]` | Add an item; its Category is inferred from history. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow` / `tmr` (any capitalisation), `2026-08-15`, `08-15`, or `08/15`; defaults to today |
+| `/add <task> [when] [at]` | Add an item, optionally at a time. Its Category is inferred from history. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow` / `tmr` (any capitalisation), `2026-08-15`, `08-15`, or `08/15`; defaults to today |
 | `/done <numbers> [when]` | Complete items by their listed number — one or several (`3` or `3,5`). `when` picks the day, defaulting to today |
 | `/delete <numbers> [when]` | Move items to Notion's trash by number — recoverable there. Takes `when` the same way |
 | `/move <numbers> <to> [from]` | Move items to another day. `from` defaults to today |
-| `/reorder <order> [when]` | Rearrange a day, e.g. `3,1,2`. Numbers you leave out keep their relative order behind the ones you name |
+| `/time <numbers> <at> [when]` | Set an item's time — `14:00`, `2pm`, `9:30am` — which is what moves it in the day. `none` clears it and sends it to the end |
 | `/overdue` | Overdue, unfinished items |
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
@@ -45,7 +45,7 @@ Numbers are per-day, and `/done` and `/delete` take the day as an argument (`/do
 
 **Commands post to the same channel their scheduled equivalent uses**, wherever you invoke them from — agenda commands to the agenda channel, `/projects` to the projects channel, `/news` to the news channel. Run one from somewhere else and you get a one-line "Posted to #channel" instead, so the archive never splits across whichever channel you happened to be in. Run it from the destination channel and it just answers in place.
 
-`/add`, `/done`, and `/delete` are the exception: they answer where you typed them, since routing a one-line confirmation would turn every write into two messages.
+`/add`, `/done`, `/delete`, `/move`, and `/time` are the exception: they answer where you typed them, since routing a one-line confirmation would turn every write into two messages.
 
 ## Setup
 
@@ -242,7 +242,6 @@ The Weekly Agenda is a Notion database, one row per item:
 | `Status` | status | `Not started` / `In progress` / `Done` |
 | `Recurring` | checkbox | Repeats weekly — the scaffolding job uses these as its template |
 | `Category` | select | Lesson / Work / Exercise / Study / Contact / Personal / Admin — filled in automatically on `/add`, see below |
-| `Order` | number | Position within a day, set by `/reorder` |
 | `Note` | text | Optional |
 
 A database rather than a hand-built page means past weeks accumulate instead of being overwritten, which is what makes the weekly review possible at all. It also means there is no week to "set up" — a date view draws the days on its own.
@@ -253,7 +252,11 @@ A database rather than a hand-built page means past weeks accumulate instead of 
 
 This is a history lookup, not a model call. Which categories exist and what belongs in them are facts about these entries, not something to reason about — and it costs one query rather than an API round trip on every add. The lookback is `category_lookback_days` in `alliegent.toml`.
 
-Notion exposes no row order through its API — a view's order is either a sort rule or a manual arrangement, and neither is reachable. `Order` is how a day gets an order at all: every listing sorts by date and then by it, so the numbers read off one message and typed into another point at the same rows. Items with no `Order` sort after those that have one, which puts newly added items at the end of the day rather than ahead of things placed deliberately. `/reorder` renumbers the whole day contiguously, writing only the rows that actually move.
+**A day is ordered by the clock**, and `Date` carries the time when an item has one. Items without a time follow the timed ones, in the order they were added — Notion's `created_time` settles that, so adding a task can never renumber the ones already listed. That matters because the numbers printed in one message get typed into another (`/done 3`), and while ordering was left to Notion those numbers shifted whenever anything was added.
+
+Ordering therefore has to happen here rather than in the query. Notion's date sort compares full timestamps, so an item with a time and one without are never tied and no second sort key is ever consulted — a `Date, Order` sort silently degrades to `Date` alone. An earlier `Order` number property was removed for that reason.
+
+The same timestamp comparison makes date *filters* unreliable: an item at 06:30 on the 24th is 21:30 UTC on the 23rd, so a query for the 23rd returns it, while a 06:00 item on the 23rd is missed. Queries therefore ask for a day either side and narrow the range in `items_between`. Nothing about this is visible until items start carrying times, which is exactly when it starts to matter.
 
 Any job can be switched off the same way: blank its time in `alliegent.toml`.
 

@@ -125,9 +125,6 @@ class AgendaProps(BaseModel):
     status: str = "Status"
     recurring: str = "Recurring"
     category: str = "Category"
-    # Number property that fixes the within-a-day order. Without it the rows
-    # come back in whatever order Notion returns, which /reorder cannot change.
-    order: str = "Order"
     project: str = ""
 
 

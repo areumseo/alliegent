@@ -24,7 +24,7 @@ EXPECTED = {
     "done",
     "delete",
     "move",
-    "reorder",
+    "time",
     "overdue",
     "projects",
     "brief",
@@ -67,7 +67,7 @@ def test_every_command_has_a_description():
 def test_add_command_options():
     bot = make_bot()
     add = next(c for c in bot.tree.get_commands() if c.name == "add")
-    assert {p.display_name for p in add.parameters} == {"task", "when"}
+    assert {p.display_name for p in add.parameters} == {"task", "when", "at"}
 
 
 def test_descriptions_are_english_too():
@@ -185,12 +185,11 @@ COMMAND_CHANNELS = {
     "brief": "agenda",
     "projects": "projects",
     "news": "news",
-    "reorder": "agenda",
 }
 
 # Short write confirmations answer in place: routing a one-line "Added — X"
 # would turn every write into two messages.
-INLINE_COMMANDS = {"add", "done", "delete", "move"}
+INLINE_COMMANDS = {"add", "done", "delete", "move", "time"}
 
 
 def test_every_command_either_routes_or_is_deliberately_inline():

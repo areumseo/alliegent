@@ -18,7 +18,6 @@ def make_page(
     projects: list[str] | None = None,
     recurring: bool | None = None,
     category: str | None = None,
-    order: float | None = None,
     in_trash: bool = False,
 ) -> dict[str, Any]:
     """Build a Notion page object shaped the way the API returns it."""
@@ -43,13 +42,14 @@ def make_page(
         props["Recurring"] = {"type": "checkbox", "checkbox": recurring}
     if category is not None:
         props["Category"] = {"type": "select", "select": {"name": category}}
-    if order is not None:
-        props["Order"] = {"type": "number", "number": order}
     return {
         "object": "page",
         "id": page_id,
         "url": f"https://notion.so/{page_id}",
         "in_trash": in_trash,
+        # Notion sets this, and it is the last tiebreak when two items on a day
+        # have no time. Tests that care override it.
+        "created_time": "2026-08-01T00:00:00.000Z",
         "properties": props,
     }
 
@@ -127,15 +127,6 @@ class FakeNotionClient:
                 continue
             matched.append(page)
 
-        if sorts and any(s.get("property") == "Order" for s in sorts):
-            # Notion sorts unset numbers last; mirror that or the reorder
-            # tests would pass against ordering the real API never produces.
-            matched.sort(
-                key=lambda pg: (
-                    (pg.get("properties", {}).get("Order") or {}).get("number") is None,
-                    (pg.get("properties", {}).get("Order") or {}).get("number") or 0,
-                )
-            )
         for page in matched:
             yield page
 

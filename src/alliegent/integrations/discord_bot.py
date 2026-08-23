@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Coroutine
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 import discord
@@ -171,6 +172,58 @@ async def _deliver(
     await interaction.followup.send(f"📨 Posted to {name}.")
 
 
+CLEAR_TIME = {"none", "clear", "off", "없음", "-"}
+
+
+def parse_time(text: str | None) -> time | None:
+    """Accept '14:00', '2pm', '2:30 PM', '11AM', or a word meaning no time.
+
+    Returns None both for "nothing given" and for "clear it": in a day ordered
+    by time those are the same thing -- the item goes to the end -- so the
+    caller does not have to tell them apart.
+    """
+    if not text:
+        return None
+    value = text.strip().strip(".!,").strip().casefold().replace(" ", "")
+    if value in CLEAR_TIME:
+        return None
+    match = re.fullmatch(r"(\d{1,2})(?::(\d{2}))?(am|pm)?", value)
+    if not match:
+        raise ValueError(
+            f"Could not read a time from {text!r}. Try 14:00, 2pm, or 9:30am."
+        )
+    hour, minute, meridiem = int(match.group(1)), int(match.group(2) or 0), match.group(3)
+    if meridiem:
+        if not 1 <= hour <= 12:
+            raise ValueError(f"{text!r} is not a valid 12-hour time.")
+        hour = hour % 12 + (12 if meridiem == "pm" else 0)
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        raise ValueError(f"{text!r} is not a valid time.")
+    return time(hour, minute)
+
+
+# Times people write into the task itself: "Cafe shift 11AM", "Dance class 7:10PM".
+TITLE_TIME = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b", re.IGNORECASE)
+
+
+def time_in_title(title: str) -> time | None:
+    """The clock time written into a title, if there is one.
+
+    Items get typed as "Cafe shift 11AM" out of habit, and that reading is already
+    the time the item happens at -- taking it means the day sorts correctly
+    without anyone learning a new argument.
+    """
+    match = TITLE_TIME.search(title)
+    if not match:
+        return None
+    try:
+        return parse_time(
+            f"{match.group(1)}:{match.group(2) or '00'}{match.group(3).lower()}"
+        )
+    except ValueError:
+        return None
+
+
 def parse_day(text: str | None, today: date) -> date:
     """Accept 'today', 'tomorrow', 'MM-DD', 'YYYY-MM-DD', or the Korean
     equivalents, which are shorter to type on a Korean keyboard."""
@@ -317,20 +370,31 @@ def _register(bot: AlliegentBot) -> None:
         # This is the only place a user finds out Korean words work, so they
         # belong here and not just in the README.
         when="오늘 / 내일 / 모레 / today / tomorrow / 2026-08-15 / 08-15 (default: today)",
+        at="Time of day, e.g. 14:00 or 2pm. Without one it goes to the end of the day",
     )
     async def add_cmd(
-        interaction: discord.Interaction, task: str, when: str | None = None
+        interaction: discord.Interaction,
+        task: str,
+        when: str | None = None,
+        at: str | None = None,
     ) -> None:
         await interaction.response.defer()
         try:
             day = parse_day(when, bot.today())
+            # A time typed into the task itself ("Cafe shift 11AM") is the same
+            # information, so it counts -- otherwise the habit of writing it
+            # there would quietly leave the day unordered.
+            clock = parse_time(at) or time_in_title(task)
         except ValueError as exc:
             await interaction.followup.send(f"⚠️ {exc}")
             return
-        item = await bot.agenda.add_item(task, day, infer_category=True)
+        item = await bot.agenda.add_item(task, day, at=clock, infer_category=True)
         filed = f" · {item.category}" if item.category else ""
+        when_text = reports.fmt_date(day)
+        if clock:
+            when_text += f" {reports.fmt_time(clock)}"
         await interaction.followup.send(
-            f"✅ Added — **{item.title}** ({reports.fmt_date(day)}{filed})"
+            f"✅ Added — **{item.title}** ({when_text}{filed})"
         )
 
     @tree.command(name="done", description="Mark items done by their listed number")
@@ -420,7 +484,7 @@ def _register(bot: AlliegentBot) -> None:
             return
 
         for item in chosen:
-            await bot.agenda.reschedule(item.id, target)
+            await bot.agenda.reschedule(item.id, target, item.at)
         titles = ", ".join(f"**{i.title}**" for i in chosen)
         # Both dates: moving is the one write whose result is invisible on the
         # day you ran it from, so the message has to say where things went.
@@ -429,29 +493,37 @@ def _register(bot: AlliegentBot) -> None:
             f"{reports.fmt_date(target)}"
         )
 
-    @tree.command(name="reorder", description="Rearrange a day by listed numbers")
+    @tree.command(name="time", description="Set or clear an item's time of day")
     @app_commands.describe(
-        order="New order, e.g. 3,1,2. Numbers you leave out keep their relative order",
+        numbers="Which items, by their listed number (3 or 3,5)",
+        at="14:00, 2pm, 9:30am, or 'none' to clear it and send it to the end",
         when="Which day (defaults to today)",
     )
-    async def reorder_cmd(
-        interaction: discord.Interaction, order: str, when: str | None = None
+    async def time_cmd(
+        interaction: discord.Interaction,
+        numbers: str,
+        at: str,
+        when: str | None = None,
     ) -> None:
         await interaction.response.defer()
-        resolved = await _resolve(bot, interaction, order, when)
+        resolved = await _resolve(bot, interaction, numbers, when)
         if resolved is None:
             return
-        _, day = resolved
+        items, day = resolved
 
         try:
-            sequence = parse_numbers(order)
+            clock = parse_time(at)
         except ValueError as exc:
             await interaction.followup.send(f"⚠️ {exc}")
             return
 
-        arranged = await bot.agenda.reorder(day, sequence)
-        await _deliver(
-            bot, interaction, reports.day_list(day, arranged, today=bot.today()), "agenda"
+        for item in items:
+            await bot.agenda.set_time(item.id, day, clock)
+
+        titles = ", ".join(f"**{item.title}**" for item in items)
+        moved_to = reports.fmt_time(clock) if clock else "no time (end of day)"
+        await interaction.followup.send(
+            f"🕘 {titles} — {moved_to} on {reports.fmt_date(day)}"
         )
 
     @tree.command(name="overdue", description="Show overdue, unfinished items")
