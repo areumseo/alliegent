@@ -67,7 +67,7 @@ def test_every_command_has_a_description():
 def test_add_command_options():
     bot = make_bot()
     add = next(c for c in bot.tree.get_commands() if c.name == "add")
-    assert {p.display_name for p in add.parameters} == {"task", "when", "at"}
+    assert {p.display_name for p in add.parameters} == {"task", "when", "at", "cal"}
 
 
 def test_descriptions_are_english_too():
@@ -201,3 +201,30 @@ def test_routed_kinds_all_resolve_to_a_channel():
     secrets = Secrets(discord_channel_id=1)
     for kind in set(COMMAND_CHANNELS.values()):
         assert secrets.channel_for(kind) > 0
+
+
+# -- /add and the calendar -------------------------------------------------
+
+
+def _should_mirror(cal: bool | None, has_time: bool) -> bool:
+    """The rule /add applies, written out so it can be checked directly."""
+    return cal if cal is not None else has_time
+
+
+def test_a_timed_item_goes_to_the_calendar_by_default():
+    """Something happening at an hour is what a calendar is for."""
+    assert _should_mirror(None, True)
+
+
+def test_a_bare_task_stays_out_of_the_calendar():
+    """The reason this is not always-on: most agenda rows are chores, and a
+    calendar full of them stops showing what the day is committed to."""
+    assert not _should_mirror(None, False)
+
+
+def test_cal_false_keeps_a_timed_item_out():
+    assert not _should_mirror(False, True)
+
+
+def test_cal_true_puts_an_untimed_item_in():
+    assert _should_mirror(True, False)

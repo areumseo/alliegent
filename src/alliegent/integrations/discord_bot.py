@@ -224,6 +224,38 @@ def time_in_title(title: str) -> time | None:
         return None
 
 
+async def _add_to_calendar(
+    bot: AlliegentBot, summary: str, day: date, clock: time | None
+) -> str:
+    """Mirror an agenda item into the calendar, reporting either way.
+
+    The Notion row is already written by the time this runs, so a calendar
+    failure must not read as the task having failed -- it is one line saying
+    the calendar half did not happen, not an error for the whole command.
+    """
+    from .calendar import DEFAULT_EVENT_MINUTES, CalendarWriteError, create_event
+
+    if clock is None:
+        # No hour to put it at, so it becomes an all-day entry rather than an
+        # arbitrary one; an all-day event in iCal ends the following midnight.
+        start: date | datetime = day
+        end: date | datetime = day + timedelta(days=1)
+        shown = "all day"
+    else:
+        start = datetime.combine(day, clock, tzinfo=bot.config.tz)
+        end = start + timedelta(minutes=DEFAULT_EVENT_MINUTES)
+        shown = f"{reports.fmt_time(clock)}–{reports.fmt_time(end.time())}"
+
+    try:
+        where = await create_event(bot.secrets, summary, start, end)
+    except CalendarWriteError as exc:
+        return f"⚠️ Not added to the calendar: {exc}"
+    except Exception as exc:
+        log.exception("calendar write failed")
+        return f"⚠️ Not added to the calendar: {type(exc).__name__}"
+    return f"📅 Calendar — {where}, {shown}"
+
+
 def parse_day(text: str | None, today: date) -> date:
     """Accept 'today', 'tomorrow', 'MM-DD', 'YYYY-MM-DD', or the Korean
     equivalents, which are shorter to type on a Korean keyboard."""
@@ -371,12 +403,14 @@ def _register(bot: AlliegentBot) -> None:
         # belong here and not just in the README.
         when="오늘 / 내일 / 모레 / today / tomorrow / 2026-08-15 / 08-15 (default: today)",
         at="Time of day, e.g. 14:00 or 2pm. Without one it goes to the end of the day",
+        cal="Also put it in the calendar. Defaults to on for items with a time",
     )
     async def add_cmd(
         interaction: discord.Interaction,
         task: str,
         when: str | None = None,
         at: str | None = None,
+        cal: bool | None = None,
     ) -> None:
         await interaction.response.defer()
         try:
@@ -388,14 +422,21 @@ def _register(bot: AlliegentBot) -> None:
         except ValueError as exc:
             await interaction.followup.send(f"⚠️ {exc}")
             return
+
         item = await bot.agenda.add_item(task, day, at=clock, infer_category=True)
+
         filed = f" · {item.category}" if item.category else ""
         when_text = reports.fmt_date(day)
         if clock:
             when_text += f" {reports.fmt_time(clock)}"
-        await interaction.followup.send(
-            f"✅ Added — **{item.title}** ({when_text}{filed})"
-        )
+        lines = [f"✅ Added — **{item.title}** ({when_text}{filed})"]
+
+        # An item with a time is something that happens at an hour, which is
+        # what a calendar is for; a bare task is not. `cal` overrides both
+        # ways, since some timed items are still just tasks.
+        if cal if cal is not None else clock is not None:
+            lines.append(await _add_to_calendar(bot, item.title, day, clock))
+        await interaction.followup.send("\n".join(lines))
 
     @tree.command(name="done", description="Mark items done by their listed number")
     @app_commands.describe(

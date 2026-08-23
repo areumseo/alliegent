@@ -163,8 +163,8 @@ def _caldav_create(
     password: str,
     calendar_name: str,
     summary: str,
-    start: datetime,
-    end: datetime,
+    start: datetime | date,
+    end: datetime | date,
 ) -> str:
     import caldav
     from icalendar import Calendar as VCalendar
@@ -196,14 +196,24 @@ def _caldav_create(
     return calendar_name
 
 
+# How long an event made from an agenda item lasts. Agenda items carry a
+# start and nothing else, and a wrong end is easier to drag in the calendar
+# than a wrong start is to notice.
+DEFAULT_EVENT_MINUTES = 30
+
+
 async def create_event(
     secrets,
     summary: str,
-    start: datetime,
-    end: datetime,
+    start: datetime | date,
+    end: datetime | date,
     url: str = CALDAV_URL,
 ) -> str:
-    """Create one event. Returns the calendar it landed in."""
+    """Create one event. Returns the calendar it landed in.
+
+    Passing plain dates rather than datetimes makes an all-day event, which is
+    what an agenda item with no time of day becomes.
+    """
     if not (secrets.icloud_username and secrets.icloud_app_password):
         raise CalendarWriteError("Calendar writing needs ICLOUD_USERNAME and ICLOUD_APP_PASSWORD.")
     if not secrets.icloud_write_calendar:

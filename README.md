@@ -25,7 +25,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/today` | Show today's agenda |
 | `/tomorrow` | Show tomorrow's agenda, numbered |
 | `/status [when]` | Completion for a day and the week containing it, plus what's left on it. `when` defaults to today |
-| `/add <task> [when] [at]` | Add an item, optionally at a time. Its Category is inferred from history. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow` / `tmr` (any capitalisation), `2026-08-15`, `08-15`, or `08/15`; defaults to today |
+| `/add <task> [when] [at] [cal]` | Add an item, optionally at a time. Its Category is inferred from history. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow` / `tmr` (any capitalisation), `2026-08-15`, `08-15`, or `08/15`; defaults to today. An item with a time also lands in the calendar — `cal` forces that on or off |
 | `/done <numbers> [when]` | Complete items by their listed number — one or several (`3` or `3,5`). `when` picks the day, defaulting to today |
 | `/delete <numbers> [when]` | Move items to Notion's trash by number — recoverable there. Takes `when` the same way |
 | `/move <numbers> <to> [from]` | Move items to another day. `from` defaults to today |
@@ -209,6 +209,12 @@ Today's events appear at the top of the daily brief, above the to-do list: that 
 Recurring events are expanded client-side by the same code for both sources, rather than trusting whatever a server chose to expand, so "every Tue and Thu at 19:10" and the weeks that were cancelled behave identically either way.
 
 Writing is opt-in and narrow. `ICLOUD_WRITE_CALENDAR` names the one calendar new events go into and has no default — writing into whichever calendar came back first is not a guess worth making on a real calendar. The bot can create events but not edit or delete them: a created event is easy to spot and remove, while a misread request that alters an existing one is not.
+
+Items added with a time are mirrored into `ICLOUD_WRITE_CALENDAR` as 30-minute events. That default is the distinction between the two tools: something happening at an hour belongs in a calendar, a chore belongs on a list, and a calendar filled with chores stops showing what the day is actually committed to. `cal: true` overrides it for an untimed item (which becomes an all-day entry), `cal: false` keeps a timed one out.
+
+Thirty minutes because an agenda item carries a start and nothing else. A wrong end is easy to drag in the calendar; a missing event is not.
+
+The Notion row is written first, so a calendar failure reports itself on its own line rather than failing the whole command — the task is in the agenda either way.
 
 ## The AI news digest
 
