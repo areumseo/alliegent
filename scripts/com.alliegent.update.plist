@@ -4,17 +4,19 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.areumseo.alliegent-update</string>
+  <string>com.alliegent.update</string>
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/areumseo/work/alliegent/scripts/self_update.sh</string>
+    <string>__HOME__/work/alliegent/scripts/self_update.sh</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/areumseo/work/alliegent</string>
+  <string>__HOME__/work/alliegent</string>
 
-  <!-- Every 15 minutes. RunAtLoad catches anything pushed while the mini was
+  <!-- __HOME__ is filled in by scripts/install_service.sh: launchd does not
+       expand ~ or $HOME, and a hardcoded path names whoever set it up.
+       Every 15 minutes. RunAtLoad catches anything pushed while the mini was
        asleep or rebooting. -->
   <key>StartInterval</key>
   <integer>900</integer>
@@ -22,9 +24,9 @@
   <true/>
 
   <key>StandardOutPath</key>
-  <string>/Users/areumseo/Library/Logs/alliegent/update.log</string>
+  <string>__HOME__/Library/Logs/alliegent/update.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/areumseo/Library/Logs/alliegent/update.log</string>
+  <string>__HOME__/Library/Logs/alliegent/update.log</string>
 
   <key>ProcessType</key>
   <string>Background</string>

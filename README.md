@@ -124,15 +124,18 @@ uv run alliegent
 
 ### 4. Run it on the Mac mini
 
-The bot runs at `~/work/alliegent` on the mini (`a-mini-server`, reachable over Tailscale) under launchd, as `com.areumseo.alliegent`. To install or restart:
+The bot runs from a checkout at `~/work/alliegent` on a Mac mini reachable over Tailscale, under launchd. Install the jobs for whoever is logged in:
 
 ```bash
-cp scripts/com.areumseo.alliegent-update.plist ~/Library/LaunchAgents/
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.areumseo.alliegent-update.plist
+./scripts/install_service.sh
 ```
 
+The plists in `scripts/` are templates: launchd expands neither `~` nor `$HOME`, so a committed plist would have to hardcode one person's home directory — and name them, in a public repo. `install_service.sh` fills `__HOME__` in at install time.
+
+To restart the bot:
+
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.areumseo.alliegent
+launchctl kickstart -k gui/$(id -u)/com.alliegent.bot
 ```
 
 Logs are in `~/Library/Logs/alliegent/` — `stderr.log` for the bot, `update.log` for the updater.

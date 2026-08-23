@@ -3,11 +3,11 @@
 # tests pass. A push from the laptop shouldn't be able to take the bot down,
 # so a failing commit is rolled back and the running version is left alone.
 #
-# Run from launchd (see scripts/com.areumseo.alliegent-update.plist).
+# Run from launchd (see scripts/com.alliegent.update.plist).
 set -uo pipefail
 
 REPO="${ALLIEGENT_REPO:-$HOME/work/alliegent}"
-LABEL="com.areumseo.alliegent"
+LABEL="${ALLIEGENT_LABEL:-com.alliegent.bot}"
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
