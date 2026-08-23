@@ -20,4 +20,5 @@ install_one() {
 
 install_one com.alliegent.update scripts/com.alliegent.update.plist
 echo
-echo "The bot itself is installed separately, as $\{ALLIEGENT_LABEL:-com.alliegent.bot\}."
+echo "The bot itself is installed separately, as com.alliegent.bot"
+echo "(override with ALLIEGENT_LABEL if an existing install uses another name)."
