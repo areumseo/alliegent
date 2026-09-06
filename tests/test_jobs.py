@@ -255,18 +255,32 @@ async def test_jobs_route_to_their_own_channel_kinds():
 
 def test_scheduler_registers_the_enabled_jobs():
     """week_scaffold ships disabled — nothing in the agenda repeats weekly."""
+    config = Config()
     jobs, _, _ = build()
-    scheduler = build_scheduler(jobs, Config())
+    scheduler = build_scheduler(jobs, config)
     ids = {job.id for job in scheduler.get_jobs()}
+    # Derived from the configured times rather than spelled out: the reminder
+    # hours are a preference that changes, and a test that has to be edited
+    # alongside them tests the edit, not the scheduling.
     assert ids == {
         "daily_brief",
         "ai_news",
-        "incomplete_alert@15:00",
-        "incomplete_alert@21:00",
         "weekly_planning",
         "stale_projects",
         "weekly_review",
-    }
+    } | {f"incomplete_alert@{when}" for when in config.schedule.incomplete_alert}
+
+
+def test_a_reminder_at_half_past_is_scheduled_on_the_minute():
+    """19:30 has to mean 19:30, not 19:00 — the minute is parsed, not dropped."""
+    config = Config()
+    config.schedule.incomplete_alert = ["19:30"]
+    jobs, _, _ = build()
+    scheduler = build_scheduler(jobs, config)
+    job = next(j for j in scheduler.get_jobs() if "incomplete_alert" in j.id)
+    fields = {f.name: str(f) for f in job.trigger.fields}
+    assert fields["hour"] == "19"
+    assert fields["minute"] == "30"
 
 
 def test_an_empty_time_disables_a_job():

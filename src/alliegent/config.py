@@ -139,9 +139,9 @@ class Schedule(BaseModel):
     daily_brief: str = "08:00"
     ai_news: str = "09:00"
     # A list: one nudge in the afternoon while the day can still be changed,
-    # one at night to close it out. A single string is still accepted, so an
-    # older alliegent.toml keeps working.
-    incomplete_alert: list[str] = Field(default_factory=lambda: ["15:00", "21:00"])
+    # one in the evening to close it out. A single string is still accepted,
+    # so an older alliegent.toml keeps working.
+    incomplete_alert: list[str] = Field(default_factory=lambda: ["14:00", "19:30"])
     weekly_planning_weekday: str = "sat"
     weekly_planning_time: str = "10:00"
     week_scaffold_weekday: str = "mon"

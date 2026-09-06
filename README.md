@@ -10,7 +10,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | --- | --- | --- |
 | Daily brief | 08:00 daily | Today's items, anything overdue, and active projects, in one message |
 | AI news digest | 09:00 daily | Five of yesterday's AI stories, read from publication feeds — headline and link, three-sentence summary in English and Korean |
-| Incomplete alert | 15:00 and 21:00 daily | Today's unfinished items and anything past its date. Two runs: one while the day can still change, one to close it out |
+| Incomplete alert | 14:00 and 19:30 daily | Today's unfinished items and anything past its date. Two runs: one while the day can still change, one to close it out |
 | Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
 | Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
 | Stale project nudge | Wed 10:00 | Projects with no linked agenda activity for N days. Off until a projects database exists |
