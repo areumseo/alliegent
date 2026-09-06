@@ -271,9 +271,17 @@ The same timestamp comparison makes date *filters* unreliable: an item at 06:30 
 
 Any job can be switched off the same way: blank its time in `alliegent.toml`.
 
-**Finished means the Complete group, not the word "Done".** Notion groups status options into To-do / In progress / Complete, and everything in that last group counts as needing no more attention — cancelling an item is a decision, not an omission, and one that kept showing up in the brief and the overdue list until this was read properly.
+**Status is read as three states, not two.** Notion groups its status options into To-do / In progress / Complete, and each group means something different to whoever reads the list:
 
-The group is read from the schema at runtime and identified by which group holds the configured done value, not by its name. So renaming `Cancelled` to `Canceled`, adding a `Dropped` status, or renaming the group itself all work with no change here.
+| Group | Shown as | Why |
+| --- | --- | --- |
+| Complete (`Done`, `Canceled`) | `✅` | Needs no more attention. Cancelling is a decision, not an omission — until this was read properly, cancelled items kept appearing in the brief and the overdue list |
+| In progress (`In progress`, `On hold`) | `🔸` | Already begun, so it needs finishing rather than starting. "2 of 7 done" reads the same whether two things are half-finished or nothing has been touched |
+| To-do (`Not started`, `Ready`) | *nothing* | An unchecked box on every line of a mostly-unstarted list is noise |
+
+`/status` counts the middle group separately for the same reason: `2 of 7 done (29%), 2 in progress`.
+
+Both groups are read from the schema at runtime, and each is found by which group holds a known member (the configured `done` and `doing` values) rather than by name. So renaming `Cancelled` to `Canceled`, adding a `Dropped` status beside it, or renaming a group itself all work with no change here.
 
 
 ## Configuration

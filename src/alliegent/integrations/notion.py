@@ -356,25 +356,32 @@ def is_done(
     return name.casefold() == done_value.casefold()
 
 
-def closed_statuses(schema_property: dict[str, Any], done_value: str) -> set[str]:
-    """Every status name that counts as finished, read from the schema.
+def group_statuses(schema_property: dict[str, Any], member: str) -> set[str]:
+    """Every status sharing a group with `member`, read from the schema.
 
     Notion groups status options into To-do / In progress / Complete, and the
-    group holding the configured done value is the one that means finished.
-    Read rather than configured, so adding a status to that group in Notion
-    needs no change here -- and identified by the group the done value is in,
-    rather than by the group's name, which can be renamed.
+    group is the useful unit: "finished" is the whole Complete group, not just
+    the word Done. Groups are found by a status known to be in them rather
+    than by name, since both the group and its options can be renamed -- which
+    is why renaming Cancelled to Canceled needed no change here.
+
+    Falls back to `member` alone for a select or checkbox, which has no groups.
     """
     if schema_property.get("type") != "status":
-        return {done_value}
+        return {member}
     status = schema_property.get("status") or {}
     options = {o["id"]: o["name"] for o in status.get("options", []) if "id" in o}
-    target = done_value.casefold()
+    target = member.casefold()
     for group in status.get("groups", []):
         names = {options[oid] for oid in group.get("option_ids", []) if oid in options}
         if any(name.casefold() == target for name in names):
             return names
-    return {done_value}
+    return {member}
+
+
+def closed_statuses(schema_property: dict[str, Any], done_value: str) -> set[str]:
+    """Every status name that counts as finished."""
+    return group_statuses(schema_property, done_value)
 
 
 def number(value: float | None) -> dict[str, Any]:

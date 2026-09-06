@@ -34,18 +34,27 @@ def _with_time(item: AgendaItem) -> str:
     return f"{fmt_time(item.at)} {item.title}"
 
 
-def _bullets(items: list[AgendaItem], *, numbered: bool = False) -> list[str]:
-    """Render items without an empty-checkbox marker.
+def _mark(item: AgendaItem) -> str:
+    """The one-glyph state of an item.
 
-    An unchecked box carries no information in a list that is already all
-    unfinished work, and repeating it on every line just adds noise. Only
-    completion is marked, and only where done and pending items are mixed.
+    No marker for work not begun: an unchecked box carries no information in a
+    list that is mostly unstarted, and repeating it on every line is noise.
+    Started work is marked because it needs something different from the
+    reader -- finishing rather than beginning -- and that was invisible when
+    the list only distinguished done from not done.
     """
+    if item.done:
+        return "✅ "
+    if item.started:
+        return "🔸 "
+    return ""
+
+
+def _bullets(items: list[AgendaItem], *, numbered: bool = False) -> list[str]:
     lines = []
     for idx, item in enumerate(items, start=1):
         prefix = f"`{idx}.` " if numbered else "• "
-        mark = "✅ " if item.done else ""
-        lines.append(f"{prefix}{mark}{_with_time(item)}")
+        lines.append(f"{prefix}{_mark(item)}{_with_time(item)}")
     return lines
 
 
@@ -58,7 +67,7 @@ def pending_lines(todays: list[AgendaItem]) -> list[str]:
     it in — and completes the wrong task.
     """
     return [
-        f"`{idx}.` {_with_time(item)}"
+        f"`{idx}.` {_mark(item)}{_with_time(item)}"
         for idx, item in enumerate(todays, start=1)
         if not item.done
     ]
@@ -294,7 +303,14 @@ def status(
         done = sum(1 for i in items if i.done)
         if not items:
             return "nothing scheduled"
-        return f"{done} of {len(items)} done ({round(done / len(items) * 100)}%)"
+        text = f"{done} of {len(items)} done ({round(done / len(items) * 100)}%)"
+        # Counted separately rather than folded into the percentage: a day
+        # with three things underway is in a different state from one where
+        # nothing has been touched, and both read as "2 of 7" otherwise.
+        started = sum(1 for i in items if i.started and not i.done)
+        if started:
+            text += f", {started} in progress"
+        return text
 
     label = "Today" if is_today else fmt_date(day)
     week_label = "This week" if is_today else "That week"

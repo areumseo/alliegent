@@ -33,12 +33,14 @@ def status_schema(*, done_name: str = "Done", closed_name: str = "Cancelled") ->
                 "options": [
                     {"id": "o1", "name": "Not started"},
                     {"id": "o2", "name": "In progress"},
+                    {"id": "o5", "name": "On hold"},
+                    {"id": "o6", "name": "Ready"},
                     {"id": "o3", "name": closed_name},
                     {"id": "o4", "name": done_name},
                 ],
                 "groups": [
-                    {"id": "g1", "name": "To-do", "option_ids": ["o1"]},
-                    {"id": "g2", "name": "In progress", "option_ids": ["o2"]},
+                    {"id": "g1", "name": "To-do", "option_ids": ["o1", "o6"]},
+                    {"id": "g2", "name": "In progress", "option_ids": ["o2", "o5"]},
                     {"id": "g3", "name": "Complete", "option_ids": ["o3", "o4"]},
                 ],
             },
@@ -113,3 +115,45 @@ async def test_a_checkbox_database_is_unaffected():
         [make_page("p1", "x", day=DAY.isoformat(), checkbox=True)], schema=schema
     )
     assert (await svc.items_on(DAY))[0].done is True
+
+
+# -- work already underway -------------------------------------------------
+
+
+async def test_an_in_progress_item_is_marked_as_started():
+    """Started work needs finishing, not beginning. Reading a list where it
+    looks identical to untouched work is what prompted this."""
+    _, svc = service(
+        [make_page("p1", "half done", day=DAY.isoformat(), status="In progress")]
+    )
+    item = (await svc.items_on(DAY))[0]
+    assert item.started is True
+    assert item.done is False
+
+
+async def test_the_whole_in_progress_group_counts_as_started():
+    """On hold sits in that group in Notion, so it is underway, not untouched."""
+    _, svc = service([make_page("p1", "paused", day=DAY.isoformat(), status="On hold")])
+    assert (await svc.items_on(DAY))[0].started is True
+
+
+async def test_a_to_do_status_is_not_started():
+    for status in ("Not started", "Ready"):
+        _, svc = service([make_page("p1", "x", day=DAY.isoformat(), status=status)])
+        assert (await svc.items_on(DAY))[0].started is False, status
+
+
+async def test_a_finished_item_is_not_also_started():
+    """Complete wins: an item cannot want both finishing and beginning."""
+    _, svc = service([make_page("p1", "x", day=DAY.isoformat(), status="Done")])
+    item = (await svc.items_on(DAY))[0]
+    assert item.done is True and item.started is False
+
+
+def test_the_in_progress_group_is_read_from_the_schema():
+    from alliegent.integrations.notion import group_statuses
+
+    assert group_statuses(status_schema()["Status"], "In progress") == {
+        "In progress",
+        "On hold",
+    }

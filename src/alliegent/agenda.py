@@ -45,6 +45,7 @@ class AgendaItem:
     category: str | None = None
     at: time | None = None
     created: datetime | None = None
+    started: bool = False
 
     def sort_key(self) -> tuple:
         """Where this item sits in its day.
@@ -85,6 +86,7 @@ class AgendaService:
         self._ds_id: str | None = None
         self._status_type: str | None = None
         self._closed: set[str] | None = None
+        self._started: set[str] | None = None
 
     @property
     def props(self):
@@ -113,13 +115,25 @@ class AgendaService:
             self._closed = n.closed_statuses(
                 definition, self._cfg.agenda.status_values["done"]
             )
+            # The In progress group, read the same way. Work already started is
+            # worth telling apart from work not begun: they need different
+            # things from the person reading the list.
+            self._started = n.group_statuses(
+                definition, self._cfg.agenda.status_values["doing"]
+            ) - self._closed
         return self._status_type
 
     async def closed(self) -> set[str]:
-        """Statuses that mean the item is finished with, Cancelled included."""
+        """Statuses that mean the item is finished with, Canceled included."""
         if self._closed is None:
             await self.status_type()
         return self._closed or {self._cfg.agenda.status_values["done"]}
+
+    async def started(self) -> set[str]:
+        """Statuses that mean the item is underway."""
+        if self._started is None:
+            await self.status_type()
+        return self._started or {self._cfg.agenda.status_values["doing"]}
 
     # -- reads -------------------------------------------------------------
 
@@ -149,6 +163,10 @@ class AgendaService:
             category=n.read_select(page, p.category) if p.category else None,
             at=n.read_time(page, p.date),
             created=n.read_created(page),
+            started=bool(
+                self._started
+                and (n.read_status(page, p.status) or "") in self._started
+            ),
         )
 
     async def items_between(self, start: date, end: date) -> list[AgendaItem]:

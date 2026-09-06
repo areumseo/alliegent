@@ -436,3 +436,49 @@ def test_the_overdue_list_is_not_truncated():
 
 def test_an_empty_backlog_says_so_without_a_hint():
     assert reports.overdue_list([]) == "🎉 Nothing overdue."
+
+
+# -- showing what is underway ----------------------------------------------
+
+
+def started_item(title: str, *, done: bool = False, started: bool = False):
+    return AgendaItem(
+        id=title, title=title, day=TODAY, status=None, done=done, url="",
+        started=started,
+    )
+
+
+def test_started_items_are_marked_in_a_day_list():
+    text = reports.day_list(
+        TODAY, [started_item("underway", started=True), started_item("untouched")]
+    )
+    assert "🔸 underway" in text
+    assert "🔸 untouched" not in text
+
+
+def test_started_items_are_marked_in_the_pending_list():
+    """The brief, the evening alert and /status all read from this."""
+    lines = reports.pending_lines([started_item("underway", started=True)])
+    assert lines == ["`1.` 🔸 underway"]
+
+
+def test_a_finished_item_keeps_its_tick():
+    text = reports.day_list(TODAY, [started_item("finished", done=True)])
+    assert "✅ finished" in text
+
+
+def test_status_counts_what_is_underway():
+    """"2 of 7 done" reads the same whether three things are half-finished or
+    nothing has been touched at all."""
+    items = [
+        started_item("a", done=True),
+        started_item("b", started=True),
+        started_item("c"),
+    ]
+    text = reports.status(TODAY, items, [], items)
+    assert "1 of 3 done (33%), 1 in progress" in text
+
+
+def test_status_says_nothing_about_progress_when_nothing_is_underway():
+    items = [started_item("a", done=True), started_item("b")]
+    assert "in progress" not in reports.status(TODAY, items, [], items)
