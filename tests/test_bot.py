@@ -228,3 +228,22 @@ def test_cal_false_keeps_a_timed_item_out():
 
 def test_cal_true_puts_an_untimed_item_in():
     assert _should_mirror(True, False)
+
+
+# -- acting on the backlog -------------------------------------------------
+
+
+def test_overdue_is_recognised_as_a_list_to_act_on():
+    """`/delete 2 overdue` has to mean the backlog. Delayed items span days,
+    so there is otherwise no day argument that reaches them."""
+    from alliegent.integrations.discord_bot import wants_overdue
+
+    for word in ("overdue", "Overdue", "od", "late", "밀린", "overdue."):
+        assert wants_overdue(word), word
+
+
+def test_a_day_is_not_mistaken_for_the_backlog():
+    from alliegent.integrations.discord_bot import wants_overdue
+
+    for word in (None, "", "today", "tomorrow", "2026-08-15", "내일"):
+        assert not wants_overdue(word), word

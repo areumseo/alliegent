@@ -335,12 +335,46 @@ def read_status(page: dict[str, Any], prop: str) -> str | None:
     return None
 
 
-def is_done(page: dict[str, Any], prop: str, done_value: str) -> bool:
+def is_done(
+    page: dict[str, Any], prop: str, done_value: str, closed: set[str] | None = None
+) -> bool:
+    """Whether this item is finished with -- not only whether it says "Done".
+
+    `closed` is every status that means the item needs no more attention,
+    which for a Notion status property is its whole Complete group. Without
+    it, "Cancelled" reads as outstanding and the item keeps appearing in the
+    brief and the overdue list after it has been called off.
+    """
     value = page.get("properties", {}).get(prop) or {}
     if value.get("type") == "checkbox":
         return bool(value.get("checkbox"))
     name = read_status(page, prop)
-    return name is not None and name.casefold() == done_value.casefold()
+    if name is None:
+        return False
+    if closed:
+        return name.casefold() in {s.casefold() for s in closed}
+    return name.casefold() == done_value.casefold()
+
+
+def closed_statuses(schema_property: dict[str, Any], done_value: str) -> set[str]:
+    """Every status name that counts as finished, read from the schema.
+
+    Notion groups status options into To-do / In progress / Complete, and the
+    group holding the configured done value is the one that means finished.
+    Read rather than configured, so adding a status to that group in Notion
+    needs no change here -- and identified by the group the done value is in,
+    rather than by the group's name, which can be renamed.
+    """
+    if schema_property.get("type") != "status":
+        return {done_value}
+    status = schema_property.get("status") or {}
+    options = {o["id"]: o["name"] for o in status.get("options", []) if "id" in o}
+    target = done_value.casefold()
+    for group in status.get("groups", []):
+        names = {options[oid] for oid in group.get("option_ids", []) if oid in options}
+        if any(name.casefold() == target for name in names):
+            return names
+    return {done_value}
 
 
 def number(value: float | None) -> dict[str, Any]:

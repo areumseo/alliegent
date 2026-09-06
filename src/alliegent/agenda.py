@@ -84,6 +84,7 @@ class AgendaService:
         self._db_id = agenda_db_id
         self._ds_id: str | None = None
         self._status_type: str | None = None
+        self._closed: set[str] | None = None
 
     @property
     def props(self):
@@ -109,7 +110,16 @@ class AgendaService:
                     "Run scripts/inspect_notion.py and fix [agenda.props] in alliegent.toml."
                 )
             self._status_type = definition["type"]
+            self._closed = n.closed_statuses(
+                definition, self._cfg.agenda.status_values["done"]
+            )
         return self._status_type
+
+    async def closed(self) -> set[str]:
+        """Statuses that mean the item is finished with, Cancelled included."""
+        if self._closed is None:
+            await self.status_type()
+        return self._closed or {self._cfg.agenda.status_values["done"]}
 
     # -- reads -------------------------------------------------------------
 
@@ -130,7 +140,9 @@ class AgendaService:
             title=n.read_title(page, p.title) or "(untitled)",
             day=n.read_date(page, p.date),
             status=n.read_status(page, p.status),
-            done=n.is_done(page, p.status, self._cfg.agenda.status_values["done"]),
+            done=n.is_done(
+                page, p.status, self._cfg.agenda.status_values["done"], self._closed
+            ),
             url=n.page_url(page),
             project_ids=tuple(n.read_relation_ids(page, p.project)) if p.project else (),
             recurring=n.read_checkbox(page, p.recurring) if p.recurring else False,
@@ -150,6 +162,9 @@ class AgendaService:
         start carrying times, which is exactly what orders a day now.
         """
         ds = await self.data_source_id()
+        # Resolves the Complete group before any page is mapped; without it the
+        # first read of a session would count Cancelled items as outstanding.
+        await self.status_type()
         query_filter = {
             "and": [
                 {
@@ -174,6 +189,7 @@ class AgendaService:
     async def overdue(self, today: date) -> list[AgendaItem]:
         """Unfinished items dated before today — the ones that quietly pile up."""
         ds = await self.data_source_id()
+        await self.status_type()
         query_filter = {
             "property": self.props.date,
             # One day wide, then narrowed below: see items_between for why a

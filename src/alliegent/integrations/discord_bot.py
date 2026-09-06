@@ -314,14 +314,32 @@ def parse_numbers(text: str) -> list[int]:
     return seen
 
 
+OVERDUE_WORDS = {"overdue", "od", "late", "밀린", "지난"}
+
+
+def wants_overdue(when: str | None) -> bool:
+    """Whether `when` names the backlog rather than a day.
+
+    Kept separate from parse_day: the overdue list is not a date, and making
+    it resolve to one would put every item on the same wrong day.
+    """
+    if not when:
+        return False
+    return when.strip().strip(".!,").casefold() in OVERDUE_WORDS
+
+
 async def _resolve(
     bot: AlliegentBot, interaction: discord.Interaction, numbers: str, when: str | None
-) -> tuple[list, date] | None:
-    """Map typed numbers onto one day's items, against a single snapshot.
+) -> tuple[list, date | None] | None:
+    """Map typed numbers onto items, against a single snapshot.
 
     One fetch for the whole command: resolving each number separately would
     let an earlier completion or deletion shift the list under the later ones,
     so `/delete 3,5` would remove item 3 and then whatever slid into 5.
+
+    `when` is a day, or "overdue" for the backlog. Overdue items span days, so
+    the day comes back as None and callers that need one read it off each
+    item -- which is the item's real date either way.
     """
     try:
         wanted = parse_numbers(numbers)
@@ -329,25 +347,30 @@ async def _resolve(
         await interaction.followup.send(f"⚠️ {exc}")
         return None
 
-    try:
-        day = parse_day(when, bot.today())
-    except ValueError as exc:
-        await interaction.followup.send(f"⚠️ {exc}")
-        return None
+    if wants_overdue(when):
+        day = None
+        items = await bot.agenda.overdue(bot.today())
+        empty = "⚠️ Nothing overdue."
+        where = "The overdue list"
+    else:
+        try:
+            day = parse_day(when, bot.today())
+        except ValueError as exc:
+            await interaction.followup.send(f"⚠️ {exc}")
+            return None
+        items = await bot.agenda.items_on(day)
+        empty = f"⚠️ Nothing scheduled on {reports.fmt_date(day)}."
+        where = reports.fmt_date(day)
 
-    items = await bot.agenda.items_on(day)
     if not items:
-        await interaction.followup.send(
-            f"⚠️ Nothing scheduled on {reports.fmt_date(day)}."
-        )
+        await interaction.followup.send(empty)
         return None
 
     bad = [n for n in wanted if not 1 <= n <= len(items)]
     if bad:
         listed = ", ".join(str(n) for n in bad)
         await interaction.followup.send(
-            f"⚠️ Out of range: {listed}. {reports.fmt_date(day)} has "
-            f"{len(items)} item(s)."
+            f"⚠️ Out of range: {listed}. {where} has {len(items)} item(s)."
         )
         return None
     return [items[n - 1] for n in wanted], day
@@ -441,7 +464,7 @@ def _register(bot: AlliegentBot) -> None:
     @tree.command(name="done", description="Mark items done by their listed number")
     @app_commands.describe(
         numbers="Number(s) from the list, e.g. 3 or 3,5",
-        when="Which day's list, e.g. tomorrow or 08-15 (defaults to today)",
+        when="Which list: a day like tomorrow or 08-15, or `overdue` (defaults to today)",
     )
     async def done_cmd(
         interaction: discord.Interaction, numbers: str, when: str | None = None
@@ -475,7 +498,7 @@ def _register(bot: AlliegentBot) -> None:
     )
     @app_commands.describe(
         numbers="Number(s) from the list, e.g. 3 or 3,5",
-        when="Which day's list, e.g. tomorrow or 08-15 (defaults to today)",
+        when="Which list: a day like tomorrow or 08-15, or `overdue` (defaults to today)",
     )
     async def delete_cmd(
         interaction: discord.Interaction, numbers: str, when: str | None = None
@@ -538,7 +561,7 @@ def _register(bot: AlliegentBot) -> None:
     @app_commands.describe(
         numbers="Which items, by their listed number (3 or 3,5)",
         at="14:00, 2pm, 9:30am, or 'none' to clear it and send it to the end",
-        when="Which day (defaults to today)",
+        when="Which day, or `overdue` (defaults to today)",
     )
     async def time_cmd(
         interaction: discord.Interaction,
@@ -559,13 +582,14 @@ def _register(bot: AlliegentBot) -> None:
             return
 
         for item in items:
-            await bot.agenda.set_time(item.id, day, clock)
+            # The item's own date, not the day argument: an overdue item keeps
+            # the day it was scheduled for, and for a day list they are equal.
+            await bot.agenda.set_time(item.id, item.day or day or bot.today(), clock)
 
         titles = ", ".join(f"**{item.title}**" for item in items)
         moved_to = reports.fmt_time(clock) if clock else "no time (end of day)"
-        await interaction.followup.send(
-            f"🕘 {titles} — {moved_to} on {reports.fmt_date(day)}"
-        )
+        on = reports.fmt_date(day) if day else "their own days"
+        await interaction.followup.send(f"🕘 {titles} — {moved_to} on {on}")
 
     @tree.command(name="overdue", description="Show overdue, unfinished items")
     async def overdue_cmd(interaction: discord.Interaction) -> None:

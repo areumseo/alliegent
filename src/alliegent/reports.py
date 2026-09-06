@@ -330,9 +330,21 @@ def ai_news(today: date, body: str) -> str:
 
 
 def overdue_list(items: list[AgendaItem]) -> str:
+    """Numbered, dated, and complete.
+
+    Numbered because the backlog is the list most likely to need clearing out,
+    and an unnumbered list is the one thing no command can act on. Complete
+    for the same reason: truncating at ten would leave the rest unreachable,
+    since the numbers have to match what /done and /delete resolve.
+    """
     if not items:
         return "🎉 Nothing overdue."
-    return "\n".join([f"**Overdue ({len(items)})**", *_dated(items)])
+    lines = [f"**Overdue ({len(items)})**"]
+    for idx, item in enumerate(items, start=1):
+        when = fmt_date(item.day) if item.day else "no date"
+        lines.append(f"`{idx}.` {_with_time(item)} — {when}")
+    lines.append("_`/done <n> overdue` or `/delete <n> overdue` to clear them._")
+    return "\n".join(lines)
 
 
 def project_list(projects: list[Project]) -> str:

@@ -26,11 +26,11 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/tomorrow` | Show tomorrow's agenda, numbered |
 | `/status [when]` | Completion for a day and the week containing it, plus what's left on it. `when` defaults to today |
 | `/add <task> [when] [at] [cal]` | Add an item, optionally at a time. Its Category is inferred from history. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow` / `tmr` (any capitalisation), `2026-08-15`, `08-15`, or `08/15`; defaults to today. An item with a time also lands in the calendar — `cal` forces that on or off |
-| `/done <numbers> [when]` | Complete items by their listed number — one or several (`3` or `3,5`). `when` picks the day, defaulting to today |
-| `/delete <numbers> [when]` | Move items to Notion's trash by number — recoverable there. Takes `when` the same way |
+| `/done <numbers> [when]` | Complete items by their listed number — one or several (`3` or `3,5`). `when` picks the day, or `overdue` for the backlog; defaults to today |
+| `/delete <numbers> [when]` | Move items to Notion's trash by number — recoverable there. Takes `when` the same way, `overdue` included |
 | `/move <numbers> <to> [from]` | Move items to another day. `from` defaults to today |
 | `/time <numbers> <at> [when]` | Set an item's time — `14:00`, `2pm`, `9:30am` — which is what moves it in the day. `none` clears it and sends it to the end |
-| `/overdue` | Overdue, unfinished items |
+| `/overdue` | Overdue, unfinished items — numbered, so they can be cleared |
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
@@ -38,6 +38,8 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 Everything the bot shows in Discord is English, so nothing needs an input-method switch. Korean date words are still accepted as `when` values.
 
 Every message that lists today's unfinished work numbers it the way `/today` does — counting completed rows too, so the numbers are gaps rather than 1,2,3. That is deliberate: `/done` and `/delete` resolve a number against the full day, so renumbering the unfinished subset would make "2" mean a different row depending on which message you read it in.
+
+`overdue` is a list in its own right: `/done 2 overdue`, `/delete 1,3 overdue`. Delayed items span days, so no day argument reaches them, and a backlog that can only be looked at is a backlog that stays. It is printed in full rather than truncated, because a number the list doesn't show is a number nothing can resolve.
 
 Numbers are per-day, and `/done` and `/delete` take the day as an argument (`/done 2 tomorrow`), so any day's list can be numbered and acted on. Their confirmations name the date, which is what makes a wrong day obvious immediately. A list for a day other than today repeats the argument you'd need.
 
@@ -268,6 +270,11 @@ Ordering therefore has to happen here rather than in the query. Notion's date so
 The same timestamp comparison makes date *filters* unreliable: an item at 06:30 on the 24th is 21:30 UTC on the 23rd, so a query for the 23rd returns it, while a 06:00 item on the 23rd is missed. Queries therefore ask for a day either side and narrow the range in `items_between`. Nothing about this is visible until items start carrying times, which is exactly when it starts to matter.
 
 Any job can be switched off the same way: blank its time in `alliegent.toml`.
+
+**Finished means the Complete group, not the word "Done".** Notion groups status options into To-do / In progress / Complete, and everything in that last group counts as needing no more attention — cancelling an item is a decision, not an omission, and one that kept showing up in the brief and the overdue list until this was read properly.
+
+The group is read from the schema at runtime and identified by which group holds the configured done value, not by its name. So renaming `Cancelled` to `Canceled`, adding a `Dropped` status, or renaming the group itself all work with no change here.
+
 
 ## Configuration
 

@@ -391,3 +391,48 @@ def test_parse_day(text, expected):
 def test_parse_day_rejects_garbage_with_a_helpful_message():
     with pytest.raises(ValueError, match="Couldn't read that date"):
         parse_day("다음주 언젠가", TODAY)
+
+
+# -- the overdue list ------------------------------------------------------
+
+
+def overdue_item(title: str, day: date, at=None):
+    return AgendaItem(
+        id=title, title=title, day=day, status="Not started", done=False,
+        url="", at=at,
+    )
+
+
+def test_overdue_items_are_numbered_so_they_can_be_cleared():
+    """An unnumbered list is the one list no command can act on, and the
+    backlog is exactly what needs clearing out."""
+    text = reports.overdue_list(
+        [overdue_item("old thing", date(2026, 8, 1)), overdue_item("older", date(2026, 7, 30))]
+    )
+    assert "`1.` old thing" in text
+    assert "`2.` older" in text
+
+
+def test_the_overdue_list_says_how_to_act_on_it():
+    text = reports.overdue_list([overdue_item("x", date(2026, 8, 1))])
+    assert "/delete <n> overdue" in text
+
+
+def test_the_overdue_list_keeps_the_dates():
+    """A number alone doesn't say which day an item is from, and these span
+    many days by definition."""
+    text = reports.overdue_list([overdue_item("x", date(2026, 8, 1))])
+    assert reports.fmt_date(date(2026, 8, 1)) in text
+
+
+def test_the_overdue_list_is_not_truncated():
+    """Truncating would leave items numbered but unreachable: /done resolves
+    a number against the full list, not against what fitted on screen."""
+    items = [overdue_item(f"item {n}", date(2026, 8, 1)) for n in range(1, 16)]
+    text = reports.overdue_list(items)
+    assert "`15.` item 15" in text
+    assert "more" not in text
+
+
+def test_an_empty_backlog_says_so_without_a_hint():
+    assert reports.overdue_list([]) == "🎉 Nothing overdue."
