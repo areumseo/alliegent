@@ -9,7 +9,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | Job | Default time (Asia/Seoul) | Description |
 | --- | --- | --- |
 | Daily brief | 08:00 daily | Today's items, anything overdue, and active projects, in one message |
-| AI news digest | 09:00 daily | Five of yesterday's AI stories, read from publication feeds — headline and link, three-sentence summary in English and Korean |
+| AI news digest | 09:00 daily | Five of yesterday's AI stories, read from publication feeds — a topics line, then linked headlines with a short summary in English and Korean |
 | Incomplete alert | 14:00 and 19:30 daily | Today's unfinished items and anything past its date. Two runs: one while the day can still change, one to close it out |
 | Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
 | Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
@@ -224,6 +224,8 @@ The Notion row is written first, so a calendar failure reports itself on its own
 ## The AI news digest
 
 At 09:00 the digest covers **yesterday** — at nine in the morning the day's own stories have barely been filed, and the day that just finished is the one worth reading about.
+
+The digest is built to be scanned, not read through. A `🏷️` line of the day's subjects comes first, so the question "is there anything for me today" is answered without scrolling; each headline is itself the link, which removes a line per item; and summaries are a sentence or two rather than three. Link previews are suppressed on send — five articles would otherwise drag in five cards, each taller than the entry above it.
 
 Stories come from the feeds listed in `news_feeds.py` (TechCrunch, The Verge, Ars Technica, VentureBeat, MIT Technology Review). The model picks five and writes them up in English and Korean; it does not go looking for news itself.
 

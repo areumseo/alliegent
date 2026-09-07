@@ -121,7 +121,9 @@ class AlliegentBot(discord.Client):
             log.error("Channel %s is not messageable", channel_id)
             return
         for part in reports.chunk(message):
-            await channel.send(part)
+            # Link previews would undo the point of a compact digest: five
+            # articles means five cards, each taller than the entry itself.
+            await channel.send(part, suppress_embeds=True)
 
     def today(self) -> date:
         return datetime.now(self.config.tz).date()
@@ -141,9 +143,8 @@ class AlliegentBot(discord.Client):
 async def _reply(interaction: discord.Interaction, message: str) -> None:
     """Send a possibly-long message as one response plus followups."""
     parts = reports.chunk(message)
-    await interaction.followup.send(parts[0])
-    for part in parts[1:]:
-        await interaction.followup.send(part)
+    for part in parts:
+        await interaction.followup.send(part, suppress_embeds=True)
 
 
 async def _deliver(
