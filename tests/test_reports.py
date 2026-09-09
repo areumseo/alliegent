@@ -482,3 +482,50 @@ def test_status_counts_what_is_underway():
 def test_status_says_nothing_about_progress_when_nothing_is_underway():
     items = [started_item("a", done=True), started_item("b")]
     assert "in progress" not in reports.status(TODAY, items, [], items)
+
+
+# -- acting on the backlog from wherever it appears -------------------------
+
+
+def overdue_row(title: str, day: date):
+    return AgendaItem(id=title, title=title, day=day, status=None, done=False, url="")
+
+
+BACKLOG = [overdue_row("Unpacking", date(2026, 8, 6)), overdue_row("Nail", date(2026, 8, 8))]
+
+
+def test_the_brief_numbers_its_overdue_block():
+    """The brief is where the backlog is actually read, so it is where someone
+    decides to clear it — and `/done 2 overdue` needs a 2 to type."""
+    text = reports.daily_brief(TODAY, [], BACKLOG, [])
+    assert "`1.` Unpacking — " in text
+    assert "`2.` Nail — " in text
+
+
+def test_every_message_numbers_the_backlog_identically():
+    """The numbers are typed into a command that recounts the list itself, so
+    a brief that numbered it differently from /overdue would tick off the
+    wrong row."""
+    brief = reports.daily_brief(TODAY, [], BACKLOG, [])
+    evening = reports.incomplete_alert(TODAY, [], BACKLOG)
+    listing = reports.overdue_list(BACKLOG)
+    planning = reports.weekly_planning(TODAY, [], BACKLOG)
+    for text in (brief, evening, listing, planning):
+        assert "`1.` Unpacking" in text
+        assert "`2.` Nail" in text
+
+
+def test_the_backlog_says_how_to_act_on_it():
+    assert "/done <n> overdue" in reports.daily_brief(TODAY, [], BACKLOG, [])
+
+
+def test_a_long_backlog_is_trimmed_in_the_brief_but_points_at_the_rest():
+    """The brief has a day to report as well; the numbers it does show stay
+    valid, and the rest are one command away."""
+    many = [overdue_row(f"item {n}", date(2026, 8, 1)) for n in range(1, 15)]
+    brief = reports.daily_brief(TODAY, [], many, [])
+    assert "`10.` item 10" in brief
+    assert "`11.`" not in brief
+    assert "4 more" in brief and "/overdue" in brief
+    # The full list is not trimmed, and keeps the same numbering.
+    assert "`14.` item 14" in reports.overdue_list(many)

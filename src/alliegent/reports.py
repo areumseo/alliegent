@@ -73,15 +73,29 @@ def pending_lines(todays: list[AgendaItem]) -> list[str]:
     ]
 
 
-def _dated(items: list[AgendaItem], marker: str = "⚠️") -> list[str]:
-    """List items with their date, truncating rather than flooding the channel."""
+def overdue_lines(items: list[AgendaItem], *, limit: int | None = None) -> list[str]:
+    """Overdue items, numbered and dated.
+
+    Numbered because every message that shows the backlog is a place someone
+    decides to clear it, and `/done 2 overdue` needs a 2 to type. The numbers
+    match what /done and /delete resolve, since both count this same list --
+    so the brief, the evening alert and /overdue all agree.
+
+    Dated because these span days by definition, and a number alone doesn't
+    say which day it came from.
+    """
+    shown = items if limit is None else items[:limit]
     lines = []
-    for item in items[:MAX_LISTED]:
+    for idx, item in enumerate(shown, start=1):
         when = fmt_date(item.day) if item.day else "no date"
-        lines.append(f"{marker} {item.title} — {when}")
-    if len(items) > MAX_LISTED:
-        lines.append(f"…and {len(items) - MAX_LISTED} more")
+        lines.append(f"`{idx}.` {_mark(item)}{_with_time(item)} — {when}")
+    if limit is not None and len(items) > limit:
+        lines.append(f"_…and {len(items) - limit} more — `/overdue` for the rest._")
     return lines
+
+
+def overdue_hint() -> str:
+    return "_`/done <n> overdue` or `/delete <n> overdue`._"
 
 
 def calendar_block(events: list) -> list[str]:
@@ -97,16 +111,28 @@ def calendar_block(events: list) -> list[str]:
     return out
 
 
+CALENDAR_PROBLEMS = {
+    "auth": "⚠️ Calendar unavailable — iCloud rejected the app password.",
+    "error": "⚠️ Calendar unavailable — could not be read this morning.",
+}
+
+
 def daily_brief(
     today: date,
     todays: list[AgendaItem],
     overdue: list[AgendaItem],
     active_projects: list[Project],
     events: list | None = None,
+    *,
+    calendar_problem: str | None = None,
 ) -> str:
     out = [f"☀️ **Daily brief — {fmt_date(today)}**", ""]
     # Calendar first: it is the part of the day already committed, and the
     # to-do list has to fit around it.
+    if calendar_problem:
+        # Said out loud, because an empty calendar and an unreachable one look
+        # identical in a brief -- and the second kind lasted a week unnoticed.
+        out += [CALENDAR_PROBLEMS.get(calendar_problem, CALENDAR_PROBLEMS["error"]), ""]
     out += calendar_block(events or [])
 
     pending = pending_lines(todays)
@@ -124,7 +150,8 @@ def daily_brief(
 
     if overdue:
         out.append(f"**Overdue ({len(overdue)})**")
-        out += _dated(overdue)
+        out += overdue_lines(overdue, limit=MAX_LISTED)
+        out.append(overdue_hint())
         out.append("")
 
     if active_projects:
@@ -152,7 +179,8 @@ def incomplete_alert(
         out.append("")
     if overdue:
         out.append(f"**Past due ({len(overdue)})**")
-        out += _dated(overdue)
+        out += overdue_lines(overdue, limit=MAX_LISTED)
+        out.append(overdue_hint())
     return "\n".join(out).strip()
 
 
@@ -194,7 +222,8 @@ def weekly_planning(
 
     if overdue:
         out.append(f"**Carrying over ({len(overdue)})**")
-        out += _dated(overdue)
+        out += overdue_lines(overdue, limit=MAX_LISTED)
+        out.append(overdue_hint())
         out.append("")
 
     out.append("_Clear what's left this week, then fill in next week._")
@@ -346,21 +375,16 @@ def ai_news(today: date, body: str) -> str:
 
 
 def overdue_list(items: list[AgendaItem]) -> str:
-    """Numbered, dated, and complete.
+    """The whole backlog, numbered the way the brief numbers it.
 
-    Numbered because the backlog is the list most likely to need clearing out,
-    and an unnumbered list is the one thing no command can act on. Complete
-    for the same reason: truncating at ten would leave the rest unreachable,
-    since the numbers have to match what /done and /delete resolve.
+    Not truncated: a number the list doesn't show is a number nothing can
+    resolve, and this is the command someone runs precisely to see the rest.
     """
     if not items:
         return "🎉 Nothing overdue."
-    lines = [f"**Overdue ({len(items)})**"]
-    for idx, item in enumerate(items, start=1):
-        when = fmt_date(item.day) if item.day else "no date"
-        lines.append(f"`{idx}.` {_with_time(item)} — {when}")
-    lines.append("_`/done <n> overdue` or `/delete <n> overdue` to clear them._")
-    return "\n".join(lines)
+    return "\n".join(
+        [f"**Overdue ({len(items)})**", *overdue_lines(items), overdue_hint()]
+    )
 
 
 def project_list(projects: list[Project]) -> str:

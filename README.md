@@ -39,7 +39,9 @@ Everything the bot shows in Discord is English, so nothing needs an input-method
 
 Every message that lists today's unfinished work numbers it the way `/today` does — counting completed rows too, so the numbers are gaps rather than 1,2,3. That is deliberate: `/done` and `/delete` resolve a number against the full day, so renumbering the unfinished subset would make "2" mean a different row depending on which message you read it in.
 
-`overdue` is a list in its own right: `/done 2 overdue`, `/delete 1,3 overdue`. Delayed items span days, so no day argument reaches them, and a backlog that can only be looked at is a backlog that stays. It is printed in full rather than truncated, because a number the list doesn't show is a number nothing can resolve.
+`overdue` is a list in its own right: `/done 2 overdue`, `/delete 1,3 overdue`. Delayed items span days, so no day argument reaches them, and a backlog that can only be looked at is a backlog that stays.
+
+Every message that shows the backlog numbers it identically — the brief, the evening alert, the weekly plan, and `/overdue` — because those numbers get typed into a command that recounts the list itself. The brief stops at ten and points at `/overdue` for the rest; `/overdue` never truncates, since a number the list doesn't show is a number nothing can resolve.
 
 Numbers are per-day, and `/done` and `/delete` take the day as an argument (`/done 2 tomorrow`), so any day's list can be numbered and acted on. Their confirmations name the date, which is what makes a wrong day obvious immediately. A list for a day other than today repeats the argument you'd need.
 
@@ -220,6 +222,9 @@ Items added with a time are mirrored into `ICLOUD_WRITE_CALENDAR` as 30-minute e
 Thirty minutes because an agenda item carries a start and nothing else. A wrong end is easy to drag in the calendar; a missing event is not.
 
 The Notion row is written first, so a calendar failure reports itself on its own line rather than failing the whole command — the task is in the agenda either way.
+
+**A calendar that can't be read says so in the brief.** The block is simply absent otherwise, which is indistinguishable from a day with no events — that hid an expired app password for a week. An authorisation failure is named specifically, because it will not clear up on its own: only a new app-specific password from appleid.apple.com fixes it.
+
 
 ## The AI news digest
 

@@ -55,27 +55,36 @@ class Jobs:
 
     # -- message builders --------------------------------------------------
 
-    async def calendar_on(self, day: date) -> list:
-        """Today's calendar events, or nothing if the feeds can't be read.
+    async def calendar_on(self, day: date) -> tuple[list, str | None]:
+        """Today's events, plus why they are missing when they are.
 
         A calendar outage should cost the brief its calendar block, not the
-        whole brief.
+        whole brief -- but it should not cost it silently either. This failed
+        every morning for a week with an expired password and the only sign
+        was the absence of a block nobody was looking for.
         """
         if self.calendar_source is None:
-            return []
+            return [], None
         try:
-            return await self.calendar_source(day, self.config.tz)
-        except Exception:
+            return await self.calendar_source(day, self.config.tz), None
+        except Exception as exc:
             log.exception("calendar lookup failed")
-            return []
+            # An authorisation failure will not clear up on its own: the app
+            # password has been revoked or has expired, and only the person
+            # holding the Apple ID can issue another.
+            if "authorization" in type(exc).__name__.casefold():
+                return [], "auth"
+            return [], "error"
 
     async def build_daily_brief(self) -> str:
         today = self.today()
         todays = await self.agenda.items_on(today)
         overdue = await self.agenda.overdue(today)
         active = await self.projects.active() if self.projects else []
-        events = await self.calendar_on(today)
-        return reports.daily_brief(today, todays, overdue, active, events)
+        events, calendar_problem = await self.calendar_on(today)
+        return reports.daily_brief(
+            today, todays, overdue, active, events, calendar_problem=calendar_problem
+        )
 
     async def build_incomplete_alert(self) -> str | None:
         today = self.today()

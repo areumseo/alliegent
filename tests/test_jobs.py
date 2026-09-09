@@ -332,3 +332,54 @@ def test_jobs_today_uses_the_configured_timezone_by_default():
     jobs, _, _ = build()
     jobs._clock = None
     assert isinstance(jobs.today(), date)
+
+
+# -- a calendar that cannot be read ---------------------------------------
+
+
+async def test_a_broken_calendar_is_reported_in_the_brief():
+    """It failed every morning for a week and the only sign was a block that
+    wasn't there. An empty calendar and an unreachable one must not look the
+    same."""
+    from caldav.lib.error import AuthorizationError
+
+    async def source(day, tz):
+        raise AuthorizationError(url="https://caldav.icloud.com", reason="Unauthorized")
+
+    jobs, _, _ = build()
+    jobs.calendar_source = source
+    text = await jobs.build_daily_brief()
+    assert "Calendar unavailable" in text
+    assert "app password" in text
+
+
+async def test_a_transient_calendar_failure_says_so_differently():
+    """A network blip needs no action; a rejected password needs a new one."""
+
+    async def source(day, tz):
+        raise TimeoutError("no answer")
+
+    jobs, _, _ = build()
+    jobs.calendar_source = source
+    text = await jobs.build_daily_brief()
+    assert "Calendar unavailable" in text
+    assert "app password" not in text
+
+
+async def test_a_calendar_failure_still_leaves_a_usable_brief():
+    """The agenda is the point of the brief; the calendar is an addition."""
+
+    async def source(day, tz):
+        raise TimeoutError("no answer")
+
+    jobs, _, _ = build()
+    jobs.calendar_source = source
+    text = await jobs.build_daily_brief()
+    assert "Daily brief" in text
+
+
+async def test_no_calendar_configured_is_not_a_failure():
+    """Most setups have no calendar at all, and that is not news."""
+    jobs, _, _ = build()
+    jobs.calendar_source = None
+    assert "Calendar unavailable" not in await jobs.build_daily_brief()
