@@ -39,7 +39,7 @@ Everything the bot shows in Discord is English, so nothing needs an input-method
 
 Every message that lists today's unfinished work numbers it the way `/today` does — counting completed rows too, so the numbers are gaps rather than 1,2,3. That is deliberate: `/done` and `/delete` resolve a number against the full day, so renumbering the unfinished subset would make "2" mean a different row depending on which message you read it in.
 
-`overdue` is a list in its own right: `/done 2 overdue`, `/delete 1,3 overdue`. Delayed items span days, so no day argument reaches them, and a backlog that can only be looked at is a backlog that stays.
+`overdue` is a list in its own right: `/done 2 overdue`, `/delete 1,3 overdue`. Type it straight through — Discord only moves to the next option when you press Tab, so the day usually lands in the numbers field, and the commands read it back out from there rather than answering "Not a number". Delayed items span days, so no day argument reaches them, and a backlog that can only be looked at is a backlog that stays.
 
 Every message that shows the backlog numbers it identically — the brief, the evening alert, the weekly plan, and `/overdue` — because those numbers get typed into a command that recounts the list itself. The brief stops at ten and points at `/overdue` for the rest; `/overdue` never truncates, since a number the list doesn't show is a number nothing can resolve.
 

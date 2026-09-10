@@ -296,6 +296,27 @@ def parse_day(text: str | None, today: date) -> date:
     )
 
 
+def split_numbers_and_when(text: str) -> tuple[str, str]:
+    """Separate "1 overdue" into the numbers and the day that followed them.
+
+    Discord fills one option at a time and only moves to the next when you
+    press Tab, so typing the whole command in one go puts "1 overdue" into the
+    numbers field -- and the reply was "Not a number: 'overdue'", which reads
+    like the command is broken rather than like a typing rule was missed.
+
+    Numbers come first, so everything from the first non-numeric word on is
+    the day. Nothing is guessed here: the remainder goes through the same
+    parser as the option would have.
+    """
+    words = text.replace(",", " ").split()
+    cut = len(words)
+    for index, word in enumerate(words):
+        if not word.lstrip("+-").isdigit():
+            cut = index
+            break
+    return " ".join(words[:cut]), " ".join(words[cut:])
+
+
 def parse_numbers(text: str) -> list[int]:
     """Parse "3", "3,5", "3 5", or "3, 5" into [3, 5].
 
@@ -342,6 +363,15 @@ async def _resolve(
     the day comes back as None and callers that need one read it off each
     item -- which is the item's real date either way.
     """
+    numbers, trailing = split_numbers_and_when(numbers)
+    if trailing:
+        if when and when.strip().casefold() != trailing.strip().casefold():
+            await interaction.followup.send(
+                f"⚠️ Two days given: {trailing!r} and {when!r}. Use one."
+            )
+            return None
+        when = trailing
+
     try:
         wanted = parse_numbers(numbers)
     except ValueError as exc:

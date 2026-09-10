@@ -247,3 +247,39 @@ def test_a_day_is_not_mistaken_for_the_backlog():
 
     for word in (None, "", "today", "tomorrow", "2026-08-15", "내일"):
         assert not wants_overdue(word), word
+
+
+# -- typing the whole command into one field -------------------------------
+
+
+def test_a_day_typed_after_the_numbers_is_read_as_the_day():
+    """Discord fills one option at a time and only advances on Tab, so
+    `/done 1 overdue` typed straight through puts both words in `numbers` —
+    and the reply was "Not a number: 'overdue'", which reads like the command
+    is broken rather than like a typing rule was missed."""
+    from alliegent.integrations.discord_bot import split_numbers_and_when
+
+    assert split_numbers_and_when("1 overdue") == ("1", "overdue")
+    assert split_numbers_and_when("1,3 tomorrow") == ("1 3", "tomorrow")
+    assert split_numbers_and_when("2 08-15") == ("2", "08-15")
+
+
+def test_numbers_alone_leave_no_day_behind():
+    from alliegent.integrations.discord_bot import split_numbers_and_when
+
+    for text in ("1", "1,3", "1 3", "  2  "):
+        numbers, when = split_numbers_and_when(text)
+        assert when == "", text
+        assert numbers
+
+
+def test_everything_after_the_first_word_belongs_to_the_day():
+    """Korean date words are two syllables and no digits, and a date can carry
+    a space; splitting on the first non-number keeps both intact."""
+    from alliegent.integrations.discord_bot import split_numbers_and_when
+
+    assert split_numbers_and_when("3 5 내일") == ("3 5", "내일")
+    assert split_numbers_and_when("1 day after tomorrow") == (
+        "1",
+        "day after tomorrow",
+    )
