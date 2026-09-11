@@ -61,12 +61,12 @@ def make_bot() -> AlliegentBot:
     )
 
 
-# The Karrot channel is deliberately Korean: every item name and category in
-# that database is Korean already, and a listing translated into English is one
-# the reader cannot search for. The rest of the bot stays English so no slash
-# command needs an input-method switch — the command *names* here are ASCII
-# too, only what they say is Korean.
-KOREAN_COMMANDS = {"list", "add", "sold", "paid", "bump", "summary"}
+# Two option descriptions name Korean values, because the values themselves
+# are Korean and the description is the only place a user finds them: the date
+# words /add accepts, and the categories the Karrot database uses. Listing a
+# value is not the same as writing the interface in Korean — every command and
+# option description is English, including Karrot's, whose *replies* are not.
+KOREAN_VALUE_OPTIONS = {("add", "when"), ("karrot add", "category")}
 
 
 def test_command_names_pass_discord_validation():
@@ -91,27 +91,42 @@ def test_every_command_has_a_description():
 
 def test_add_command_options():
     bot = make_bot()
-    add = next(c for c in leaf_commands(bot) if c.name == "add")
+    add = next(c for c in leaf_commands(bot) if c.qualified_name == "add")
     assert {p.display_name for p in add.parameters} == {"task", "when", "at", "cal"}
 
 
 def test_descriptions_are_english_too():
-    """One exception: /add's `when` lists the Korean date words it accepts.
-    That description is the only place a user learns they work, so the values
-    have to appear there — spelling them out is not the same as writing the
-    interface in Korean."""
+    """Every command reads as English in Discord's own UI, Karrot included.
+
+    The channel's replies are Korean on purpose, but the command picker is
+    where you choose a command before any reply exists — and a picker that
+    switches language mid-list is just harder to scan.
+    """
     for cmd in leaf_commands(make_bot()):
-        if cmd.name in KOREAN_COMMANDS:
-            continue
-        assert cmd.description.isascii(), cmd.description
+        assert cmd.description.isascii(), (cmd.qualified_name, cmd.description)
         for param in cmd.parameters:
-            if (cmd.name, param.display_name) == ("add", "when"):
+            if (cmd.qualified_name, param.display_name) in KOREAN_VALUE_OPTIONS:
                 continue
-            assert param.description.isascii(), param.description
+            assert param.description.isascii(), (cmd.qualified_name, param.description)
+
+
+def test_korean_values_are_still_advertised_where_they_are_the_values():
+    """The exception has to keep earning itself: if these stop listing the
+    Korean words, nobody learns they can be typed."""
+    # Qualified, because /add and /karrot add share a name.
+    commands = {c.qualified_name: c for c in leaf_commands(make_bot())}
+    for qualified, option_name, word in (
+        ("add", "when", "내일"),
+        ("karrot add", "category", "의류"),
+    ):
+        option = next(
+            p for p in commands[qualified].parameters if p.display_name == option_name
+        )
+        assert word in option.description, qualified
 
 
 def test_add_advertises_the_korean_date_words():
-    add = next(c for c in leaf_commands(make_bot()) if c.name == "add")
+    add = next(c for c in leaf_commands(make_bot()) if c.qualified_name == "add")
     when = next(p for p in add.parameters if p.display_name == "when")
     for word in ("오늘", "내일", "모레"):
         assert word in when.description

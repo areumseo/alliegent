@@ -722,7 +722,7 @@ def _register(bot: AlliegentBot) -> None:
         ][:25]
 
     karrot_group = app_commands.Group(
-        name="karrot", description="Second-hand listings (Korean)"
+        name="karrot", description="Second-hand listings; replies are in Korean"
     )
     tree.add_command(karrot_group)
 
@@ -751,8 +751,10 @@ def _register(bot: AlliegentBot) -> None:
             return None
         return items[number - 1]
 
-    @karrot_group.command(name="list", description="판매 목록")
-    @app_commands.describe(status="Listed / Reserved / Sold (기본: 처리할 것 전부)")
+    @karrot_group.command(name="list", description="Show listings")
+    @app_commands.describe(
+        status="Listed / Reserved / Sold (default: everything still to handle)"
+    )
     async def karrot_list(
         interaction: discord.Interaction, status: str | None = None
     ) -> None:
@@ -775,11 +777,11 @@ def _register(bot: AlliegentBot) -> None:
             message = karrot.item_list(items, today)
         await _deliver(bot, interaction, message, "karrot")
 
-    @karrot_group.command(name="add", description="새 매물 등록")
+    @karrot_group.command(name="add", description="List a new item")
     @app_commands.describe(
-        name="이름",
-        price="가격(원)",
-        category="게임/의류/전자기기/발레/뷰티/문구/잡화/기타",
+        name="Item name",
+        price="Price in won",
+        category="게임/의류/전자기기/발레/뷰티/문구/잡화/기타 (optional)",
     )
     async def karrot_add(
         interaction: discord.Interaction,
@@ -799,8 +801,10 @@ def _register(bot: AlliegentBot) -> None:
         filed = f" · {item.category}" if item.category else ""
         await interaction.followup.send(f"🥕 등록 — **{item.name}** ({item.won}{filed})")
 
-    @karrot_group.command(name="sold", description="판매 완료 처리")
-    @app_commands.describe(number="`/karrot list`의 번호", paid="입금까지 받았으면 True")
+    @karrot_group.command(name="sold", description="Mark an item sold")
+    @app_commands.describe(
+        number="Number from /karrot list", paid="True if the money has arrived"
+    )
     async def karrot_sold(
         interaction: discord.Interaction, number: int, paid: bool = False
     ) -> None:
@@ -812,8 +816,8 @@ def _register(bot: AlliegentBot) -> None:
         tail = "" if paid else " · 입금 대기"
         await interaction.followup.send(f"💰 판매 — **{item.name}** ({item.won}{tail})")
 
-    @karrot_group.command(name="paid", description="입금 확인")
-    @app_commands.describe(number="`/karrot list`의 번호")
+    @karrot_group.command(name="paid", description="Confirm payment received")
+    @app_commands.describe(number="Number from /karrot list")
     async def karrot_paid(interaction: discord.Interaction, number: int) -> None:
         await interaction.response.defer()
         item = await _karrot_pick(interaction, number)
@@ -822,8 +826,10 @@ def _register(bot: AlliegentBot) -> None:
         await bot.karrot.mark_paid(item)
         await interaction.followup.send(f"✅ 입금 확인 — **{item.name}** ({item.won})")
 
-    @karrot_group.command(name="bump", description="끌올 — 정체 일수를 오늘부터 다시")
-    @app_commands.describe(number="`/karrot list`의 번호")
+    @karrot_group.command(
+        name="bump", description="Bump a listing, restarting its idle count"
+    )
+    @app_commands.describe(number="Number from /karrot list")
     async def karrot_bump(interaction: discord.Interaction, number: int) -> None:
         await interaction.response.defer()
         item = await _karrot_pick(interaction, number)
@@ -832,7 +838,7 @@ def _register(bot: AlliegentBot) -> None:
         await bot.karrot.bump(item, bot.today())
         await interaction.followup.send(f"🔼 끌올 — **{item.name}**")
 
-    @karrot_group.command(name="summary", description="집계")
+    @karrot_group.command(name="summary", description="Totals for the whole database")
     async def karrot_summary(interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         if bot.karrot is None:
