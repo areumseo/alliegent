@@ -24,6 +24,7 @@ class Secrets(BaseSettings):
     notion_token: str = ""
     notion_agenda_db_id: str = ""
     notion_projects_db_id: str = ""
+    notion_karrot_db_id: str = ""
 
     anthropic_api_key: str = ""
 
@@ -62,6 +63,7 @@ class Secrets(BaseSettings):
     discord_projects_channel_id: int = 0
     discord_review_channel_id: int = 0
     discord_news_channel_id: int = 0
+    discord_karrot_channel_id: int = 0
 
     @field_validator(
         "discord_guild_id",
@@ -70,6 +72,7 @@ class Secrets(BaseSettings):
         "discord_projects_channel_id",
         "discord_review_channel_id",
         "discord_news_channel_id",
+        "discord_karrot_channel_id",
         mode="before",
     )
     @classmethod
@@ -98,6 +101,7 @@ class Secrets(BaseSettings):
             "projects": self.discord_projects_channel_id or self.discord_channel_id,
             "review": self.discord_review_channel_id or agenda,
             "news": self.discord_news_channel_id or self.discord_channel_id,
+            "karrot": self.discord_karrot_channel_id or self.discord_channel_id,
         }
         target = routes.get(kind, agenda)
         if not target:
@@ -152,6 +156,8 @@ class Schedule(BaseModel):
     stale_project_time: str = "10:00"
     weekly_review_weekday: str = "sun"
     weekly_review_time: str = "21:00"
+    # Stale listings and unpaid sales, to the Karrot channel. Blank to disable.
+    karrot_report: str = "09:00"
 
     @field_validator("incomplete_alert", mode="before")
     @classmethod
@@ -186,6 +192,12 @@ class ProjectsConfig(BaseModel):
     )
 
 
+class KarrotConfig(BaseModel):
+    # How long a listing sits before the morning report calls it stale. Counted
+    # from the last bump, so bumping resets it.
+    stale_after_days: int = 30
+
+
 class NewsConfig(BaseModel):
     # Five items of three sentences in two languages is most of the output
     # tokens this job spends, and the digest is read on a phone.
@@ -198,6 +210,7 @@ class Config(BaseModel):
     agenda: AgendaConfig = Field(default_factory=AgendaConfig)
     projects: ProjectsConfig = Field(default_factory=ProjectsConfig)
     news: NewsConfig = Field(default_factory=NewsConfig)
+    karrot: KarrotConfig = Field(default_factory=KarrotConfig)
 
     @property
     def tz(self) -> ZoneInfo:

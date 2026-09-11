@@ -265,6 +265,7 @@ def test_scheduler_registers_the_enabled_jobs():
     assert ids == {
         "daily_brief",
         "ai_news",
+        "karrot_report",
         "weekly_planning",
         "stale_projects",
         "weekly_review",

@@ -33,6 +33,7 @@ class Jobs:
         config: Config,
         notify: Notifier,
         clock: Callable[[], date] | None = None,
+        karrot=None,
         anthropic_api_key: str = "",
         calendar_source: Callable | None = None,
         secrets: Secrets | None = None,
@@ -40,6 +41,7 @@ class Jobs:
         self.calendar_source = calendar_source
         self.agenda = agenda
         self.projects = projects
+        self.karrot = karrot
         self.config = config
         self.notify = notify
         self._anthropic_api_key = anthropic_api_key
@@ -133,6 +135,21 @@ class Jobs:
             return None
         return reports.ai_news(day, body)
 
+    async def build_karrot_report(self) -> str | None:
+        """Stale listings and unpaid sales, in Korean.
+
+        None when there is nothing to act on: a daily "all clear" in a channel
+        about second-hand listings is how that channel stops being read.
+        """
+        if self.karrot is None:
+            return None
+        from . import karrot as karrot_module
+
+        today = self.today()
+        days = self.config.karrot.stale_after_days
+        report = await self.karrot.stale_report(today, days)
+        return karrot_module.stale_message(report, today, days)
+
     async def build_weekly_planning(self) -> str:
         """Nudge to plan the coming week, with what is already in it.
 
@@ -215,6 +232,9 @@ class Jobs:
         except Exception:
             # Email failure must not prevent or undo Discord delivery.
             log.exception("AI news email delivery failed")
+
+    async def run_karrot_report(self) -> None:
+        await self._send(await self.build_karrot_report(), "karrot")
 
     async def run_weekly_planning(self) -> None:
         await self._send(await self.build_weekly_planning(), "agenda")

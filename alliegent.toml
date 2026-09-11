@@ -12,6 +12,7 @@ timezone = "Asia/Seoul"
 # 24h local time in `timezone` above.
 daily_brief = "08:00"          # morning briefing to Discord
 ai_news = "09:00"              # daily AI news digest
+karrot_report = "09:00"        # Karrot: stale listings and unpaid sales
 # Nudge about today's unfinished items. One in the afternoon while the day
 # can still change, one at night to close it out. Silent when nothing is left.
 incomplete_alert = ["14:00", "19:30"]

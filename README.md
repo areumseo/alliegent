@@ -14,6 +14,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
 | Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
 | Stale project nudge | Wed 10:00 | Projects with no linked agenda activity for N days. Off until a projects database exists |
+| Karrot report | 09:00 daily | Stale listings and unpaid sales, to the Karrot channel. Silent when there is nothing to act on |
 | Weekly review | Sun 21:00 | Completion stats for the past week as a review draft |
 
 The evening alert stays silent when there is nothing pending. A daily "all clear" ping trains you to ignore the channel, so only the morning brief is unconditional — and it distinguishes a day you finished from a day with nothing on it, rather than reporting both as empty.
@@ -33,9 +34,10 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/overdue` | Overdue, unfinished items — numbered, so they can be cleared |
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
+| `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `paid`, `bump`, `summary`. This channel speaks Korean — see below |
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
 
-Everything the bot shows in Discord is English, so nothing needs an input-method switch. Korean date words are still accepted as `when` values.
+Everything the bot shows in Discord is English, so nothing needs an input-method switch — with one deliberate exception, the Karrot channel, for the reason given below. Korean date words are still accepted as `when` values.
 
 Every message that lists today's unfinished work numbers it the way `/today` does — counting completed rows too, so the numbers are gaps rather than 1,2,3. That is deliberate: `/done` and `/delete` resolve a number against the full day, so renumbering the unfinished subset would make "2" mean a different row depending on which message you read it in.
 
@@ -80,6 +82,7 @@ Each job posts to the channel matching its kind:
 | `DISCORD_PROJECTS_CHANNEL_ID` | Stale project nudges |
 | `DISCORD_REVIEW_CHANNEL_ID` | Weekly review (falls back to the agenda channel) |
 | `DISCORD_NEWS_CHANNEL_ID` | Daily AI news digest |
+| `DISCORD_KARROT_CHANNEL_ID` | Karrot listings report |
 | `DISCORD_CHANNEL_ID` | Fallback for anything left blank |
 
 ### 3. Run locally
@@ -248,6 +251,20 @@ Reading feeds instead fixes those by construction rather than by tuning:
 The cost is a list to maintain. A feed that moves or dies goes quiet rather than failing, so any feed contributing nothing is named in a `no articles from:` warning — worth reading if the digest starts looking thin.
 
 Delivery is Discord, plus Gmail if `AI_NEWS_EMAIL_TO` is set.
+
+## Karrot listings
+
+Second-hand sales live in their own Notion database and their own channel, and **this one channel is in Korean**. Every item name and category in that database is Korean already; a listing translated into "Clothing" is one the reader cannot search for. The slash commands keep ASCII names so nothing needs an input-method switch — only what they say is Korean.
+
+`/karrot list` numbers one working set: everything still listed or reserved, plus anything sold but not yet paid for. That is exactly the set with something left to do, which is what makes a single number space workable — a sold and settled item is worth reading but never worth acting on. `/karrot list Sold` is a read-only view and is deliberately unnumbered, so its numbers cannot be confused with the actionable ones.
+
+Three judgements carried over from the script this was ported from, each earned:
+
+- `Sold At` is stamped only on the **first** move into Sold, so changing the status twice does not push the sale date to today.
+- Idleness counts from `Bumped` when there is one, else `Listed At` — bumping restarts the clock, which is the point of bumping.
+- Items with **no date at all** are reported separately rather than as stale. Nineteen migrated rows have no `Listed At`, and letting them appear as stale every morning is how a daily report becomes one you stop reading. Filling the date in moves them into the normal count automatically.
+
+`NOTION_KARROT_DB_ID` switches the whole feature off when blank.
 
 ## The agenda database
 

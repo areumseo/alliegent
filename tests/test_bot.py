@@ -29,7 +29,24 @@ EXPECTED = {
     "projects",
     "brief",
     "news",
+    "karrot",
 }
+
+
+def leaf_commands(bot: AlliegentBot):
+    """Every command that actually takes arguments, groups expanded.
+
+    /karrot is a group, and a group has subcommands rather than parameters —
+    walking the tree without expanding it silently skips everything inside.
+    """
+    out = []
+    for command in bot.tree.get_commands():
+        children = getattr(command, "commands", None)
+        if children:
+            out.extend(children)
+        else:
+            out.append(command)
+    return out
 
 
 def make_bot() -> AlliegentBot:
@@ -44,6 +61,14 @@ def make_bot() -> AlliegentBot:
     )
 
 
+# The Karrot channel is deliberately Korean: every item name and category in
+# that database is Korean already, and a listing translated into English is one
+# the reader cannot search for. The rest of the bot stays English so no slash
+# command needs an input-method switch — the command *names* here are ASCII
+# too, only what they say is Korean.
+KOREAN_COMMANDS = {"list", "add", "sold", "paid", "bump", "summary"}
+
+
 def test_command_names_pass_discord_validation():
     bot = make_bot()
     assert {cmd.name for cmd in bot.tree.get_commands()} == EXPECTED
@@ -51,7 +76,7 @@ def test_command_names_pass_discord_validation():
 
 def test_command_names_need_no_input_method_switch():
     """Typing a slash command should never require switching to a Korean IME."""
-    for cmd in make_bot().tree.get_commands():
+    for cmd in leaf_commands(make_bot()):
         assert cmd.name.isascii(), cmd.name
         for param in cmd.parameters:
             assert param.display_name.isascii(), param.display_name
@@ -59,14 +84,14 @@ def test_command_names_need_no_input_method_switch():
 
 def test_every_command_has_a_description():
     # Discord rejects commands with an empty description.
-    for cmd in make_bot().tree.get_commands():
+    for cmd in leaf_commands(make_bot()):
         assert cmd.description
         assert len(cmd.description) <= 100
 
 
 def test_add_command_options():
     bot = make_bot()
-    add = next(c for c in bot.tree.get_commands() if c.name == "add")
+    add = next(c for c in leaf_commands(bot) if c.name == "add")
     assert {p.display_name for p in add.parameters} == {"task", "when", "at", "cal"}
 
 
@@ -75,7 +100,9 @@ def test_descriptions_are_english_too():
     That description is the only place a user learns they work, so the values
     have to appear there — spelling them out is not the same as writing the
     interface in Korean."""
-    for cmd in make_bot().tree.get_commands():
+    for cmd in leaf_commands(make_bot()):
+        if cmd.name in KOREAN_COMMANDS:
+            continue
         assert cmd.description.isascii(), cmd.description
         for param in cmd.parameters:
             if (cmd.name, param.display_name) == ("add", "when"):
@@ -84,14 +111,14 @@ def test_descriptions_are_english_too():
 
 
 def test_add_advertises_the_korean_date_words():
-    add = next(c for c in make_bot().tree.get_commands() if c.name == "add")
+    add = next(c for c in leaf_commands(make_bot()) if c.name == "add")
     when = next(p for p in add.parameters if p.display_name == "when")
     for word in ("오늘", "내일", "모레"):
         assert word in when.description
 
 
 def test_option_descriptions_fit_discords_limit():
-    for cmd in make_bot().tree.get_commands():
+    for cmd in leaf_commands(make_bot()):
         for param in cmd.parameters:
             assert len(param.description) <= 100, (cmd.name, param.display_name)
 
@@ -185,6 +212,7 @@ COMMAND_CHANNELS = {
     "brief": "agenda",
     "projects": "projects",
     "news": "news",
+    "karrot": "karrot",
 }
 
 # Short write confirmations answer in place: routing a one-line "Added — X"

@@ -129,6 +129,18 @@ class AgendaService:
             await self.status_type()
         return self._closed or {self._cfg.agenda.status_values["done"]}
 
+    async def status_names(self) -> list[str]:
+        """Every status the database offers, in the order Notion lists them."""
+        schema = await self._client.get_schema(await self.data_source_id())
+        definition = schema.get(self.props.status) or {}
+        if definition.get("type") != "status":
+            return sorted(self._cfg.agenda.status_values.values())
+        return [
+            option["name"]
+            for option in (definition.get("status") or {}).get("options", [])
+            if option.get("name")
+        ]
+
     async def started(self) -> set[str]:
         """Statuses that mean the item is underway."""
         if self._started is None:

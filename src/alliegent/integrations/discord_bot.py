@@ -12,7 +12,7 @@ from typing import Any
 import discord
 from discord import app_commands
 
-from .. import reports
+from .. import karrot, reports
 from ..agenda import AgendaService, ProjectService
 from ..chat import ChatAgent, strip_mentions
 from ..config import Config, Secrets
@@ -30,6 +30,7 @@ class AlliegentBot(discord.Client):
         agenda: AgendaService,
         projects: ProjectService | None,
         secrets: Secrets,
+        karrot=None,
         guild_id: int = 0,
         enable_chat: bool = True,
     ) -> None:
@@ -44,6 +45,7 @@ class AlliegentBot(discord.Client):
         self.config = config
         self.agenda = agenda
         self.projects = projects
+        self.karrot = karrot
         self.secrets = secrets
         self.guild_id = guild_id
         self.tree = app_commands.CommandTree(self)
@@ -58,6 +60,7 @@ class AlliegentBot(discord.Client):
             projects,
             config,
             self.notify,
+            karrot=karrot,
             anthropic_api_key=secrets.anthropic_api_key,
             calendar_source=make_source(secrets),
             secrets=secrets,
@@ -337,6 +340,55 @@ def parse_numbers(text: str) -> list[int]:
 
 
 OVERDUE_WORDS = {"overdue", "od", "late", "밀린", "지난"}
+
+
+GROUP_WORDS = {
+    "in progress": "started",
+    "inprogress": "started",
+    "in-progress": "started",
+    "started": "started",
+    "진행": "started",
+    "진행중": "started",
+    "to do": "todo",
+    "todo": "todo",
+    "to-do": "todo",
+    "not started": "todo",
+    "안함": "todo",
+}
+
+
+def _normalise(text: str) -> str:
+    return " ".join(text.strip().casefold().replace("-", " ").split())
+
+
+async def status_filter(bot: AlliegentBot, text: str) -> tuple[set[str], str]:
+    """Turn a typed status into the set of statuses it names.
+
+    Accepts a group ("in progress") or one exact status ("On hold"), because
+    the two are equally natural to type and Notion's own grouping is what
+    makes the first meaningful. Raises ValueError naming what is available --
+    a filter that silently matches nothing looks like an empty backlog.
+    """
+    names = await bot.agenda.status_names()
+    closed = await bot.agenda.closed()
+    started = await bot.agenda.started()
+    open_names = [n for n in names if n not in closed]
+
+    wanted = _normalise(text)
+    group = GROUP_WORDS.get(wanted)
+    if group == "started":
+        return started, "in progress"
+    if group == "todo":
+        return {n for n in open_names if n not in started}, "to do"
+
+    for name in names:
+        if _normalise(name) == wanted:
+            return {name}, name
+
+    raise ValueError(
+        f"No status called {text!r}. Try: "
+        + ", ".join([*open_names, "in progress", "to do"])
+    )
 
 
 def wants_overdue(when: str | None) -> bool:
@@ -623,10 +675,172 @@ def _register(bot: AlliegentBot) -> None:
         await interaction.followup.send(f"🕘 {titles} — {moved_to} on {on}")
 
     @tree.command(name="overdue", description="Show overdue, unfinished items")
-    async def overdue_cmd(interaction: discord.Interaction) -> None:
+    @app_commands.describe(
+        status="Only items with this status, e.g. In progress (default: all)"
+    )
+    async def overdue_cmd(
+        interaction: discord.Interaction, status: str | None = None
+    ) -> None:
         await interaction.response.defer()
         items = await bot.agenda.overdue(bot.today())
-        await _deliver(bot, interaction, reports.overdue_list(items), "agenda")
+
+        keep: set[str] | None = None
+        label = ""
+        if status:
+            try:
+                keep, label = await status_filter(bot, status)
+            except ValueError as exc:
+                await interaction.followup.send(f"⚠️ {exc}")
+                return
+
+        await _deliver(
+            bot, interaction, reports.overdue_list(items, keep=keep, label=label), "agenda"
+        )
+
+    @overdue_cmd.autocomplete("status")
+    async def _overdue_status_options(
+        interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """Offer the database's own statuses, so none has to be remembered.
+
+        Read from Notion rather than listed here: the statuses are the user's
+        to rename, and a hardcoded list would go stale silently.
+        """
+        try:
+            closed = await bot.agenda.closed()
+            names = [n for n in await bot.agenda.status_names() if n not in closed]
+        except Exception:
+            log.exception("status autocomplete failed")
+            names = []
+        options = ["In progress", "To do", *names]
+        seen = list(dict.fromkeys(options))
+        typed = current.casefold()
+        return [
+            app_commands.Choice(name=option, value=option)
+            for option in seen
+            if typed in option.casefold()
+        ][:25]
+
+    karrot_group = app_commands.Group(
+        name="karrot", description="Second-hand listings (Korean)"
+    )
+    tree.add_command(karrot_group)
+
+    async def _karrot_items(interaction: discord.Interaction):
+        """The numbered working set, or None when the feature is off.
+
+        One number space for everything that still needs a hand -- listed,
+        reserved, and sold-but-unpaid. A sold and settled item is readable but
+        not actionable, so numbering it would only compete with these.
+        """
+        if bot.karrot is None:
+            await interaction.followup.send(
+                "⚠️ NOTION_KARROT_DB_ID가 설정되지 않았습니다."
+            )
+            return None
+        return await bot.karrot.open_items(bot.today())
+
+    async def _karrot_pick(interaction: discord.Interaction, number: int):
+        items = await _karrot_items(interaction)
+        if items is None:
+            return None
+        if not 1 <= number <= len(items):
+            await interaction.followup.send(
+                f"⚠️ 번호는 1~{len(items)} 사이여야 합니다. `/karrot list`로 확인하세요."
+            )
+            return None
+        return items[number - 1]
+
+    @karrot_group.command(name="list", description="판매 목록")
+    @app_commands.describe(status="Listed / Reserved / Sold (기본: 처리할 것 전부)")
+    async def karrot_list(
+        interaction: discord.Interaction, status: str | None = None
+    ) -> None:
+        await interaction.response.defer()
+        if bot.karrot is None:
+            await interaction.followup.send("⚠️ NOTION_KARROT_DB_ID가 설정되지 않았습니다.")
+            return
+        today = bot.today()
+        if status:
+            try:
+                items = await bot.karrot.by_status(status.strip().title())
+            except ValueError as exc:
+                await interaction.followup.send(f"⚠️ {exc}")
+                return
+            # 번호는 처리 대상 목록에만 붙는다. 상태별 조회는 읽기용이라
+            # 번호를 붙이면 다른 목록의 번호와 충돌한다.
+            message = karrot.read_only_list(items, today, title=status.strip().title())
+        else:
+            items = await bot.karrot.open_items(today)
+            message = karrot.item_list(items, today)
+        await _deliver(bot, interaction, message, "karrot")
+
+    @karrot_group.command(name="add", description="새 매물 등록")
+    @app_commands.describe(
+        name="이름",
+        price="가격(원)",
+        category="게임/의류/전자기기/발레/뷰티/문구/잡화/기타",
+    )
+    async def karrot_add(
+        interaction: discord.Interaction,
+        name: str,
+        price: int,
+        category: str | None = None,
+    ) -> None:
+        await interaction.response.defer()
+        if bot.karrot is None:
+            await interaction.followup.send("⚠️ NOTION_KARROT_DB_ID가 설정되지 않았습니다.")
+            return
+        try:
+            item = await bot.karrot.add(name, price, bot.today(), category)
+        except ValueError as exc:
+            await interaction.followup.send(f"⚠️ {exc}")
+            return
+        filed = f" · {item.category}" if item.category else ""
+        await interaction.followup.send(f"🥕 등록 — **{item.name}** ({item.won}{filed})")
+
+    @karrot_group.command(name="sold", description="판매 완료 처리")
+    @app_commands.describe(number="`/karrot list`의 번호", paid="입금까지 받았으면 True")
+    async def karrot_sold(
+        interaction: discord.Interaction, number: int, paid: bool = False
+    ) -> None:
+        await interaction.response.defer()
+        item = await _karrot_pick(interaction, number)
+        if item is None:
+            return
+        await bot.karrot.mark_sold(item, bot.today(), paid=paid)
+        tail = "" if paid else " · 입금 대기"
+        await interaction.followup.send(f"💰 판매 — **{item.name}** ({item.won}{tail})")
+
+    @karrot_group.command(name="paid", description="입금 확인")
+    @app_commands.describe(number="`/karrot list`의 번호")
+    async def karrot_paid(interaction: discord.Interaction, number: int) -> None:
+        await interaction.response.defer()
+        item = await _karrot_pick(interaction, number)
+        if item is None:
+            return
+        await bot.karrot.mark_paid(item)
+        await interaction.followup.send(f"✅ 입금 확인 — **{item.name}** ({item.won})")
+
+    @karrot_group.command(name="bump", description="끌올 — 정체 일수를 오늘부터 다시")
+    @app_commands.describe(number="`/karrot list`의 번호")
+    async def karrot_bump(interaction: discord.Interaction, number: int) -> None:
+        await interaction.response.defer()
+        item = await _karrot_pick(interaction, number)
+        if item is None:
+            return
+        await bot.karrot.bump(item, bot.today())
+        await interaction.followup.send(f"🔼 끌올 — **{item.name}**")
+
+    @karrot_group.command(name="summary", description="집계")
+    async def karrot_summary(interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        if bot.karrot is None:
+            await interaction.followup.send("⚠️ NOTION_KARROT_DB_ID가 설정되지 않았습니다.")
+            return
+        today = bot.today()
+        data = await bot.karrot.summary(today)
+        await _deliver(bot, interaction, karrot.summary_message(data, today), "karrot")
 
     @tree.command(name="projects", description="Show active projects")
     async def projects_cmd(interaction: discord.Interaction) -> None:

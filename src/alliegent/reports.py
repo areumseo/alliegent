@@ -73,7 +73,12 @@ def pending_lines(todays: list[AgendaItem]) -> list[str]:
     ]
 
 
-def overdue_lines(items: list[AgendaItem], *, limit: int | None = None) -> list[str]:
+def overdue_lines(
+    items: list[AgendaItem],
+    *,
+    limit: int | None = None,
+    keep: set[str] | None = None,
+) -> list[str]:
     """Overdue items, numbered and dated.
 
     Numbered because every message that shows the backlog is a place someone
@@ -84,13 +89,22 @@ def overdue_lines(items: list[AgendaItem], *, limit: int | None = None) -> list[
     Dated because these span days by definition, and a number alone doesn't
     say which day it came from.
     """
-    shown = items if limit is None else items[:limit]
     lines = []
-    for idx, item in enumerate(shown, start=1):
+    for idx, item in enumerate(items, start=1):
+        # Numbered against the whole backlog even when filtered: /done recounts
+        # the full list, so renumbering a subset from 1 would send "1" to a
+        # different row than the one being read.
+        if keep is not None and (item.status or "") not in keep:
+            continue
         when = fmt_date(item.day) if item.day else "no date"
         lines.append(f"`{idx}.` {_mark(item)}{_with_time(item)} — {when}")
-    if limit is not None and len(items) > limit:
-        lines.append(f"_…and {len(items) - limit} more — `/overdue` for the rest._")
+        if limit is not None and len(lines) == limit:
+            break
+    remaining = (len(items) if keep is None else len(
+        [i for i in items if (i.status or "") in keep]
+    )) - len(lines)
+    if limit is not None and remaining > 0:
+        lines.append(f"_…and {remaining} more — `/overdue` for the rest._")
     return lines
 
 
@@ -374,17 +388,28 @@ def ai_news(today: date, body: str) -> str:
     return f"🤖 **AI News — {fmt_date(today)}**\n\n{body.strip()}"
 
 
-def overdue_list(items: list[AgendaItem]) -> str:
+def overdue_list(
+    items: list[AgendaItem], *, keep: set[str] | None = None, label: str = ""
+) -> str:
     """The whole backlog, numbered the way the brief numbers it.
 
     Not truncated: a number the list doesn't show is a number nothing can
     resolve, and this is the command someone runs precisely to see the rest.
+
+    `keep` narrows what is displayed without touching the numbering, so a
+    filtered view and an unfiltered one name the same rows.
     """
     if not items:
         return "🎉 Nothing overdue."
-    return "\n".join(
-        [f"**Overdue ({len(items)})**", *overdue_lines(items), overdue_hint()]
+    lines = overdue_lines(items, keep=keep)
+    if not lines:
+        return f"🎉 Nothing overdue is {label}." if label else "🎉 Nothing overdue."
+    header = (
+        f"**Overdue — {label} ({len(lines)} of {len(items)})**"
+        if label
+        else f"**Overdue ({len(items)})**"
     )
+    return "\n".join([header, *lines, overdue_hint()])
 
 
 def project_list(projects: list[Project]) -> str:

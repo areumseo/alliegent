@@ -529,3 +529,49 @@ def test_a_long_backlog_is_trimmed_in_the_brief_but_points_at_the_rest():
     assert "4 more" in brief and "/overdue" in brief
     # The full list is not trimmed, and keeps the same numbering.
     assert "`14.` item 14" in reports.overdue_list(many)
+
+
+# -- filtering the backlog by status ---------------------------------------
+
+
+def backlog_row(title: str, day: date, status: str, *, started: bool = False):
+    return AgendaItem(
+        id=title, title=title, day=day, status=status, done=False, url="",
+        started=started,
+    )
+
+
+MIXED_BACKLOG = [
+    backlog_row("started one", date(2026, 8, 1), "In progress", started=True),
+    backlog_row("untouched", date(2026, 8, 2), "Not started"),
+    backlog_row("paused", date(2026, 8, 3), "On hold", started=True),
+]
+
+
+def test_filtering_keeps_the_numbers_of_the_whole_backlog():
+    """The numbers are typed into /done, which recounts the full list — so a
+    filtered view must not renumber from 1, or "1" means a different row than
+    the one being read."""
+    text = reports.overdue_list(
+        MIXED_BACKLOG, keep={"In progress", "On hold"}, label="in progress"
+    )
+    assert "`1.` 🔸 started one" in text
+    assert "`3.` 🔸 paused" in text
+    assert "untouched" not in text
+
+
+def test_a_filtered_header_says_how_much_is_hidden():
+    text = reports.overdue_list(MIXED_BACKLOG, keep={"Not started"}, label="to do")
+    assert "Overdue — to do (1 of 3)" in text
+
+
+def test_an_unfiltered_list_is_unchanged():
+    text = reports.overdue_list(MIXED_BACKLOG)
+    assert "**Overdue (3)**" in text
+    assert "`2.` untouched" in text
+
+
+def test_a_filter_matching_nothing_says_so():
+    """Silence would read as an empty backlog, which is the opposite of true."""
+    text = reports.overdue_list(MIXED_BACKLOG, keep={"Ready"}, label="Ready")
+    assert "Nothing overdue is Ready" in text
