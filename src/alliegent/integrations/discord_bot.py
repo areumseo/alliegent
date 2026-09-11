@@ -781,7 +781,10 @@ def _register(bot: AlliegentBot) -> None:
     @app_commands.describe(
         name="Item name",
         price="Price in won",
-        category="게임/의류/전자기기/발레/뷰티/문구/잡화/기타 (optional)",
+        category=(
+            "Games / Clothing / Electronics / Ballet / Beauty / Stationery"
+            " / Accessories / Other"
+        ),
     )
     async def karrot_add(
         interaction: discord.Interaction,

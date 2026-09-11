@@ -66,7 +66,7 @@ def make_bot() -> AlliegentBot:
 # words /add accepts, and the categories the Karrot database uses. Listing a
 # value is not the same as writing the interface in Korean — every command and
 # option description is English, including Karrot's, whose *replies* are not.
-KOREAN_VALUE_OPTIONS = {("add", "when"), ("karrot add", "category")}
+KOREAN_VALUE_OPTIONS = {("add", "when")}
 
 
 def test_command_names_pass_discord_validation():
@@ -115,10 +115,7 @@ def test_korean_values_are_still_advertised_where_they_are_the_values():
     Korean words, nobody learns they can be typed."""
     # Qualified, because /add and /karrot add share a name.
     commands = {c.qualified_name: c for c in leaf_commands(make_bot())}
-    for qualified, option_name, word in (
-        ("add", "when", "내일"),
-        ("karrot add", "category", "의류"),
-    ):
+    for qualified, option_name, word in (("add", "when", "내일"),):
         option = next(
             p for p in commands[qualified].parameters if p.display_name == option_name
         )

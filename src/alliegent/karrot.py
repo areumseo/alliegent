@@ -1,10 +1,10 @@
 """당근 판매 목록. Notion의 🥕 Karrot 데이터베이스를 읽고 쓴다.
 
-The Karrot channel is the one surface that speaks Korean. Everywhere else in
-this bot is English so nothing needs an input-method switch, but every item
-name and category in this database is Korean already, and a report that
-translated "의류" into "Clothing" would be reporting on something the reader
-cannot search for.
+The Karrot channel is the one surface whose *messages* are Korean. Item names
+are copied from a Korean marketplace and translating one would report on
+something the reader cannot search for. The command picker and the fixed
+choices (Status, Category) are English, because those are interface rather
+than data -- Status always was, and Category was renamed to match.
 
 The logic here is ported from a standalone script rather than written fresh,
 and its judgement calls are kept -- they are the useful part:
@@ -41,7 +41,19 @@ RESERVED = "Reserved"
 SOLD = "Sold"
 STATUSES = (LISTED, RESERVED, SOLD)
 
-CATEGORIES = ("게임", "의류", "전자기기", "발레", "뷰티", "문구", "잡화", "기타")
+# Renamed from Korean on 2026-09-11, to match Status, which was always
+# English. The split is by kind, not language: fixed choices are interface,
+# item names are data and stay in the language they were listed in.
+CATEGORIES = (
+    "Games",
+    "Clothing",
+    "Electronics",
+    "Ballet",
+    "Beauty",
+    "Stationery",
+    "Accessories",
+    "Other",
+)
 
 
 @dataclass(frozen=True)
