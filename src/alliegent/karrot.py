@@ -36,10 +36,14 @@ from .integrations.notion import NotionClient
 
 log = logging.getLogger(__name__)
 
+# Not listed is a real state, not a missing one: the item is here, decided on,
+# and not yet put up for sale. It cannot go stale -- nothing is waiting on a
+# buyer -- but it is still work, so it keeps a number.
+NOT_LISTED = "Not listed"
 LISTED = "Listed"
 RESERVED = "Reserved"
 SOLD = "Sold"
-STATUSES = (LISTED, RESERVED, SOLD)
+STATUSES = (NOT_LISTED, LISTED, RESERVED, SOLD)
 
 # Renamed from Korean on 2026-09-11, to match Status, which was always
 # English. The split is by kind, not language: fixed choices are interface,
@@ -134,6 +138,7 @@ class KarrotService:
             items,
             key=lambda i: (
                 i.status == SOLD,  # 미입금 건은 뒤로 -- 팔린 건 이미 손을 떠났다
+                i.status == NOT_LISTED,  # 아직 안 올린 건 팔리는 중인 것 다음
                 -(i.days_idle(today) or 0),
                 i.name,
             ),
@@ -215,6 +220,7 @@ class KarrotService:
         sold = [i for i in items if i.status == SOLD]
         listed = [i for i in items if i.status == LISTED]
         reserved = [i for i in items if i.status == RESERVED]
+        waiting = [i for i in items if i.status == NOT_LISTED]
         unpaid = [i for i in sold if not i.paid]
         month_start = today.replace(day=1)
         this_month = [i for i in sold if i.sold_at and i.sold_at >= month_start]
@@ -229,6 +235,8 @@ class KarrotService:
             "listed": len(listed),
             "listed_amount": total(listed),
             "reserved": len(reserved),
+            "not_listed": len(waiting),
+            "not_listed_amount": total(waiting),
             "unpaid": len(unpaid),
             "unpaid_amount": total(unpaid),
             "month": len(this_month),
@@ -245,11 +253,13 @@ class KarrotService:
 def _line(index: int, item: Item, today: date) -> str:
     idle = item.days_idle(today)
     bits = [item.won]
+    if item.status == NOT_LISTED:
+        bits.append("아직 안 올림")
     if item.status == RESERVED:
         bits.append("예약중")
     if item.status == SOLD and not item.paid:
         bits.append("⚠️ 미입금")
-    elif idle is not None:
+    elif idle is not None and item.status != NOT_LISTED:
         bits.append(f"{idle}일째")
     return f"`{index}.` {item.name} — {' · '.join(bits)}"
 
@@ -309,6 +319,11 @@ def summary_message(data: dict, today: date) -> str:
             f"• 판매 완료 {data['sold']}건 · ₩{data['sold_amount']:,}",
             f"• 판매 중 {data['listed']}건 · ₩{data['listed_amount']:,}"
             + (f" (예약 {data['reserved']}건)" if data["reserved"] else ""),
+            *(
+                [f"• 아직 안 올림 {data['not_listed']}건 · ₩{data['not_listed_amount']:,}"]
+                if data["not_listed"]
+                else []
+            ),
             f"• 이번 달 판매 {data['month']}건 · ₩{data['month_amount']:,}",
             f"• 미입금 {data['unpaid']}건 · ₩{data['unpaid_amount']:,}",
         ]

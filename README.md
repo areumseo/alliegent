@@ -256,7 +256,9 @@ Delivery is Discord, plus Gmail if `AI_NEWS_EMAIL_TO` is set.
 
 Second-hand sales live in their own Notion database and their own channel, and **this one channel is in Korean**. Every item name and category in that database is Korean already; a listing translated into "Clothing" is one the reader cannot search for. The slash commands keep ASCII names so nothing needs an input-method switch — only what they say is Korean.
 
-The commands describe themselves in English even here — the picker is where you choose a command before any reply exists, and one that switches language mid-list is harder to scan. Only the replies and the morning report are Korean. `Status` and `Category` are both English in the database — they are fixed choices, which makes them interface rather than data. Item names stay in the language they were listed in.
+The commands describe themselves in English even here — the picker is where you choose a command before any reply exists, and one that switches language mid-list is harder to scan. Only the replies and the morning report are Korean. Statuses are `Not listed` → `Listed` → `Reserved` → `Sold`. **`Not listed` is a real state, not a missing one** — the item is here and decided on, just not put up yet. It keeps a number, because listing it is the work; it never counts as stale, because nothing can fail to sell what was never for sale.
+
+`Status` and `Category` are both English in the database — they are fixed choices, which makes them interface rather than data. Item names stay in the language they were listed in.
 
 `/karrot list` numbers one working set: everything still listed or reserved, plus anything sold but not yet paid for. That is exactly the set with something left to do, which is what makes a single number space workable — a sold and settled item is worth reading but never worth acting on. `/karrot list Sold` is a read-only view and is deliberately unnumbered, so its numbers cannot be confused with the actionable ones.
 
