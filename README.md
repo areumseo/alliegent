@@ -34,7 +34,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/overdue` | Overdue, unfinished items — numbered, so they can be cleared |
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
-| `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `bump`, `summary`. This channel speaks Korean — see below |
+| `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `bump`, `sales`, `summary`. This channel speaks Korean — see below |
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
 
 Everything the bot shows in Discord is English, so nothing needs an input-method switch — with one deliberate exception, the Karrot channel, for the reason given below. Korean date words are still accepted as `when` values.
@@ -269,6 +269,8 @@ Three judgements carried over from the script this was ported from, each earned:
 - `Sold At` is stamped only on the **first** move into Sold, so changing the status twice does not push the sale date to today.
 - Idleness counts from `Bumped` when there is one, else `Listed At` — bumping restarts the clock, which is the point of bumping.
 - Items with **no date at all** are reported separately rather than as stale. Nineteen migrated rows have no `Listed At`, and letting them appear as stale every morning is how a daily report becomes one you stop reading. Filling the date in moves them into the normal count automatically.
+
+`/karrot sales` breaks revenue down by week, month and year, and **names the money it could not place**. A sale with no `Sold At` belongs to no period, and 109 of them had none when this was written — reporting "이번 달 ₩0" without saying why would read as a month with no sales rather than a month with no dates. Unpaid sales count as revenue, with the outstanding amount on its own line: the item is gone and the price is settled, so netting it out would hide a sale that happened.
 
 `NOTION_KARROT_DB_ID` switches the whole feature off when blank.
 

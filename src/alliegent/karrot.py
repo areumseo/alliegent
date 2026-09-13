@@ -226,6 +226,48 @@ class KarrotService:
         )
         return {"stale": stale, "undated": undated, "unpaid": unpaid}
 
+    async def sales(self, today: date) -> dict:
+        """팔린 금액을 기간별로. 날짜 없는 건은 따로 센다.
+
+        기간 합계에서 빠진 돈을 숨기지 않는 게 요점이다. Sold At이 비어 있으면
+        어느 주에도 어느 달에도 넣을 수 없는데, 그런 건이 109건 있는 상태에서
+        "이번 달 ₩0"만 보여주면 매출이 없는 것처럼 읽힌다.
+        """
+        items = await self.all_items()
+        sold = [i for i in items if i.status == SOLD]
+        dated = [i for i in sold if i.sold_at]
+        undated = [i for i in sold if not i.sold_at]
+
+        week_start = today - timedelta(days=today.weekday())
+        last_week = week_start - timedelta(days=7)
+        month_start = today.replace(day=1)
+        last_month_end = month_start - timedelta(days=1)
+        last_month_start = last_month_end.replace(day=1)
+
+        def between(start: date, end: date) -> list[Item]:
+            return [i for i in dated if i.sold_at and start <= i.sold_at <= end]
+
+        def money(rows: list[Item]) -> int:
+            return sum(i.price or 0 for i in rows)
+
+        periods = {
+            "this_week": between(week_start, today),
+            "last_week": between(last_week, week_start - timedelta(days=1)),
+            "this_month": between(month_start, today),
+            "last_month": between(last_month_start, last_month_end),
+            "this_year": between(today.replace(month=1, day=1), today),
+        }
+        # 미입금은 이미 sold에 포함돼 있다. 빼지 않고 따로 알린다 -- 물건은
+        # 나갔고 금액도 확정됐으니 매출이 맞고, 아직 안 들어온 것은 별개다.
+        unpaid = [i for i in sold if not i.paid]
+        return {
+            "week_start": week_start,
+            "periods": {name: (len(rows), money(rows)) for name, rows in periods.items()},
+            "total": (len(sold), money(sold)),
+            "undated": (len(undated), money(undated)),
+            "unpaid": (len(unpaid), money(unpaid)),
+        }
+
     async def summary(self, today: date) -> dict:
         items = await self.all_items()
         sold = [i for i in items if i.status == SOLD]
@@ -324,6 +366,40 @@ def stale_message(report: dict[str, list[Item]], today: date, days: int) -> str 
         out.append(f"_등록일이 비어 판정하지 못한 항목 {len(undated)}건_")
     out.append("_`/karrot list`에서 번호로 처리하실 수 있습니다._")
     return "\n".join(out).strip()
+
+
+def sales_message(data: dict, today: date) -> str:
+    def line(label: str, pair: tuple[int, int]) -> str:
+        count, amount = pair
+        return f"{label:<12} {count:>3}건 · ₩{amount:,}"
+
+    week_end = data["week_start"] + timedelta(days=6)
+    p = data["periods"]
+    out = [
+        f"🥕 **매출 — {today.month}월 {today.day}일 기준**",
+        "```",
+        line("이번 주", p["this_week"]),
+        line("지난 주", p["last_week"]),
+        line("이번 달", p["this_month"]),
+        line("지난 달", p["last_month"]),
+        line("올해", p["this_year"]),
+        line("전체", data["total"]),
+        "```",
+        f"_이번 주: {data['week_start'].month}/{data['week_start'].day}"
+        f"–{week_end.month}/{week_end.day}_",
+    ]
+
+    undated_count, undated_amount = data["undated"]
+    if undated_count:
+        # 기간 합계가 왜 작은지 말해주지 않으면, 매출이 없는 것처럼 읽힌다.
+        out.append(
+            f"⚠️ 판매일이 비어 기간 집계에서 빠진 건 {undated_count}건 · "
+            f"₩{undated_amount:,}"
+        )
+    unpaid_count, unpaid_amount = data["unpaid"]
+    if unpaid_count:
+        out.append(f"⚠️ 이 중 미입금 {unpaid_count}건 · ₩{unpaid_amount:,}")
+    return "\n".join(out)
 
 
 def summary_message(data: dict, today: date) -> str:

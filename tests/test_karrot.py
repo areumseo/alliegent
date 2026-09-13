@@ -171,3 +171,77 @@ async def test_an_off_market_item_shows_no_idle_count():
 
 def test_the_statuses_follow_the_order_a_sale_moves_through():
     assert K.STATUSES == ("Not listed", "Listed", "Reserved", "Sent", "Sold")
+
+
+# -- revenue ---------------------------------------------------------------
+
+
+def sold(pid, name, price, sold_at=None, paid=True):
+    p = page(pid, name, status="Sold", paid=paid, price=price)
+    if sold_at:
+        p["properties"]["Sold At"] = {"type": "date", "date": {"start": sold_at}}
+    return p
+
+
+async def test_sales_are_counted_into_the_week_they_happened():
+    """Weeks run Monday to Sunday; 2026-09-11 is the Friday of this one."""
+    _, svc = service([sold("p1", "이번주", 10000, "2026-09-11")])
+    data = await svc.sales(TODAY)
+    assert data["periods"]["this_week"] == (1, 10000)
+    assert data["periods"]["last_week"] == (0, 0)
+
+
+async def test_last_week_is_its_own_bucket():
+    _, svc = service([sold("p1", "지난주", 5000, "2026-09-03")])
+    data = await svc.sales(TODAY)
+    assert data["periods"]["last_week"] == (1, 5000)
+    assert data["periods"]["this_week"] == (0, 0)
+
+
+async def test_months_and_years_accumulate():
+    _, svc = service(
+        [
+            sold("p1", "9월", 1000, "2026-09-02"),
+            sold("p2", "8월", 2000, "2026-08-20"),
+            sold("p3", "작년", 4000, "2025-12-31"),
+        ]
+    )
+    data = await svc.sales(TODAY)
+    assert data["periods"]["this_month"] == (1, 1000)
+    assert data["periods"]["last_month"] == (1, 2000)
+    assert data["periods"]["this_year"] == (2, 3000)
+    assert data["total"] == (3, 7000)
+
+
+async def test_undated_sales_are_counted_apart_rather_than_dropped():
+    """109 sales had no Sold At when this was written. Reporting ₩0 for the
+    month without saying why would read as a month with no sales."""
+    _, svc = service([sold("p1", "날짜없음", 9000)])
+    data = await svc.sales(TODAY)
+    assert data["periods"]["this_month"] == (0, 0)
+    assert data["undated"] == (1, 9000)
+    assert data["total"] == (1, 9000)
+    assert "판매일이 비어" in K.sales_message(data, TODAY)
+
+
+async def test_an_unpaid_sale_still_counts_as_revenue():
+    """The item is gone and the price is settled; the money not having arrived
+    is a separate fact, and netting it out would hide the sale."""
+    _, svc = service([sold("p1", "미입금", 3000, "2026-09-11", paid=False)])
+    data = await svc.sales(TODAY)
+    assert data["periods"]["this_week"] == (1, 3000)
+    assert data["unpaid"] == (1, 3000)
+    assert "미입금" in K.sales_message(data, TODAY)
+
+
+async def test_items_still_for_sale_are_not_revenue():
+    _, svc = service([page("p1", "안 팔림", status="Listed", price=99000)])
+    data = await svc.sales(TODAY)
+    assert data["total"] == (0, 0)
+
+
+async def test_a_clean_report_says_nothing_about_gaps():
+    _, svc = service([sold("p1", "정상", 1000, "2026-09-11")])
+    text = K.sales_message(await svc.sales(TODAY), TODAY)
+    assert "판매일이 비어" not in text
+    assert "미입금" not in text

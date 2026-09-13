@@ -851,6 +851,16 @@ def _register(bot: AlliegentBot) -> None:
         await bot.karrot.bump(item, bot.today())
         await interaction.followup.send(f"🔼 끌올 — **{item.name}**")
 
+    @karrot_group.command(name="sales", description="Revenue by week, month and year")
+    async def karrot_sales(interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        if bot.karrot is None:
+            await interaction.followup.send("⚠️ NOTION_KARROT_DB_ID가 설정되지 않았습니다.")
+            return
+        today = bot.today()
+        data = await bot.karrot.sales(today)
+        await _deliver(bot, interaction, karrot.sales_message(data, today), "karrot")
+
     @karrot_group.command(name="summary", description="Totals for the whole database")
     async def karrot_summary(interaction: discord.Interaction) -> None:
         await interaction.response.defer()
