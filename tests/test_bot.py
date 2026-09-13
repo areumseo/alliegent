@@ -30,6 +30,7 @@ EXPECTED = {
     "brief",
     "news",
     "karrot",
+    "assets",
 }
 
 
@@ -225,6 +226,7 @@ COMMAND_CHANNELS = {
     "projects": "projects",
     "news": "news",
     "karrot": "karrot",
+    "assets": "assets",
 }
 
 # Short write confirmations answer in place: routing a one-line "Added — X"

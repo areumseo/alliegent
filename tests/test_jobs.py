@@ -267,6 +267,7 @@ def test_scheduler_registers_the_enabled_jobs():
         "ai_news",
         "karrot_report",
         "karrot_candidates",
+        "asset_prompt",
         "weekly_planning",
         "stale_projects",
         "weekly_review",

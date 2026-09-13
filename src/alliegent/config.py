@@ -25,6 +25,7 @@ class Secrets(BaseSettings):
     notion_agenda_db_id: str = ""
     notion_projects_db_id: str = ""
     notion_karrot_db_id: str = ""
+    notion_assets_db_id: str = ""
 
     anthropic_api_key: str = ""
 
@@ -64,6 +65,7 @@ class Secrets(BaseSettings):
     discord_review_channel_id: int = 0
     discord_news_channel_id: int = 0
     discord_karrot_channel_id: int = 0
+    discord_assets_channel_id: int = 0
 
     @field_validator(
         "discord_guild_id",
@@ -73,6 +75,7 @@ class Secrets(BaseSettings):
         "discord_review_channel_id",
         "discord_news_channel_id",
         "discord_karrot_channel_id",
+        "discord_assets_channel_id",
         mode="before",
     )
     @classmethod
@@ -102,6 +105,7 @@ class Secrets(BaseSettings):
             "review": self.discord_review_channel_id or agenda,
             "news": self.discord_news_channel_id or self.discord_channel_id,
             "karrot": self.discord_karrot_channel_id or self.discord_channel_id,
+            "assets": self.discord_assets_channel_id or self.discord_channel_id,
         }
         target = routes.get(kind, agenda)
         if not target:
@@ -163,6 +167,10 @@ class Schedule(BaseModel):
     karrot_candidates_time: str = "09:00"
     karrot_report_weekday: str = "sat"
     karrot_report_time: str = "20:00"
+    # Monday morning, with last week's figures to edit rather than a blank
+    # form to fill. Blank the time to switch it off.
+    asset_prompt_weekday: str = "mon"
+    asset_prompt_time: str = "09:00"
 
     @field_validator("incomplete_alert", mode="before")
     @classmethod

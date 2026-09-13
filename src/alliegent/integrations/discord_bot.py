@@ -12,6 +12,7 @@ from typing import Any
 import discord
 from discord import app_commands
 
+from .. import assets as assets_module
 from .. import karrot, reports
 from ..agenda import AgendaService, ProjectService
 from ..chat import ChatAgent, strip_mentions
@@ -31,6 +32,7 @@ class AlliegentBot(discord.Client):
         projects: ProjectService | None,
         secrets: Secrets,
         karrot=None,
+        assets=None,
         guild_id: int = 0,
         enable_chat: bool = True,
     ) -> None:
@@ -46,6 +48,7 @@ class AlliegentBot(discord.Client):
         self.agenda = agenda
         self.projects = projects
         self.karrot = karrot
+        self.assets = assets
         self.secrets = secrets
         self.guild_id = guild_id
         self.tree = app_commands.CommandTree(self)
@@ -61,6 +64,7 @@ class AlliegentBot(discord.Client):
             config,
             self.notify,
             karrot=karrot,
+            assets=assets,
             anthropic_api_key=secrets.anthropic_api_key,
             calendar_source=make_source(secrets),
             secrets=secrets,
@@ -722,7 +726,7 @@ def _register(bot: AlliegentBot) -> None:
         ][:25]
 
     karrot_group = app_commands.Group(
-        name="karrot", description="Second-hand listings; replies are in Korean"
+        name="karrot", description="Second-hand listings"
     )
     tree.add_command(karrot_group)
 
@@ -735,7 +739,7 @@ def _register(bot: AlliegentBot) -> None:
         """
         if bot.karrot is None:
             await interaction.followup.send(
-                "⚠️ NOTION_KARROT_DB_ID가 설정되지 않았습니다."
+                "⚠️ NOTION_KARROT_DB_ID is not set."
             )
             return None
         return await bot.karrot.open_items(bot.today())
@@ -746,7 +750,7 @@ def _register(bot: AlliegentBot) -> None:
             return None
         if not 1 <= number <= len(items):
             await interaction.followup.send(
-                f"⚠️ 번호는 1~{len(items)} 사이여야 합니다. `/karrot list`로 확인하세요."
+                f"⚠️ Out of range: 1–{len(items)}. Run `/karrot list` to see the numbers."
             )
             return None
         return items[number - 1]
@@ -760,7 +764,7 @@ def _register(bot: AlliegentBot) -> None:
     ) -> None:
         await interaction.response.defer()
         if bot.karrot is None:
-            await interaction.followup.send("⚠️ NOTION_KARROT_DB_ID가 설정되지 않았습니다.")
+            await interaction.followup.send("⚠️ NOTION_KARROT_DB_ID is not set.")
             return
         today = bot.today()
         if status:
@@ -794,7 +798,7 @@ def _register(bot: AlliegentBot) -> None:
     ) -> None:
         await interaction.response.defer()
         if bot.karrot is None:
-            await interaction.followup.send("⚠️ NOTION_KARROT_DB_ID가 설정되지 않았습니다.")
+            await interaction.followup.send("⚠️ NOTION_KARROT_DB_ID is not set.")
             return
         try:
             item = await bot.karrot.add(name, price, bot.today(), category)
@@ -802,7 +806,7 @@ def _register(bot: AlliegentBot) -> None:
             await interaction.followup.send(f"⚠️ {exc}")
             return
         filed = f" · {item.category}" if item.category else ""
-        await interaction.followup.send(f"🥕 등록 — **{item.name}** ({item.won}{filed})")
+        await interaction.followup.send(f"🥕 Listed — **{item.name}** ({item.won}{filed})")
 
     @karrot_group.command(name="sold", description="Mark an item sold")
     @app_commands.describe(
@@ -816,8 +820,8 @@ def _register(bot: AlliegentBot) -> None:
         if item is None:
             return
         await bot.karrot.mark_sold(item, bot.today(), paid=paid)
-        tail = "" if paid else " · 입금 대기"
-        await interaction.followup.send(f"💰 판매 — **{item.name}** ({item.won}{tail})")
+        tail = "" if paid else " · awaiting payment"
+        await interaction.followup.send(f"💰 Sold — **{item.name}** ({item.won}{tail})")
 
     @karrot_group.command(name="sent", description="Mark an item posted to the buyer")
     @app_commands.describe(number="Number from /karrot list")
@@ -827,7 +831,7 @@ def _register(bot: AlliegentBot) -> None:
         if item is None:
             return
         await bot.karrot.mark_sent(item)
-        await interaction.followup.send(f"📦 발송 — **{item.name}** ({item.won})")
+        await interaction.followup.send(f"📦 Sent — **{item.name}** ({item.won})")
 
     @karrot_group.command(name="paid", description="Confirm payment received")
     @app_commands.describe(number="Number from /karrot list")
@@ -837,13 +841,13 @@ def _register(bot: AlliegentBot) -> None:
         if item is None:
             return
         await bot.karrot.mark_paid(item)
-        await interaction.followup.send(f"✅ 입금 확인 — **{item.name}** ({item.won})")
+        await interaction.followup.send(f"✅ Paid — **{item.name}** ({item.won})")
 
     @karrot_group.command(name="sales", description="Revenue by week, month and year")
     async def karrot_sales(interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         if bot.karrot is None:
-            await interaction.followup.send("⚠️ NOTION_KARROT_DB_ID가 설정되지 않았습니다.")
+            await interaction.followup.send("⚠️ NOTION_KARROT_DB_ID is not set.")
             return
         today = bot.today()
         data = await bot.karrot.sales(today)
@@ -853,11 +857,49 @@ def _register(bot: AlliegentBot) -> None:
     async def karrot_summary(interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         if bot.karrot is None:
-            await interaction.followup.send("⚠️ NOTION_KARROT_DB_ID가 설정되지 않았습니다.")
+            await interaction.followup.send("⚠️ NOTION_KARROT_DB_ID is not set.")
             return
         today = bot.today()
         data = await bot.karrot.summary(today)
         await _deliver(bot, interaction, karrot.summary_message(data, today), "karrot")
+
+    assets_group = app_commands.Group(
+        name="assets", description="Weekly asset snapshots"
+    )
+    tree.add_command(assets_group)
+
+    @assets_group.command(name="show", description="The latest snapshot and what changed")
+    async def assets_show(interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        if bot.assets is None:
+            await interaction.followup.send("⚠️ NOTION_ASSETS_DB_ID is not set.")
+            return
+        history = await bot.assets.history()
+        if not history:
+            await interaction.followup.send(
+                "No records yet. Add a row to the Assets database in Notion."
+            )
+            return
+        current = history[-1]
+        previous = history[-2] if len(history) > 1 else None
+        await _deliver(
+            bot,
+            interaction,
+            assets_module.snapshot_message(current, previous),
+            "assets",
+        )
+
+    @assets_group.command(name="trend", description="Recent snapshots, oldest first")
+    @app_commands.describe(weeks="How many to show (default 8)")
+    async def assets_trend(interaction: discord.Interaction, weeks: int = 8) -> None:
+        await interaction.response.defer()
+        if bot.assets is None:
+            await interaction.followup.send("⚠️ NOTION_ASSETS_DB_ID is not set.")
+            return
+        history = await bot.assets.history()
+        await _deliver(
+            bot, interaction, assets_module.trend_message(history, weeks), "assets"
+        )
 
     @tree.command(name="projects", description="Show active projects")
     async def projects_cmd(interaction: discord.Interaction) -> None:

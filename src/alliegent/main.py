@@ -8,6 +8,7 @@ import logging
 import discord
 
 from .agenda import AgendaService, ProjectService
+from .assets import AssetService
 from .config import duplicate_env_keys, get_config, get_secrets
 from .integrations.discord_bot import AlliegentBot
 from .integrations.notion import NotionClient
@@ -45,7 +46,7 @@ async def main() -> None:
     secrets.require("notion_token", "notion_agenda_db_id", "discord_bot_token")
     # Resolve every route up front so a missing channel fails at boot rather
     # than silently swallowing a scheduled message days later.
-    for kind in ("agenda", "projects", "review", "news", "karrot"):
+    for kind in ("agenda", "projects", "review", "news", "karrot", "assets"):
         secrets.channel_for(kind)
     if not secrets.anthropic_api_key:
         log.warning("ANTHROPIC_API_KEY not set — the AI news digest is disabled")
@@ -59,6 +60,14 @@ async def main() -> None:
     )
     if projects is None:
         log.warning("NOTION_PROJECTS_DB_ID not set — project features are disabled")
+
+    assets = (
+        AssetService(client, config, secrets.notion_assets_db_id)
+        if secrets.notion_assets_db_id
+        else None
+    )
+    if assets is None:
+        log.warning("NOTION_ASSETS_DB_ID not set — asset tracking is disabled")
 
     karrot = (
         KarrotService(client, config, secrets.notion_karrot_db_id)
@@ -74,6 +83,7 @@ async def main() -> None:
             agenda=agenda,
             projects=projects,
             karrot=karrot,
+            assets=assets,
             secrets=secrets,
             guild_id=secrets.discord_guild_id,
             enable_chat=enable_chat,

@@ -14,6 +14,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
 | Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
 | Stale project nudge | Wed 10:00 | Projects with no linked agenda activity for N days. Off until a projects database exists |
+| Asset prompt | Mon 09:00 | Asks for this week's balances, carrying last week's figures to edit |
 | Karrot candidates | Mon 09:00 | What is decided on but not yet listed. Silent when there is nothing waiting |
 | Karrot sales | Sat 20:00 | The week's sales, with the month, the year and the running total. Silent when nothing sold and nothing is owed |
 | Weekly review | Sun 21:00 | Completion stats for the past week as a review draft |
@@ -35,6 +36,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/overdue` | Overdue, unfinished items — numbered, so they can be cleared |
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
+| `/assets show` · `/assets trend` | Latest snapshot with what changed, and the recent history |
 | `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `sales`, `summary`. This channel speaks Korean — see below |
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
 
@@ -84,6 +86,7 @@ Each job posts to the channel matching its kind:
 | `DISCORD_REVIEW_CHANNEL_ID` | Weekly review (falls back to the agenda channel) |
 | `DISCORD_NEWS_CHANNEL_ID` | Daily AI news digest |
 | `DISCORD_KARROT_CHANNEL_ID` | Karrot listings report |
+| `DISCORD_ASSETS_CHANNEL_ID` | Weekly asset prompt |
 | `DISCORD_CHANNEL_ID` | Fallback for anything left blank |
 
 ### 3. Run locally
@@ -252,6 +255,16 @@ Reading feeds instead fixes those by construction rather than by tuning:
 The cost is a list to maintain. A feed that moves or dies goes quiet rather than failing, so any feed contributing nothing is named in a `no articles from:` warning — worth reading if the digest starts looking thin.
 
 Delivery is Discord, plus Gmail if `AI_NEWS_EMAIL_TO` is set.
+
+## Assets
+
+A weekly snapshot, typed in by hand. Korean banks have no personal API worth building on and scraping survives neither the certificates nor the one-time codes, so the division of labour is the other way round from everything else here: a person writes seven numbers into Notion once a week, and the bot does the part a person will not — compare, weigh, and show the trend.
+
+**Locked money is in the total and shown apart from it.** `Pension`, `Deposit` and `Mom` are assets that cannot be drawn on; a single net-worth figure reads as money you could spend. Both numbers appear together every time, which is half the point of the feature. `ESPP` is marked as an estimate wherever it is counted, because it is one.
+
+Monday's prompt carries last week's figures rather than presenting a blank form: editing numbers is faster than recalling them, and a bucket you forgot shows up as one that did not change. Recording twice in the same week corrects that week's row instead of adding a second — otherwise the next comparison would measure a change of zero.
+
+Every amount lives in Notion. Nothing in this repository contains one, and the examples and fixtures are invented.
 
 ## Karrot listings
 

@@ -126,7 +126,7 @@ async def test_the_list_says_which_stage_an_item_is_at():
         ]
     )
     text = K.item_list(await svc.open_items(TODAY), TODAY)
-    assert "후보" in text and "예약중" in text and "발송함" in text
+    assert "candidate" in text and "reserved" in text and "sent" in text
 
 
 def test_the_statuses_follow_the_order_a_sale_moves_through():
@@ -181,7 +181,7 @@ async def test_undated_sales_are_counted_apart_rather_than_dropped():
     assert data["periods"]["this_month"] == (0, 0)
     assert data["undated"] == (1, 9000)
     assert data["total"] == (1, 9000)
-    assert "판매일이 비어" in K.sales_message(data, TODAY)
+    assert "have no date" in K.sales_message(data, TODAY)
 
 
 async def test_an_unpaid_sale_still_counts_as_revenue():
@@ -191,7 +191,7 @@ async def test_an_unpaid_sale_still_counts_as_revenue():
     data = await svc.sales(TODAY)
     assert data["periods"]["this_week"] == (1, 3000)
     assert data["unpaid"] == (1, 3000)
-    assert "미입금" in K.sales_message(data, TODAY)
+    assert "unpaid" in K.sales_message(data, TODAY)
 
 
 async def test_items_still_for_sale_are_not_revenue():
@@ -203,18 +203,20 @@ async def test_items_still_for_sale_are_not_revenue():
 async def test_a_clean_report_says_nothing_about_gaps():
     _, svc = service([sold("p1", "정상", 1000, "2026-09-11")])
     text = K.sales_message(await svc.sales(TODAY), TODAY)
-    assert "판매일이 비어" not in text
-    assert "미입금" not in text
+    assert "have no date" not in text
+    assert "unpaid" not in text.lower()
 
 
 # -- the two weekly reports -------------------------------------------------
 
 
 async def test_the_saturday_report_counts_the_week_and_the_running_total():
-    _, svc = service([sold("p1", "이번주", 10000, "2026-09-11"), sold("p2", "옛날", 5000, "2026-01-05")])
+    _, svc = service(
+        [sold("p1", "이번주", 10000, "2026-09-11"), sold("p2", "옛날", 5000, "2026-01-05")]
+    )
     text = K.weekly_message(await svc.sales(TODAY), [], TODAY)
-    assert "이번 주 1건 · ₩10,000" in text
-    assert "누적 2건 · ₩15,000" in text
+    assert "This week   1 sold · ₩10,000" in text
+    assert "All time    2 sold · ₩15,000" in text
 
 
 async def test_a_week_with_nothing_sold_and_nothing_owed_stays_silent():
@@ -227,7 +229,7 @@ async def test_a_quiet_week_still_reports_money_owed():
     """Nothing sold is not nothing to do when someone owes you."""
     _, svc = service([sold("p1", "미입금", 3000, "2026-01-05", paid=False)])
     text = K.weekly_message(await svc.sales(TODAY), await svc.unpaid(), TODAY)
-    assert text is not None and "미입금" in text
+    assert text is not None and "Unpaid" in text
 
 
 async def test_monday_lists_what_is_waiting_to_be_listed():
@@ -239,7 +241,7 @@ async def test_monday_lists_what_is_waiting_to_be_listed():
     )
     text = K.candidates_message(await svc.all_items())
     assert "후보1" in text and "이미 올림" not in text
-    assert "1건 · ₩5,000" in text
+    assert "1 · ₩5,000" in text
 
 
 async def test_monday_says_nothing_when_there_are_no_candidates():

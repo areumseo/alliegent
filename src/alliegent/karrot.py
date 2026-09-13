@@ -1,27 +1,19 @@
-"""당근 판매 목록. Notion의 🥕 Karrot 데이터베이스를 읽고 쓴다.
+"""Karrot listings: what sold, for how much, and what is still waiting.
 
-The Karrot channel is the one surface whose *messages* are Korean. Item names
-are copied from a Korean marketplace and translating one would report on
-something the reader cannot search for. The command picker and the fixed
-choices (Status, Category) are English, because those are interface rather
-than data -- Status always was, and Category was renamed to match.
+Only the item names are Korean, because they are data -- copied from a Korean
+marketplace, and a listing translated into "Clothing" is one the reader cannot
+search for. Everything the bot writes around them is English, like the rest of
+the bot: one language for the interface, whichever language the data came in.
 
-The logic here is ported from a standalone script rather than written fresh,
-and its judgement calls are kept -- they are the useful part:
+The logic is ported from a standalone script rather than written fresh, and
+its judgement calls are kept -- they are the useful part:
 
 - `Sold At` is stamped only on the first move into Sold, so changing the
   status twice does not push the sale date to today.
-- Idleness counts from `Bumped` when there is one, else `Listed At`: bumping
-  an item restarts its clock, which is what bumping is for.
-- Items with no date at all are reported separately rather than as stale.
-  Nineteen migrated rows have no `Listed At`, and letting them appear as
-  stale every morning is how a daily alert becomes something you ignore.
-
-What changed in the port: this goes through the shared NotionClient (one HTTP
-stack, one API version) instead of its own aiohttp calls against the 2022 API,
-and items are addressed by number the way the rest of the bot works, rather
-than by name -- a name lookup fails on "여러 건이 걸립니다" exactly when the
-list is long enough to need the help.
+- Unpaid sales count as revenue and are flagged rather than deducted: the item
+  is gone and the price is settled.
+- Two statuses are off the market -- a candidate not yet listed, and an item
+  already posted -- and neither is chased for sitting unsold.
 """
 
 from __future__ import annotations
@@ -81,16 +73,17 @@ class Item:
 
     @property
     def needs_attention(self) -> bool:
-        """번호가 붙는 대상: 아직 안 팔렸거나, 팔렸는데 입금이 안 된 것.
+        """Whether this item gets a number: not sold yet, or sold and unpaid.
 
-        하나의 번호 체계로 묶는 이유는, 손댈 일이 있는 항목이 정확히 이것들이기
-        때문이다. 팔리고 입금까지 끝난 건은 읽을 일은 있어도 고칠 일이 없다.
+        One number space, because these are exactly the items with something
+        left to do. A sold and settled row is worth reading and never worth
+        acting on, so numbering it would only compete with these.
         """
         return self.status != SOLD or not self.paid
 
     @property
     def won(self) -> str:
-        return f"₩{self.price:,}" if self.price is not None else "가격 미정"
+        return f"₩{self.price:,}" if self.price is not None else "no price"
 
 
 class KarrotService:
@@ -108,7 +101,7 @@ class KarrotService:
     def _to_item(self, page: dict) -> Item:
         return Item(
             id=page["id"],
-            name=n.read_title(page, "Name") or "(무제)",
+            name=n.read_title(page, "Name") or "(untitled)",
             price=n.read_number(page, "Price"),
             status=n.read_select(page, "Status"),
             paid=n.read_checkbox(page, "Paid"),
@@ -117,42 +110,43 @@ class KarrotService:
             note=n.read_text(page, "Note"),
         )
 
-    # -- 조회 --------------------------------------------------------------
+    # -- reads --------------------------------------------------------------
 
     async def all_items(self) -> list[Item]:
         ds = await self.data_source_id()
         return [self._to_item(page) async for page in self._client.query(ds)]
 
     async def open_items(self, today: date) -> list[Item]:
-        """번호가 붙는 목록. 오래 방치된 것부터 위로 온다.
+        """The numbered list.
 
-        정렬이 결정적이어야 하는 이유는 어젠다 쪽과 같다: 한 메시지에서 읽은
-        번호를 다른 명령에 입력하는데, 그 명령은 목록을 다시 계산한다.
+        The order has to be deterministic for the same reason it does in the
+        agenda: a number read in one message is typed into another, and that
+        command recomputes the list rather than remembering it.
         """
         items = [i for i in await self.all_items() if i.needs_attention]
         return sorted(
             items,
             key=lambda i: (
-                i.status == SOLD,  # 미입금 건은 뒤로 -- 팔린 건 이미 손을 떠났다
-                i.status == NOT_LISTED,  # 아직 안 올린 건 팔리는 중인 것 다음
+                i.status == SOLD,  # unpaid sales last: the item is already gone
+                i.status == NOT_LISTED,  # candidates after things actually on sale
                 i.name,
             ),
         )
 
     async def by_status(self, status: str) -> list[Item]:
         if status not in STATUSES:
-            raise ValueError(f"status는 {' / '.join(STATUSES)} 중 하나여야 합니다.")
+            raise ValueError(f"Status must be one of: {', '.join(STATUSES)}")
         items = [i for i in await self.all_items() if i.status == status]
         return sorted(items, key=lambda i: i.name)
 
-    # -- 쓰기 --------------------------------------------------------------
+    # -- writes --------------------------------------------------------------
 
     async def add(
         self, name: str, price: int, today: date, category: str | None = None
     ) -> Item:
-        """새 매물 등록. Status는 Listed, 등록일은 오늘."""
+        """A new listing: Status becomes Listed."""
         if category and category not in CATEGORIES:
-            raise ValueError(f"카테고리는 {' / '.join(CATEGORIES)} 중 하나여야 합니다.")
+            raise ValueError(f"Category must be one of: {', '.join(CATEGORIES)}")
         props = {
             "Name": n.title(name),
             "Price": n.number(price),
@@ -166,14 +160,14 @@ class KarrotService:
 
     async def mark_sold(self, item: Item, today: date, paid: bool = False) -> None:
         props = {"Status": n.select(SOLD), "Paid": n.checkbox(paid)}
-        # 판매일은 처음 Sold가 될 때만 찍는다. 상태를 두 번 바꿔도 날짜가 오늘로
-        # 밀리지 않게 하려는 것.
+        # Stamped only on the first move into Sold, so changing the status
+        # twice does not push the sale date to today.
         if item.sold_at is None:
             props["Sold At"] = n.date_prop(today)
         await self._client.update_page(item.id, props)
 
     async def mark_sent(self, item: Item) -> None:
-        """발송함. 아직 거래완료는 아니고, 상대가 받기를 기다리는 상태."""
+        """Posted to the buyer -- not finished, waiting on delivery."""
         await self._client.update_page(item.id, {"Status": n.select(SENT)})
 
     async def mark_paid(self, item: Item, paid: bool = True) -> None:
@@ -181,27 +175,28 @@ class KarrotService:
 
     async def set_status(self, item: Item, status: str, today: date) -> None:
         if status not in STATUSES:
-            raise ValueError(f"status는 {' / '.join(STATUSES)} 중 하나여야 합니다.")
+            raise ValueError(f"Status must be one of: {', '.join(STATUSES)}")
         if status == SOLD:
             await self.mark_sold(item, today)
             return
         await self._client.update_page(item.id, {"Status": n.select(status)})
 
-    # -- 집계 --------------------------------------------------------------
+    # -- totals --------------------------------------------------------------
 
     async def unpaid(self) -> list[Item]:
-        """팔렸는데 아직 돈이 안 들어온 건."""
+        """Sold, but the money has not arrived."""
         items = await self.all_items()
         return sorted(
             (i for i in items if i.status == SOLD and not i.paid), key=lambda i: i.name
         )
 
     async def sales(self, today: date) -> dict:
-        """팔린 금액을 기간별로. 날짜 없는 건은 따로 센다.
+        """Revenue by period, counting undated sales apart.
 
-        기간 합계에서 빠진 돈을 숨기지 않는 게 요점이다. Sold At이 비어 있으면
-        어느 주에도 어느 달에도 넣을 수 없는데, 그런 건이 109건 있는 상태에서
-        "이번 달 ₩0"만 보여주면 매출이 없는 것처럼 읽힌다.
+        The point is not to hide money that fell out of the periods. A sale
+        with no Sold At belongs to no week and no month, and with 109 of them
+        "this month ₩0" would read as a month with no sales rather than a
+        month with no dates.
         """
         items = await self.all_items()
         sold = [i for i in items if i.status == SOLD]
@@ -227,8 +222,8 @@ class KarrotService:
             "last_month": between(last_month_start, last_month_end),
             "this_year": between(today.replace(month=1, day=1), today),
         }
-        # 미입금은 이미 sold에 포함돼 있다. 빼지 않고 따로 알린다 -- 물건은
-        # 나갔고 금액도 확정됐으니 매출이 맞고, 아직 안 들어온 것은 별개다.
+        # Unpaid sales are already in `sold`. Flagged, not deducted: the item
+        # is gone and the price is agreed, so the sale happened.
         unpaid = [i for i in sold if not i.paid]
         return {
             "week_start": week_start,
@@ -270,35 +265,36 @@ class KarrotService:
         }
 
 
-# -- 메시지 ----------------------------------------------------------------
+# -- messages --------------------------------------------------------------
 #
-# 이 파일에만 한국어 출력이 모여 있다. reports.py는 영어 전용으로 두고, 언어가
-# 갈리는 지점을 파일 경계와 맞춰 둔 것.
+# English, like everything else the bot writes. The item names inside these
+# messages are Korean because they are data, quoted from the marketplace.
 
 
 def _line(index: int, item: Item) -> str:
     bits = [item.won]
     if item.status == NOT_LISTED:
-        bits.append("후보")
+        bits.append("candidate")
     if item.status == RESERVED:
-        bits.append("예약중")
+        bits.append("reserved")
     if item.status == SENT:
-        bits.append("발송함")
+        bits.append("sent")
     if item.status == SOLD and not item.paid:
-        bits.append("⚠️ 미입금")
+        bits.append("⚠️ unpaid")
     if item.note:
-        # 메모는 본인이 적어둔 맥락이라 짧게라도 보이는 게 낫다.
+        # The note is context the user wrote for themselves; hiding it sends
+        # them back to Notion to find out why an item is flagged.
         note = item.note if len(item.note) <= 40 else item.note[:39] + "…"
         bits.append(note)
     return f"`{index}.` {item.name} — {' · '.join(bits)}"
 
 
-def item_list(items: list[Item], today: date, *, title: str = "판매 중") -> str:
+def item_list(items: list[Item], today: date, *, title: str = "Open") -> str:
     if not items:
-        return "등록된 매물이 없습니다."
-    lines = [f"🥕 **{title} ({len(items)}건)**"]
+        return "Nothing to handle."
+    lines = [f"🥕 **{title} ({len(items)})**"]
     lines += [_line(i, item) for i, item in enumerate(items, start=1)]
-    lines.append("_`/karrot sold <번호>` · `/karrot sent <번호>` · `/karrot paid <번호>`_")
+    lines.append("_`/karrot sold <n>` · `/karrot sent <n>` · `/karrot paid <n>`_")
     return "\n".join(lines)
 
 
@@ -307,18 +303,17 @@ def read_only_list(items: list[Item], today: date, *, title: str) -> str:
     헷갈리기만 한다."""
     if not items:
         return f"{title}: 해당하는 매물이 없습니다."
-    lines = [f"🥕 **{title} ({len(items)}건)**"]
+    lines = [f"🥕 **{title} ({len(items)})**"]
     for item in items:
         lines.append(f"• {item.name} — {item.won}")
     return "\n".join(lines)
 
 
 def weekly_message(data: dict, unpaid: list[Item], today: date) -> str | None:
-    """일요일 주간 매출. 판 것도 없고 받을 것도 없으면 None.
+    """Saturday's week. None when nothing sold and nothing is owed.
 
-    아침마다 정체 매물을 세던 자리를 대신한다. 등록일이 사라지면서 정체라는
-    개념 자체가 없어졌고, 이 데이터베이스가 답하는 질문은 이제 하나다 --
-    이번 주에 얼마 팔렸나.
+    A weekly report that reads 0 every week is one you stop opening. Money
+    owed still speaks up, because nothing sold is not nothing to do.
     """
     count, amount = data["periods"]["this_week"]
     if not count and not unpaid:
@@ -327,106 +322,101 @@ def weekly_message(data: dict, unpaid: list[Item], today: date) -> str | None:
     start = data["week_start"]
     end = start + timedelta(days=6)
     out = [
-        f"🥕 **주간 매출 — {start.month}/{start.day}–{end.month}/{end.day}**",
+        f"🥕 **This week — {start.month}/{start.day}–{end.month}/{end.day}**",
         "",
-        f"이번 주 {count}건 · ₩{amount:,}",
+        f"This week   {count} sold · ₩{amount:,}",
     ]
     last_count, last_amount = data["periods"]["last_week"]
     if last_count or last_amount:
         diff = amount - last_amount
         arrow = "▲" if diff > 0 else ("▼" if diff < 0 else "-")
-        out.append(f"지난 주 {last_count}건 · ₩{last_amount:,}  ({arrow} ₩{abs(diff):,})")
+        out.append(
+            f"Last week   {last_count} sold · ₩{last_amount:,}"
+            f"  ({arrow} ₩{abs(diff):,})"
+        )
     month_count, month_amount = data["periods"]["this_month"]
-    out.append(f"이번 달 {month_count}건 · ₩{month_amount:,}")
+    out.append(f"This month  {month_count} sold · ₩{month_amount:,}")
     year_count, year_amount = data["periods"]["this_year"]
-    out.append(f"올해 {year_count}건 · ₩{year_amount:,}")
+    out.append(f"This year   {year_count} sold · ₩{year_amount:,}")
     total_count, total_amount = data["total"]
-    out.append(f"누적 {total_count}건 · ₩{total_amount:,}")
+    out.append(f"All time    {total_count} sold · ₩{total_amount:,}")
 
     undated_count, undated_amount = data["undated"]
     if undated_count:
-        out.append(f"_판매일이 비어 기간에 못 넣은 건 {undated_count}건 · ₩{undated_amount:,}_")
-
+        out.append(
+            f"_{undated_count} sale(s) · ₩{undated_amount:,} have no date and fall "
+            "into no period_"
+        )
     if unpaid:
-        total = sum(i.price or 0 for i in unpaid)
-        out += ["", f"**미입금 {len(unpaid)}건 · ₩{total:,}**"]
+        owed = sum(i.price or 0 for i in unpaid)
+        out += ["", f"**Unpaid {len(unpaid)} · ₩{owed:,}**"]
         out += [f"• {i.name} — {i.won}" for i in unpaid]
     return "\n".join(out)
 
 
 def sales_message(data: dict, today: date) -> str:
-    """`/karrot sales`. 기간별로 나누고, 어느 기간에도 못 넣은 돈을 밝힌다."""
+    """Revenue by period, naming the money that fits in none of them."""
 
     def line(label: str, pair: tuple[int, int]) -> str:
         count, amount = pair
-        return f"{label:<12} {count:>3}건 · ₩{amount:,}"
+        return f"{label:<11} {count:>3} · ₩{amount:,}"
 
     week_end = data["week_start"] + timedelta(days=6)
     p = data["periods"]
     out = [
-        f"🥕 **매출 — {today.month}월 {today.day}일 기준**",
+        f"🥕 **Sales — {today.isoformat()}**",
         "```",
-        line("이번 주", p["this_week"]),
-        line("지난 주", p["last_week"]),
-        line("이번 달", p["this_month"]),
-        line("지난 달", p["last_month"]),
-        line("올해", p["this_year"]),
-        line("누적", data["total"]),
+        line("This week", p["this_week"]),
+        line("Last week", p["last_week"]),
+        line("This month", p["this_month"]),
+        line("Last month", p["last_month"]),
+        line("This year", p["this_year"]),
+        line("All time", data["total"]),
         "```",
-        f"_이번 주: {data['week_start'].month}/{data['week_start'].day}"
+        f"_This week: {data['week_start'].month}/{data['week_start'].day}"
         f"–{week_end.month}/{week_end.day}_",
     ]
     undated_count, undated_amount = data["undated"]
     if undated_count:
         out.append(
-            f"⚠️ 판매일이 비어 기간 집계에서 빠진 건 {undated_count}건 · "
-            f"₩{undated_amount:,}"
+            f"⚠️ {undated_count} sale(s) · ₩{undated_amount:,} have no date, so they "
+            "are in the total but in no period"
         )
     unpaid_count, unpaid_amount = data["unpaid"]
     if unpaid_count:
-        out.append(f"⚠️ 이 중 미입금 {unpaid_count}건 · ₩{unpaid_amount:,}")
+        out.append(f"⚠️ Of these, {unpaid_count} unpaid · ₩{unpaid_amount:,}")
     return "\n".join(out)
 
 
 def candidates_message(items: list[Item]) -> str | None:
-    """월요일 아침 후보 목록. 없으면 None.
+    """Monday's candidates. None when there are none.
 
-    올릴 마음만 먹고 안 올린 물건은 팔릴 수 없다. 주가 시작할 때 한 번
-    보여주는 게 이 목록이 존재하는 이유다.
+    An item nobody has put up cannot sell, and the start of a week is when
+    that is worth knowing.
     """
     waiting = [i for i in items if i.status == NOT_LISTED]
     if not waiting:
         return None
     total = sum(i.price or 0 for i in waiting)
-    out = [f"🥕 **이번 주에 올릴 후보 {len(waiting)}건 · ₩{total:,}**", ""]
+    out = [f"🥕 **To list this week — {len(waiting)} · ₩{total:,}**", ""]
     out += [f"• {i.name} — {i.won}" for i in waiting]
-    out.append("")
-    out.append("_올리셨으면 노션에서 Listed로 바꿔주세요._")
+    out += ["", "_Set them to Listed in Notion once they are up._"]
     return "\n".join(out)
 
 
 def summary_message(data: dict, today: date) -> str:
-    return "\n".join(
-        [
-            f"🥕 **당근 집계 — {today.month}월 {today.day}일**",
-            "",
-            f"전체 {data['total']}건",
-            f"• 판매 완료 {data['sold']}건 · ₩{data['sold_amount']:,}",
-            f"• 판매 중 {data['listed']}건 · ₩{data['listed_amount']:,}"
-            + (f" (예약 {data['reserved']}건)" if data["reserved"] else ""),
-            *(
-                [f"• 발송함 {data['sent']}건 · ₩{data['sent_amount']:,}"]
-                if data["sent"]
-                else []
-            ),
-            *(
-                [f"• 후보 {data['not_listed']}건 · ₩{data['not_listed_amount']:,}"]
-                if data["not_listed"]
-                else []
-            ),
-            f"• 이번 달 판매 {data['month']}건 · ₩{data['month_amount']:,}",
-            f"• 미입금 {data['unpaid']}건 · ₩{data['unpaid_amount']:,}",
-        ]
-    )
-
-
+    out = [
+        f"🥕 **Summary — {today.isoformat()}**",
+        "",
+        f"{data['total']} items",
+        f"• Sold {data['sold']} · ₩{data['sold_amount']:,}",
+        f"• Listed {data['listed']} · ₩{data['listed_amount']:,}"
+        + (f" (reserved {data['reserved']})" if data["reserved"] else ""),
+    ]
+    if data["sent"]:
+        out.append(f"• Sent {data['sent']} · ₩{data['sent_amount']:,}")
+    if data["not_listed"]:
+        out.append(f"• Candidates {data['not_listed']} · ₩{data['not_listed_amount']:,}")
+    out.append(f"• This month {data['month']} · ₩{data['month_amount']:,}")
+    out.append(f"• Unpaid {data['unpaid']} · ₩{data['unpaid_amount']:,}")
+    return "\n".join(out)

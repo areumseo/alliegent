@@ -34,6 +34,7 @@ class Jobs:
         notify: Notifier,
         clock: Callable[[], date] | None = None,
         karrot=None,
+        assets=None,
         anthropic_api_key: str = "",
         calendar_source: Callable | None = None,
         secrets: Secrets | None = None,
@@ -42,6 +43,7 @@ class Jobs:
         self.agenda = agenda
         self.projects = projects
         self.karrot = karrot
+        self.assets = assets
         self.config = config
         self.notify = notify
         self._anthropic_api_key = anthropic_api_key
@@ -158,6 +160,14 @@ class Jobs:
 
         return karrot_module.candidates_message(await self.karrot.all_items())
 
+    async def build_asset_prompt(self) -> str | None:
+        """Monday's reminder to record the week's balances."""
+        if self.assets is None:
+            return None
+        from . import assets as assets_module
+
+        return assets_module.prompt_message(await self.assets.latest(), self.today())
+
     async def build_weekly_planning(self) -> str:
         """Nudge to plan the coming week, with what is already in it.
 
@@ -246,6 +256,9 @@ class Jobs:
 
     async def run_karrot_candidates(self) -> None:
         await self._send(await self.build_karrot_candidates(), "karrot")
+
+    async def run_asset_prompt(self) -> None:
+        await self._send(await self.build_asset_prompt(), "assets")
 
     async def run_weekly_planning(self) -> None:
         await self._send(await self.build_weekly_planning(), "agenda")
