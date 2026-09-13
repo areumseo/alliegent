@@ -18,17 +18,18 @@ DS = "ds_karrot-db"
 TODAY = date(2026, 9, 11)
 
 
-def page(pid, name, *, status="Listed", paid=False, listed=None, bumped=None, price=1000):
+def page(pid, name, *, status="Listed", paid=False, note="", price=1000):
     props = {
         "Name": {"type": "title", "title": [{"plain_text": name, "type": "text"}]},
         "Price": {"type": "number", "number": price},
         "Status": {"type": "select", "select": {"name": status}},
         "Paid": {"type": "checkbox", "checkbox": paid},
     }
-    if listed:
-        props["Listed At"] = {"type": "date", "date": {"start": listed, "end": None}}
-    if bumped:
-        props["Bumped"] = {"type": "date", "date": {"start": bumped, "end": None}}
+    if note:
+        props["Note"] = {
+            "type": "rich_text",
+            "rich_text": [{"plain_text": note, "type": "text"}],
+        }
     return {
         "object": "page",
         "id": pid,
@@ -51,32 +52,6 @@ async def test_a_not_listed_item_still_gets_a_number():
     assert [i.name for i in await svc.open_items(TODAY)] == ["아직 안 올린 것"]
 
 
-async def test_a_not_listed_item_never_goes_stale():
-    """Staleness means "nobody is buying it", and nothing can buy what was
-    never put up. Counting it would fill the morning report with items the
-    report cannot help with."""
-    _, svc = service(
-        [page("p1", "안 올림", status="Not listed", listed="2026-01-01")]
-    )
-    report = await svc.stale_report(TODAY, days=30)
-    assert report["stale"] == []
-    assert report["undated"] == []
-
-
-async def test_a_listed_item_older_than_the_window_is_stale():
-    _, svc = service([page("p1", "오래된 것", listed="2026-01-01")])
-    report = await svc.stale_report(TODAY, days=30)
-    assert [i.name for i in report["stale"]] == ["오래된 것"]
-
-
-async def test_bumping_restarts_the_clock():
-    """The whole point of bumping: the listing was shown again today."""
-    _, svc = service(
-        [page("p1", "끌올함", listed="2026-01-01", bumped=TODAY.isoformat())]
-    )
-    assert (await svc.stale_report(TODAY, days=30))["stale"] == []
-
-
 async def test_selling_stamps_the_date_once():
     client, svc = service([page("p1", "팔린 것")])
     item = (await svc.open_items(TODAY))[0]
@@ -91,7 +66,7 @@ async def test_selling_again_leaves_the_original_date():
     client, svc = service([sold])
     item = K.Item(
         id="p1", name="x", price=1, status="Sold", paid=False,
-        listed_at=None, sold_at=date(2026, 8, 1), bumped=None, category=None,
+        sold_at=date(2026, 8, 1), category=None,
     )
     await svc.mark_sold(item, TODAY)
     assert "Sold At" not in client.updated[0][1]
@@ -106,7 +81,7 @@ async def test_sold_and_paid_items_leave_the_numbered_list():
 async def test_an_unpaid_sale_stays_in_the_list_but_sorts_last():
     _, svc = service(
         [
-            page("p1", "안 팔린 것", listed="2026-09-01"),
+            page("p1", "안 팔린 것"),
             page("p2", "미입금", status="Sold", paid=False),
         ]
     )
@@ -124,13 +99,6 @@ async def test_an_unknown_category_is_refused_with_the_list():
 
 
 # -- Sent: posted, not yet done --------------------------------------------
-
-
-async def test_a_sent_item_never_goes_stale():
-    """Staleness means nobody is buying it. Something already in the post has
-    a buyer — it is waiting on delivery, not on the market."""
-    _, svc = service([page("p1", "보냄", status="Sent", listed="2026-01-01")])
-    assert (await svc.stale_report(TODAY, days=30))["stale"] == []
 
 
 async def test_a_sent_item_still_needs_following_up():
@@ -159,14 +127,6 @@ async def test_the_list_says_which_stage_an_item_is_at():
     )
     text = K.item_list(await svc.open_items(TODAY), TODAY)
     assert "후보" in text and "예약중" in text and "발송함" in text
-
-
-async def test_an_off_market_item_shows_no_idle_count():
-    """Days idle measures time on sale, so it says nothing about an item that
-    is not on sale — printing it would invite bumping something already sent."""
-    _, svc = service([page("p1", "보냄", status="Sent", listed="2026-01-01")])
-    text = K.item_list(await svc.open_items(TODAY), TODAY)
-    assert "일째" not in text
 
 
 def test_the_statuses_follow_the_order_a_sale_moves_through():
@@ -245,3 +205,51 @@ async def test_a_clean_report_says_nothing_about_gaps():
     text = K.sales_message(await svc.sales(TODAY), TODAY)
     assert "판매일이 비어" not in text
     assert "미입금" not in text
+
+
+# -- the two weekly reports -------------------------------------------------
+
+
+async def test_the_saturday_report_counts_the_week_and_the_running_total():
+    _, svc = service([sold("p1", "이번주", 10000, "2026-09-11"), sold("p2", "옛날", 5000, "2026-01-05")])
+    text = K.weekly_message(await svc.sales(TODAY), [], TODAY)
+    assert "이번 주 1건 · ₩10,000" in text
+    assert "누적 2건 · ₩15,000" in text
+
+
+async def test_a_week_with_nothing_sold_and_nothing_owed_stays_silent():
+    """A weekly report that says 0건 every week is one you stop opening."""
+    _, svc = service([sold("p1", "옛날", 5000, "2026-01-05")])
+    assert K.weekly_message(await svc.sales(TODAY), [], TODAY) is None
+
+
+async def test_a_quiet_week_still_reports_money_owed():
+    """Nothing sold is not nothing to do when someone owes you."""
+    _, svc = service([sold("p1", "미입금", 3000, "2026-01-05", paid=False)])
+    text = K.weekly_message(await svc.sales(TODAY), await svc.unpaid(), TODAY)
+    assert text is not None and "미입금" in text
+
+
+async def test_monday_lists_what_is_waiting_to_be_listed():
+    _, svc = service(
+        [
+            page("p1", "후보1", status="Not listed", price=5000),
+            page("p2", "이미 올림", status="Listed"),
+        ]
+    )
+    text = K.candidates_message(await svc.all_items())
+    assert "후보1" in text and "이미 올림" not in text
+    assert "1건 · ₩5,000" in text
+
+
+async def test_monday_says_nothing_when_there_are_no_candidates():
+    _, svc = service([page("p1", "이미 올림", status="Listed")])
+    assert K.candidates_message(await svc.all_items()) is None
+
+
+async def test_a_note_is_shown_beside_the_item():
+    """The note is context the user wrote for themselves; a list that hides it
+    sends them back to Notion to find out why an item is flagged."""
+    _, svc = service([page("p1", "물건", note="어머니한테 판 것")])
+    text = K.item_list(await svc.open_items(TODAY), TODAY)
+    assert "어머니한테 판 것" in text

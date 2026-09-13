@@ -136,19 +136,27 @@ class Jobs:
         return reports.ai_news(day, body)
 
     async def build_karrot_report(self) -> str | None:
-        """Stale listings and unpaid sales, in Korean.
+        """Sunday's sales week, in Korean.
 
-        None when there is nothing to act on: a daily "all clear" in a channel
-        about second-hand listings is how that channel stops being read.
+        None when nothing sold and nothing is owed: a weekly report that says
+        "0건" every week is one you stop opening.
         """
         if self.karrot is None:
             return None
         from . import karrot as karrot_module
 
         today = self.today()
-        days = self.config.karrot.stale_after_days
-        report = await self.karrot.stale_report(today, days)
-        return karrot_module.stale_message(report, today, days)
+        data = await self.karrot.sales(today)
+        unpaid = await self.karrot.unpaid()
+        return karrot_module.weekly_message(data, unpaid, today)
+
+    async def build_karrot_candidates(self) -> str | None:
+        """Monday's list of what is decided on but not yet listed."""
+        if self.karrot is None:
+            return None
+        from . import karrot as karrot_module
+
+        return karrot_module.candidates_message(await self.karrot.all_items())
 
     async def build_weekly_planning(self) -> str:
         """Nudge to plan the coming week, with what is already in it.
@@ -235,6 +243,9 @@ class Jobs:
 
     async def run_karrot_report(self) -> None:
         await self._send(await self.build_karrot_report(), "karrot")
+
+    async def run_karrot_candidates(self) -> None:
+        await self._send(await self.build_karrot_candidates(), "karrot")
 
     async def run_weekly_planning(self) -> None:
         await self._send(await self.build_weekly_planning(), "agenda")

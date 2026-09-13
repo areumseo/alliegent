@@ -156,8 +156,13 @@ class Schedule(BaseModel):
     stale_project_time: str = "10:00"
     weekly_review_weekday: str = "sun"
     weekly_review_time: str = "21:00"
-    # Stale listings and unpaid sales, to the Karrot channel. Blank to disable.
-    karrot_report: str = "09:00"
+    # Two Karrot reports, at the two ends of a week. Monday asks what is
+    # waiting to be listed -- the week is the unit you would act in. Saturday
+    # counts what the week actually sold. Blank either time to switch it off.
+    karrot_candidates_weekday: str = "mon"
+    karrot_candidates_time: str = "09:00"
+    karrot_report_weekday: str = "sat"
+    karrot_report_time: str = "20:00"
 
     @field_validator("incomplete_alert", mode="before")
     @classmethod
@@ -193,9 +198,7 @@ class ProjectsConfig(BaseModel):
 
 
 class KarrotConfig(BaseModel):
-    # How long a listing sits before the morning report calls it stale. Counted
-    # from the last bump, so bumping resets it.
-    stale_after_days: int = 30
+    """Nothing to configure yet; the report is scheduled from [schedule]."""
 
 
 class NewsConfig(BaseModel):

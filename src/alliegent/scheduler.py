@@ -30,6 +30,7 @@ JOB_CHANNELS = {
     "stale_projects": "projects",
     "ai_news": "news",
     "karrot_report": "karrot",
+    "karrot_candidates": "karrot",
 }
 
 
@@ -88,7 +89,18 @@ def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
 
     add("daily_brief", jobs.run_daily_brief, time=sched.daily_brief)
     add("ai_news", jobs.run_ai_news, time=sched.ai_news)
-    add("karrot_report", jobs.run_karrot_report, time=sched.karrot_report)
+    add(
+        "karrot_candidates",
+        jobs.run_karrot_candidates,
+        time=sched.karrot_candidates_time,
+        day_of_week=sched.karrot_candidates_weekday,
+    )
+    add(
+        "karrot_report",
+        jobs.run_karrot_report,
+        time=sched.karrot_report_time,
+        day_of_week=sched.karrot_report_weekday,
+    )
     # One job per configured time; the id carries the time so two runs of the
     # same alert don't collide on a single id.
     for when in sched.incomplete_alert:

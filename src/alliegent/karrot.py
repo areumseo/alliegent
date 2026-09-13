@@ -48,9 +48,10 @@ SOLD = "Sold"
 # candidates, things being considered rather than offered.
 STATUSES = (NOT_LISTED, LISTED, RESERVED, SENT, SOLD)
 
-# Neither of these is on the market, so neither can go stale: nobody is
-# failing to buy an item that is already on its way, or not yet for sale.
-OFF_MARKET = (NOT_LISTED, SENT)
+# Listed At and Bumped were dropped from the database on 2026-09-13: this is a
+# record of what sold for how much, not of how long a listing sat. Staleness
+# went with them -- it was measured from those dates and nothing else could
+# stand in for them.
 
 # Renamed from Korean on 2026-09-11, to match Status, which was always
 # English. The split is by kind, not language: fixed choices are interface,
@@ -74,20 +75,9 @@ class Item:
     price: int | None
     status: str | None
     paid: bool
-    listed_at: date | None
     sold_at: date | None
-    bumped: date | None
     category: str | None
-
-    @property
-    def last_shown(self) -> date | None:
-        """마지막으로 노출을 갱신한 날 — 끌올했으면 그날, 아니면 등록일."""
-        dates = [d for d in (self.listed_at, self.bumped) if d]
-        return max(dates) if dates else None
-
-    def days_idle(self, today: date) -> int | None:
-        anchor = self.last_shown
-        return None if anchor is None else (today - anchor).days
+    note: str = ""
 
     @property
     def needs_attention(self) -> bool:
@@ -122,10 +112,9 @@ class KarrotService:
             price=n.read_number(page, "Price"),
             status=n.read_select(page, "Status"),
             paid=n.read_checkbox(page, "Paid"),
-            listed_at=n.read_date(page, "Listed At"),
             sold_at=n.read_date(page, "Sold At"),
-            bumped=n.read_date(page, "Bumped"),
             category=n.read_select(page, "Category"),
+            note=n.read_text(page, "Note"),
         )
 
     # -- 조회 --------------------------------------------------------------
@@ -146,7 +135,6 @@ class KarrotService:
             key=lambda i: (
                 i.status == SOLD,  # 미입금 건은 뒤로 -- 팔린 건 이미 손을 떠났다
                 i.status == NOT_LISTED,  # 아직 안 올린 건 팔리는 중인 것 다음
-                -(i.days_idle(today) or 0),
                 i.name,
             ),
         )
@@ -170,7 +158,6 @@ class KarrotService:
             "Price": n.number(price),
             "Status": n.select(LISTED),
             "Paid": n.checkbox(False),
-            "Listed At": n.date_prop(today),
         }
         if category:
             props["Category"] = n.select(category)
@@ -192,10 +179,6 @@ class KarrotService:
     async def mark_paid(self, item: Item, paid: bool = True) -> None:
         await self._client.update_page(item.id, {"Paid": n.checkbox(paid)})
 
-    async def bump(self, item: Item, today: date) -> None:
-        """끌올. 정체 일수가 오늘부터 다시 세어진다."""
-        await self._client.update_page(item.id, {"Bumped": n.date_prop(today)})
-
     async def set_status(self, item: Item, status: str, today: date) -> None:
         if status not in STATUSES:
             raise ValueError(f"status는 {' / '.join(STATUSES)} 중 하나여야 합니다.")
@@ -206,25 +189,12 @@ class KarrotService:
 
     # -- 집계 --------------------------------------------------------------
 
-    async def stale_report(self, today: date, days: int) -> dict[str, list[Item]]:
-        """정체 매물, 날짜 미상, 미입금."""
+    async def unpaid(self) -> list[Item]:
+        """팔렸는데 아직 돈이 안 들어온 건."""
         items = await self.all_items()
-        listed = [i for i in items if i.status == LISTED]
-
-        stale, undated = [], []
-        for item in listed:
-            idle = item.days_idle(today)
-            if idle is None:
-                undated.append(item)
-            elif idle >= days:
-                stale.append(item)
-
-        stale.sort(key=lambda i: i.days_idle(today) or 0, reverse=True)
-        undated.sort(key=lambda i: i.name)
-        unpaid = sorted(
+        return sorted(
             (i for i in items if i.status == SOLD and not i.paid), key=lambda i: i.name
         )
-        return {"stale": stale, "undated": undated, "unpaid": unpaid}
 
     async def sales(self, today: date) -> dict:
         """팔린 금액을 기간별로. 날짜 없는 건은 따로 센다.
@@ -306,8 +276,7 @@ class KarrotService:
 # 갈리는 지점을 파일 경계와 맞춰 둔 것.
 
 
-def _line(index: int, item: Item, today: date) -> str:
-    idle = item.days_idle(today)
+def _line(index: int, item: Item) -> str:
     bits = [item.won]
     if item.status == NOT_LISTED:
         bits.append("후보")
@@ -317,8 +286,10 @@ def _line(index: int, item: Item, today: date) -> str:
         bits.append("발송함")
     if item.status == SOLD and not item.paid:
         bits.append("⚠️ 미입금")
-    elif idle is not None and item.status not in OFF_MARKET:
-        bits.append(f"{idle}일째")
+    if item.note:
+        # 메모는 본인이 적어둔 맥락이라 짧게라도 보이는 게 낫다.
+        note = item.note if len(item.note) <= 40 else item.note[:39] + "…"
+        bits.append(note)
     return f"`{index}.` {item.name} — {' · '.join(bits)}"
 
 
@@ -326,8 +297,8 @@ def item_list(items: list[Item], today: date, *, title: str = "판매 중") -> s
     if not items:
         return "등록된 매물이 없습니다."
     lines = [f"🥕 **{title} ({len(items)}건)**"]
-    lines += [_line(i, item, today) for i, item in enumerate(items, start=1)]
-    lines.append("_`/karrot sold <번호>` · `/karrot bump <번호>` · `/karrot paid <번호>`_")
+    lines += [_line(i, item) for i, item in enumerate(items, start=1)]
+    lines.append("_`/karrot sold <번호>` · `/karrot sent <번호>` · `/karrot paid <번호>`_")
     return "\n".join(lines)
 
 
@@ -342,33 +313,50 @@ def read_only_list(items: list[Item], today: date, *, title: str) -> str:
     return "\n".join(lines)
 
 
-def stale_message(report: dict[str, list[Item]], today: date, days: int) -> str | None:
-    """아침 보고. 보고할 게 없으면 None — 매일 '이상 없음'을 보내면 채널을
-    안 보게 된다."""
-    stale, undated, unpaid = report["stale"], report["undated"], report["unpaid"]
-    if not stale and not unpaid:
+def weekly_message(data: dict, unpaid: list[Item], today: date) -> str | None:
+    """일요일 주간 매출. 판 것도 없고 받을 것도 없으면 None.
+
+    아침마다 정체 매물을 세던 자리를 대신한다. 등록일이 사라지면서 정체라는
+    개념 자체가 없어졌고, 이 데이터베이스가 답하는 질문은 이제 하나다 --
+    이번 주에 얼마 팔렸나.
+    """
+    count, amount = data["periods"]["this_week"]
+    if not count and not unpaid:
         return None
 
-    out = ["🥕 **당근 정리**", ""]
-    if stale:
-        out.append(f"**{days}일 넘게 안 팔린 매물 {len(stale)}건**")
-        for item in stale:
-            out.append(f"• {item.name} — {item.won} · {item.days_idle(today)}일째")
-        out.append("")
+    start = data["week_start"]
+    end = start + timedelta(days=6)
+    out = [
+        f"🥕 **주간 매출 — {start.month}/{start.day}–{end.month}/{end.day}**",
+        "",
+        f"이번 주 {count}건 · ₩{amount:,}",
+    ]
+    last_count, last_amount = data["periods"]["last_week"]
+    if last_count or last_amount:
+        diff = amount - last_amount
+        arrow = "▲" if diff > 0 else ("▼" if diff < 0 else "-")
+        out.append(f"지난 주 {last_count}건 · ₩{last_amount:,}  ({arrow} ₩{abs(diff):,})")
+    month_count, month_amount = data["periods"]["this_month"]
+    out.append(f"이번 달 {month_count}건 · ₩{month_amount:,}")
+    year_count, year_amount = data["periods"]["this_year"]
+    out.append(f"올해 {year_count}건 · ₩{year_amount:,}")
+    total_count, total_amount = data["total"]
+    out.append(f"누적 {total_count}건 · ₩{total_amount:,}")
+
+    undated_count, undated_amount = data["undated"]
+    if undated_count:
+        out.append(f"_판매일이 비어 기간에 못 넣은 건 {undated_count}건 · ₩{undated_amount:,}_")
+
     if unpaid:
-        amount = sum(i.price or 0 for i in unpaid)
-        out.append(f"**미입금 {len(unpaid)}건 · ₩{amount:,}**")
-        for item in unpaid:
-            out.append(f"• {item.name} — {item.won}")
-        out.append("")
-    if undated:
-        # 판정 못 한 것을 정체로 섞으면 매일 같은 19건이 올라온다.
-        out.append(f"_등록일이 비어 판정하지 못한 항목 {len(undated)}건_")
-    out.append("_`/karrot list`에서 번호로 처리하실 수 있습니다._")
-    return "\n".join(out).strip()
+        total = sum(i.price or 0 for i in unpaid)
+        out += ["", f"**미입금 {len(unpaid)}건 · ₩{total:,}**"]
+        out += [f"• {i.name} — {i.won}" for i in unpaid]
+    return "\n".join(out)
 
 
 def sales_message(data: dict, today: date) -> str:
+    """`/karrot sales`. 기간별로 나누고, 어느 기간에도 못 넣은 돈을 밝힌다."""
+
     def line(label: str, pair: tuple[int, int]) -> str:
         count, amount = pair
         return f"{label:<12} {count:>3}건 · ₩{amount:,}"
@@ -383,15 +371,13 @@ def sales_message(data: dict, today: date) -> str:
         line("이번 달", p["this_month"]),
         line("지난 달", p["last_month"]),
         line("올해", p["this_year"]),
-        line("전체", data["total"]),
+        line("누적", data["total"]),
         "```",
         f"_이번 주: {data['week_start'].month}/{data['week_start'].day}"
         f"–{week_end.month}/{week_end.day}_",
     ]
-
     undated_count, undated_amount = data["undated"]
     if undated_count:
-        # 기간 합계가 왜 작은지 말해주지 않으면, 매출이 없는 것처럼 읽힌다.
         out.append(
             f"⚠️ 판매일이 비어 기간 집계에서 빠진 건 {undated_count}건 · "
             f"₩{undated_amount:,}"
@@ -399,6 +385,23 @@ def sales_message(data: dict, today: date) -> str:
     unpaid_count, unpaid_amount = data["unpaid"]
     if unpaid_count:
         out.append(f"⚠️ 이 중 미입금 {unpaid_count}건 · ₩{unpaid_amount:,}")
+    return "\n".join(out)
+
+
+def candidates_message(items: list[Item]) -> str | None:
+    """월요일 아침 후보 목록. 없으면 None.
+
+    올릴 마음만 먹고 안 올린 물건은 팔릴 수 없다. 주가 시작할 때 한 번
+    보여주는 게 이 목록이 존재하는 이유다.
+    """
+    waiting = [i for i in items if i.status == NOT_LISTED]
+    if not waiting:
+        return None
+    total = sum(i.price or 0 for i in waiting)
+    out = [f"🥕 **이번 주에 올릴 후보 {len(waiting)}건 · ₩{total:,}**", ""]
+    out += [f"• {i.name} — {i.won}" for i in waiting]
+    out.append("")
+    out.append("_올리셨으면 노션에서 Listed로 바꿔주세요._")
     return "\n".join(out)
 
 
@@ -427,15 +430,3 @@ def summary_message(data: dict, today: date) -> str:
     )
 
 
-def days_since(item: Item, today: date) -> int | None:
-    return item.days_idle(today)
-
-
-def default_stale_days(config: Config) -> int:
-    return config.karrot.stale_after_days
-
-
-def month_window(today: date) -> tuple[date, date]:
-    start = today.replace(day=1)
-    nxt = (start + timedelta(days=32)).replace(day=1)
-    return start, nxt - timedelta(days=1)

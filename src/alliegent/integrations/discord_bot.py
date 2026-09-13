@@ -839,18 +839,6 @@ def _register(bot: AlliegentBot) -> None:
         await bot.karrot.mark_paid(item)
         await interaction.followup.send(f"✅ 입금 확인 — **{item.name}** ({item.won})")
 
-    @karrot_group.command(
-        name="bump", description="Bump a listing, restarting its idle count"
-    )
-    @app_commands.describe(number="Number from /karrot list")
-    async def karrot_bump(interaction: discord.Interaction, number: int) -> None:
-        await interaction.response.defer()
-        item = await _karrot_pick(interaction, number)
-        if item is None:
-            return
-        await bot.karrot.bump(item, bot.today())
-        await interaction.followup.send(f"🔼 끌올 — **{item.name}**")
-
     @karrot_group.command(name="sales", description="Revenue by week, month and year")
     async def karrot_sales(interaction: discord.Interaction) -> None:
         await interaction.response.defer()

@@ -14,7 +14,8 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
 | Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
 | Stale project nudge | Wed 10:00 | Projects with no linked agenda activity for N days. Off until a projects database exists |
-| Karrot report | 09:00 daily | Stale listings and unpaid sales, to the Karrot channel. Silent when there is nothing to act on |
+| Karrot candidates | Mon 09:00 | What is decided on but not yet listed. Silent when there is nothing waiting |
+| Karrot sales | Sat 20:00 | The week's sales, with the month, the year and the running total. Silent when nothing sold and nothing is owed |
 | Weekly review | Sun 21:00 | Completion stats for the past week as a review draft |
 
 The evening alert stays silent when there is nothing pending. A daily "all clear" ping trains you to ignore the channel, so only the morning brief is unconditional — and it distinguishes a day you finished from a day with nothing on it, rather than reporting both as empty.
@@ -34,7 +35,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/overdue` | Overdue, unfinished items — numbered, so they can be cleared |
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
-| `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `bump`, `sales`, `summary`. This channel speaks Korean — see below |
+| `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `sales`, `summary`. This channel speaks Korean — see below |
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
 
 Everything the bot shows in Discord is English, so nothing needs an input-method switch — with one deliberate exception, the Karrot channel, for the reason given below. Korean date words are still accepted as `when` values.
@@ -258,7 +259,9 @@ Second-hand sales live in their own Notion database and their own channel, and *
 
 The commands describe themselves in English even here — the picker is where you choose a command before any reply exists, and one that switches language mid-list is harder to scan. Only the replies and the morning report are Korean. Statuses follow the order a sale moves through: `Not listed` → `Listed` → `Reserved` → `Sent` → `Sold`.
 
-Two of those are **off the market**, and neither can go stale — staleness means nobody is buying, and nobody is failing to buy something that was never offered or is already in the post. `Not listed` is a candidate, an item being considered; `Sent` is posted and waiting on delivery. Both keep a number, because both still have something left to do, and neither shows a day count: printing "40일째" beside an item already sent would invite bumping it.
+`Not listed` is a candidate — decided on, not yet put up — and Monday's report is the list of them, because a week is the unit you would act in. `Sent` is posted and waiting on delivery. Both keep a number in `/karrot list`, because both still have something left to do.
+
+**`Listed At` and `Bumped` were removed from the database on 2026-09-13**, and staleness went with them. This is a record of what sold for how much, not of how long a listing sat; nothing else could stand in for those dates, so rather than approximate them the feature is gone. `/karrot bump` went too.
 
 `Status` and `Category` are both English in the database — they are fixed choices, which makes them interface rather than data. Item names stay in the language they were listed in.
 
