@@ -230,6 +230,27 @@ def get_config() -> Config:
     return load_config()
 
 
+def duplicate_env_keys(path: Path | None = None) -> dict[str, int]:
+    """Keys that appear more than once in .env, with how many times.
+
+    The last line wins silently, so a key pasted a second time replaces a
+    working value with no error anywhere. A second NOTION_TOKEN did exactly
+    that on 2026-09-11 and every Notion job failed for two days while the
+    file still visibly contained the right token, further up.
+    """
+    path = path or Path(".env")
+    if not path.exists():
+        return {}
+    seen: dict[str, int] = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key = line.split("=", 1)[0].strip()
+        seen[key] = seen.get(key, 0) + 1
+    return {key: count for key, count in seen.items() if count > 1}
+
+
 @lru_cache(maxsize=1)
 def get_secrets() -> Secrets:
     return Secrets()

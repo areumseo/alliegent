@@ -384,3 +384,76 @@ async def test_no_calendar_configured_is_not_a_failure():
     jobs, _, _ = build()
     jobs.calendar_source = None
     assert "Calendar unavailable" not in await jobs.build_daily_brief()
+
+
+# -- failures that used to be silent ---------------------------------------
+
+
+async def test_a_failing_job_says_so_in_its_channel():
+    """Every Notion job failed for two days after a duplicate .env key, and
+    the only trace was a stack trace on the server. A bot built to stay quiet
+    when there is nothing to say cannot also be quiet when it is broken."""
+    from alliegent.scheduler import _announcing
+
+    jobs, sent, _ = build()
+
+    async def boom():
+        raise RuntimeError("Notion said no")
+
+    await _announcing(jobs, "daily_brief", boom)()
+    message, kind = sent[0]
+    assert "daily_brief" in message and "RuntimeError" in message
+    assert kind == "agenda"
+
+
+async def test_a_failure_is_reported_where_the_message_belonged():
+    """Not all in one channel: the Karrot report failing is Karrot news."""
+    from alliegent.scheduler import _announcing
+
+    async def boom():
+        raise RuntimeError("nope")
+
+    jobs, sent, _ = build()
+    await _announcing(jobs, "karrot_report", boom)()
+    assert sent[0][1] == "karrot"
+
+
+async def test_a_reminder_time_is_stripped_from_the_channel_lookup():
+    """Job ids carry their time (incomplete_alert@14:00); the routing table
+    does not."""
+    from alliegent.scheduler import _announcing
+
+    async def boom():
+        raise RuntimeError("nope")
+
+    jobs, sent, _ = build()
+    await _announcing(jobs, "incomplete_alert@14:00", boom)()
+    assert sent[0][1] == "agenda"
+
+
+async def test_a_working_job_announces_nothing_extra():
+    from alliegent.scheduler import _announcing
+
+    jobs, sent, _ = build()
+    await _announcing(jobs, "daily_brief", jobs.run_daily_brief)()
+    assert all("failed" not in message for message, _ in sent)
+
+
+def test_duplicate_env_keys_are_detected(tmp_path):
+    """The failure mode itself: .env keeps the last value, so a second copy of
+    a key silently replaces a working one."""
+    from alliegent.config import duplicate_env_keys
+
+    env = tmp_path / ".env"
+    env.write_text(
+        "NOTION_TOKEN=first\n# a comment\nOTHER=1\nNOTION_TOKEN=second\n"
+    )
+    assert duplicate_env_keys(env) == {"NOTION_TOKEN": 2}
+
+
+def test_a_clean_env_reports_nothing(tmp_path):
+    from alliegent.config import duplicate_env_keys
+
+    env = tmp_path / ".env"
+    env.write_text("NOTION_TOKEN=only\nOTHER=1\n")
+    assert duplicate_env_keys(env) == {}

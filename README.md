@@ -344,6 +344,11 @@ PYTHONPATH=src uv run python -m alliegent.cli brief
 
 **The bot ignores mentions** — either `ANTHROPIC_API_KEY` is unset, or the Message Content intent is off in the developer portal. `fly logs` says which: a missing intent is logged explicitly at startup, and the bot keeps running without the chat feature rather than failing to connect.
 
+**`Could not find database with ID …` on every Notion job.** The token in use has no access to that database — which is not always the token you think you set. `.env` keeps the **last** definition of a key, so a second `NOTION_TOKEN=` pasted at the bottom silently replaces a working one further up, and the file still looks correct. A duplicate key is now logged as an error at startup; check the log before the login line.
+
+**A scheduled job that stops arriving.** Jobs stay silent when there is nothing to say, so a broken one looks the same as a quiet one. Failures are now announced in the channel the message belonged to, once per run. That is how a two-day outage went unnoticed in September: the AI news digest kept arriving because it is the one job that never touches Notion.
+
+
 ## Development
 
 ```bash

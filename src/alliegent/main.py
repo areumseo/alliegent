@@ -8,7 +8,7 @@ import logging
 import discord
 
 from .agenda import AgendaService, ProjectService
-from .config import get_config, get_secrets
+from .config import duplicate_env_keys, get_config, get_secrets
 from .integrations.discord_bot import AlliegentBot
 from .integrations.notion import NotionClient
 from .karrot import KarrotService
@@ -32,6 +32,15 @@ def configure_logging() -> None:
 async def main() -> None:
     configure_logging()
     config = get_config()
+    for key, count in duplicate_env_keys().items():
+        # Loud, because the file still looks right: the working value is up
+        # there in plain sight, and a later copy of the same key is what the
+        # app actually loaded.
+        log.error(
+            "%s appears %d times in .env — the LAST one wins. Delete the extras.",
+            key,
+            count,
+        )
     secrets = get_secrets()
     secrets.require("notion_token", "notion_agenda_db_id", "discord_bot_token")
     # Resolve every route up front so a missing channel fails at boot rather

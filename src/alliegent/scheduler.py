@@ -18,6 +18,48 @@ def _hhmm(value: str) -> tuple[int, int]:
     return int(hour), int(minute)
 
 
+# Which channel a failing job should complain in. A job that dies quietly is
+# indistinguishable from a job with nothing to say, and this bot is built to
+# stay quiet when there is nothing to say -- so the two look identical.
+JOB_CHANNELS = {
+    "daily_brief": "agenda",
+    "incomplete_alert": "agenda",
+    "weekly_planning": "agenda",
+    "week_scaffold": "agenda",
+    "weekly_review": "review",
+    "stale_projects": "projects",
+    "ai_news": "news",
+    "karrot_report": "karrot",
+}
+
+
+def _announcing(jobs: Jobs, name: str, func):
+    """Run a job, and say so in its own channel when it fails.
+
+    Once per scheduled run, which is the same cadence as the message that
+    failed to arrive -- so a job broken for two days says so twice, rather
+    than leaving two days of silence to be noticed by accident.
+    """
+    kind = JOB_CHANNELS.get(name.split("@")[0], "agenda")
+
+    async def run() -> None:
+        try:
+            await func()
+        except Exception as exc:
+            log.exception("%s failed", name)
+            try:
+                await jobs.notify(
+                    f"⚠️ `{name}` failed: {type(exc).__name__}. "
+                    "The message it would have sent is missing, not empty.",
+                    kind,
+                )
+            except Exception:
+                # Reporting the failure must not become a second failure.
+                log.exception("could not report the failure of %s", name)
+
+    return run
+
+
 def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
     sched = config.schedule
     scheduler = AsyncIOScheduler(timezone=config.tz)
@@ -32,7 +74,7 @@ def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
             hour=hour, minute=minute, day_of_week=day_of_week, timezone=config.tz
         )
         scheduler.add_job(
-            func,
+            _announcing(jobs, name, func),
             trigger,
             id=name,
             name=name,
