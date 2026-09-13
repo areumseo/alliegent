@@ -42,8 +42,15 @@ log = logging.getLogger(__name__)
 NOT_LISTED = "Not listed"
 LISTED = "Listed"
 RESERVED = "Reserved"
+SENT = "Sent"
 SOLD = "Sold"
-STATUSES = (NOT_LISTED, LISTED, RESERVED, SOLD)
+# The order a sale actually moves through. Not listed sits before it: those are
+# candidates, things being considered rather than offered.
+STATUSES = (NOT_LISTED, LISTED, RESERVED, SENT, SOLD)
+
+# Neither of these is on the market, so neither can go stale: nobody is
+# failing to buy an item that is already on its way, or not yet for sale.
+OFF_MARKET = (NOT_LISTED, SENT)
 
 # Renamed from Korean on 2026-09-11, to match Status, which was always
 # English. The split is by kind, not language: fixed choices are interface,
@@ -178,6 +185,10 @@ class KarrotService:
             props["Sold At"] = n.date_prop(today)
         await self._client.update_page(item.id, props)
 
+    async def mark_sent(self, item: Item) -> None:
+        """발송함. 아직 거래완료는 아니고, 상대가 받기를 기다리는 상태."""
+        await self._client.update_page(item.id, {"Status": n.select(SENT)})
+
     async def mark_paid(self, item: Item, paid: bool = True) -> None:
         await self._client.update_page(item.id, {"Paid": n.checkbox(paid)})
 
@@ -220,6 +231,7 @@ class KarrotService:
         sold = [i for i in items if i.status == SOLD]
         listed = [i for i in items if i.status == LISTED]
         reserved = [i for i in items if i.status == RESERVED]
+        sent = [i for i in items if i.status == SENT]
         waiting = [i for i in items if i.status == NOT_LISTED]
         unpaid = [i for i in sold if not i.paid]
         month_start = today.replace(day=1)
@@ -235,6 +247,8 @@ class KarrotService:
             "listed": len(listed),
             "listed_amount": total(listed),
             "reserved": len(reserved),
+            "sent": len(sent),
+            "sent_amount": total(sent),
             "not_listed": len(waiting),
             "not_listed_amount": total(waiting),
             "unpaid": len(unpaid),
@@ -254,12 +268,14 @@ def _line(index: int, item: Item, today: date) -> str:
     idle = item.days_idle(today)
     bits = [item.won]
     if item.status == NOT_LISTED:
-        bits.append("아직 안 올림")
+        bits.append("후보")
     if item.status == RESERVED:
         bits.append("예약중")
+    if item.status == SENT:
+        bits.append("발송함")
     if item.status == SOLD and not item.paid:
         bits.append("⚠️ 미입금")
-    elif idle is not None and item.status != NOT_LISTED:
+    elif idle is not None and item.status not in OFF_MARKET:
         bits.append(f"{idle}일째")
     return f"`{index}.` {item.name} — {' · '.join(bits)}"
 
@@ -320,7 +336,12 @@ def summary_message(data: dict, today: date) -> str:
             f"• 판매 중 {data['listed']}건 · ₩{data['listed_amount']:,}"
             + (f" (예약 {data['reserved']}건)" if data["reserved"] else ""),
             *(
-                [f"• 아직 안 올림 {data['not_listed']}건 · ₩{data['not_listed_amount']:,}"]
+                [f"• 발송함 {data['sent']}건 · ₩{data['sent_amount']:,}"]
+                if data["sent"]
+                else []
+            ),
+            *(
+                [f"• 후보 {data['not_listed']}건 · ₩{data['not_listed_amount']:,}"]
                 if data["not_listed"]
                 else []
             ),

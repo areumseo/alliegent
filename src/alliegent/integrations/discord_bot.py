@@ -819,6 +819,16 @@ def _register(bot: AlliegentBot) -> None:
         tail = "" if paid else " · 입금 대기"
         await interaction.followup.send(f"💰 판매 — **{item.name}** ({item.won}{tail})")
 
+    @karrot_group.command(name="sent", description="Mark an item posted to the buyer")
+    @app_commands.describe(number="Number from /karrot list")
+    async def karrot_sent(interaction: discord.Interaction, number: int) -> None:
+        await interaction.response.defer()
+        item = await _karrot_pick(interaction, number)
+        if item is None:
+            return
+        await bot.karrot.mark_sent(item)
+        await interaction.followup.send(f"📦 발송 — **{item.name}** ({item.won})")
+
     @karrot_group.command(name="paid", description="Confirm payment received")
     @app_commands.describe(number="Number from /karrot list")
     async def karrot_paid(interaction: discord.Interaction, number: int) -> None:

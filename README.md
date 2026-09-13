@@ -34,7 +34,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/overdue` | Overdue, unfinished items — numbered, so they can be cleared |
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
-| `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `paid`, `bump`, `summary`. This channel speaks Korean — see below |
+| `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `bump`, `summary`. This channel speaks Korean — see below |
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
 
 Everything the bot shows in Discord is English, so nothing needs an input-method switch — with one deliberate exception, the Karrot channel, for the reason given below. Korean date words are still accepted as `when` values.
@@ -256,7 +256,9 @@ Delivery is Discord, plus Gmail if `AI_NEWS_EMAIL_TO` is set.
 
 Second-hand sales live in their own Notion database and their own channel, and **this one channel is in Korean**. Every item name and category in that database is Korean already; a listing translated into "Clothing" is one the reader cannot search for. The slash commands keep ASCII names so nothing needs an input-method switch — only what they say is Korean.
 
-The commands describe themselves in English even here — the picker is where you choose a command before any reply exists, and one that switches language mid-list is harder to scan. Only the replies and the morning report are Korean. Statuses are `Not listed` → `Listed` → `Reserved` → `Sold`. **`Not listed` is a real state, not a missing one** — the item is here and decided on, just not put up yet. It keeps a number, because listing it is the work; it never counts as stale, because nothing can fail to sell what was never for sale.
+The commands describe themselves in English even here — the picker is where you choose a command before any reply exists, and one that switches language mid-list is harder to scan. Only the replies and the morning report are Korean. Statuses follow the order a sale moves through: `Not listed` → `Listed` → `Reserved` → `Sent` → `Sold`.
+
+Two of those are **off the market**, and neither can go stale — staleness means nobody is buying, and nobody is failing to buy something that was never offered or is already in the post. `Not listed` is a candidate, an item being considered; `Sent` is posted and waiting on delivery. Both keep a number, because both still have something left to do, and neither shows a day count: printing "40일째" beside an item already sent would invite bumping it.
 
 `Status` and `Category` are both English in the database — they are fixed choices, which makes them interface rather than data. Item names stay in the language they were listed in.
 

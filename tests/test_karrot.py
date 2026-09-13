@@ -121,3 +121,53 @@ async def test_an_unknown_category_is_refused_with_the_list():
         assert "Clothing" in str(exc)
     else:
         raise AssertionError("a category that is not in the database must be refused")
+
+
+# -- Sent: posted, not yet done --------------------------------------------
+
+
+async def test_a_sent_item_never_goes_stale():
+    """Staleness means nobody is buying it. Something already in the post has
+    a buyer — it is waiting on delivery, not on the market."""
+    _, svc = service([page("p1", "보냄", status="Sent", listed="2026-01-01")])
+    assert (await svc.stale_report(TODAY, days=30))["stale"] == []
+
+
+async def test_a_sent_item_still_needs_following_up():
+    """It keeps a number: the sale is not finished until it is marked sold."""
+    _, svc = service([page("p1", "보냄", status="Sent")])
+    assert [i.name for i in await svc.open_items(TODAY)] == ["보냄"]
+
+
+async def test_marking_sent_leaves_the_dates_alone():
+    """Sending is not selling: Sold At belongs to the completed sale."""
+    client, svc = service([page("p1", "예약된 것", status="Reserved")])
+    item = (await svc.open_items(TODAY))[0]
+    await svc.mark_sent(item)
+    written = client.updated[0][1]
+    assert written["Status"]["select"]["name"] == "Sent"
+    assert "Sold At" not in written
+
+
+async def test_the_list_says_which_stage_an_item_is_at():
+    _, svc = service(
+        [
+            page("p1", "후보", status="Not listed"),
+            page("p2", "예약", status="Reserved"),
+            page("p3", "발송", status="Sent"),
+        ]
+    )
+    text = K.item_list(await svc.open_items(TODAY), TODAY)
+    assert "후보" in text and "예약중" in text and "발송함" in text
+
+
+async def test_an_off_market_item_shows_no_idle_count():
+    """Days idle measures time on sale, so it says nothing about an item that
+    is not on sale — printing it would invite bumping something already sent."""
+    _, svc = service([page("p1", "보냄", status="Sent", listed="2026-01-01")])
+    text = K.item_list(await svc.open_items(TODAY), TODAY)
+    assert "일째" not in text
+
+
+def test_the_statuses_follow_the_order_a_sale_moves_through():
+    assert K.STATUSES == ("Not listed", "Listed", "Reserved", "Sent", "Sold")
