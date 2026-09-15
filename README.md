@@ -41,7 +41,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `sales`, `summary` |
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
 
-Everything the bot writes in Discord is English, so nothing needs an input-method switch. Data keeps the language it arrived in — Karrot item names are Korean because they are quoted from a Korean marketplace. Korean date words are still accepted as `when` values.
+Everything the bot writes in Discord is English, so nothing needs an input-method switch — except English quiz situations, for the reason given below. Data keeps the language it arrived in — Karrot item names are Korean because they are quoted from a Korean marketplace. Korean date words are still accepted as `when` values.
 
 Every message that lists today's unfinished work numbers it the way `/today` does — counting completed rows too, so the numbers are gaps rather than 1,2,3. That is deliberate: `/done` and `/delete` resolve a number against the full day, so renumbering the unfinished subset would make "2" mean a different row depending on which message you read it in.
 
@@ -267,6 +267,8 @@ Post what a lesson left behind into `#english-review` — the PDF, screenshots, 
 **British Council's pages refuse requests from servers** — HTTP/2 streams reset, HTTP/1.1 never answers, from both the laptop and the server. When the page cannot be read, its address is passed instead: it names the grammar topic, and standard grammar is something the model already knows.
 
 Cost is kept down deliberately. PDF text is extracted on the server with `pypdf` and only the text is sent; sending the file makes the model process every page as an image as well, several times the tokens for the same words. The original goes only when a PDF has no text layer. Quiz questions come from the stored context, so asking costs nothing — only extracting a lesson and grading call the model.
+
+**Quiz situations are the one place the bot writes Korean.** Tried in English they leaked the answer through the words that set the scene — "how would you say you're *willing* to do that" defines *be up for* rather than asking for it. A Korean situation makes you produce the English instead of recognising it. The heading, the instruction and the feedback around it stay English.
 
 Answers are read as a **reply to the quiz message**, which is how they are told apart from new lesson material posted while a quiz is open. Numbered lines land on their numbers, plain lines fill in order, and a skipped number stays empty rather than shifting every later answer onto the wrong question.
 

@@ -7,6 +7,13 @@ link is general grammar anyone could read. The quiz is built from the first and
 only explained with the second; a quiz built from a public grammar page would
 be a grammar exercise, not a review of the lesson.
 
+Quiz situations are written in Korean, the one place this bot's output is not
+English. Tried in English, they leaked the answer through the words that set
+the scene -- "how would you say you're *willing* to do that" is a definition
+of "be up for", not a question about it. A Korean situation makes the learner
+produce the English rather than recognise it. Everything around the question
+-- the heading, the instruction, the feedback -- stays English.
+
 Everything is stored in Notion, like the rest of the bot, rather than in a
 local database. At two lessons a week the volume is tiny, and the lessons stay
 browsable and correctable in the place the user already works.
@@ -205,8 +212,8 @@ Reply with one JSON object and nothing else:
     {
       "phrase": "the expression worth keeping, as used in the lesson",
       "meaning_ko": "what it means, in natural Korean",
-      "context": "one sentence describing a situation where it fits, worded so
-                  it can be asked as a question without giving the phrase away",
+      "context": "one or two sentences in Korean setting up a situation where
+                  the phrase is what you would say",
       "my_attempt": "what the learner said instead, if the material shows it, else empty",
       "tutor_version": "how the tutor said it, if the material shows it, else empty"
     }
@@ -225,7 +232,16 @@ Rules:
 - Include only what the lesson material actually contains. An empty list is
   correct when there is nothing; inventing examples is not.
 - Up to 10 expressions, the most useful first.
-- The context must not contain the phrase itself or an obvious form of it.
+- The context is a quiz question, so it must not give the answer away. Describe
+  the situation, not the meaning. To ask for "call off", write "토요일에 축구
+  경기가 있는데 폭우 예보가 있어요. 주최 측은 어떻게 할까요?" -- not a sentence
+  that already says the match was cancelled.
+- The question must stand on its own. The learner does not see the phrase, so
+  never refer to it: no "this expression", "the phrase", "using this idiom".
+  End with a plain question such as "뭐라고 말할까요?".
+- Write the context in Korean. The learner reads a Korean situation and has to
+  produce the English themselves; an English description tends to leak the
+  answer through the very words that explain it.
 """
 
 GRADE_SYSTEM = """\
