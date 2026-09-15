@@ -33,6 +33,7 @@ class AlliegentBot(discord.Client):
         secrets: Secrets,
         karrot=None,
         assets=None,
+        english=None,
         guild_id: int = 0,
         enable_chat: bool = True,
     ) -> None:
@@ -49,6 +50,7 @@ class AlliegentBot(discord.Client):
         self.projects = projects
         self.karrot = karrot
         self.assets = assets
+        self.english = english
         self.secrets = secrets
         self.guild_id = guild_id
         self.tree = app_commands.CommandTree(self)
@@ -65,6 +67,7 @@ class AlliegentBot(discord.Client):
             self.notify,
             karrot=karrot,
             assets=assets,
+            english=english,
             anthropic_api_key=secrets.anthropic_api_key,
             calendar_source=make_source(secrets),
             secrets=secrets,
@@ -87,7 +90,18 @@ class AlliegentBot(discord.Client):
 
     async def on_message(self, message: discord.Message) -> None:
         """Answer when mentioned. Only when mentioned: reacting to everything
-        would talk over conversations and bill for the privilege."""
+        would talk over conversations and bill for the privilege.
+
+        One exception: the English review channel exists to receive lesson
+        material, so everything posted there is read without a mention.
+        """
+        if message.author.bot:
+            return
+        english_channel = self.secrets.discord_english_channel_id
+        if self.english is not None and english_channel and message.channel.id == english_channel:
+            await self._english_message(message)
+            return
+
         if self.chat is None or self.user is None:
             return
         if message.author.bot or not self.user.mentioned_in(message):
@@ -109,13 +123,17 @@ class AlliegentBot(discord.Client):
         for part in reports.chunk(reply):
             await message.reply(part, mention_author=False)
 
-    async def notify(self, message: str, kind: str = "agenda") -> None:
-        """Push a scheduled message to the channel configured for `kind`."""
+    async def notify(self, message: str, kind: str = "agenda") -> list[discord.Message]:
+        """Push a scheduled message to the channel configured for `kind`.
+
+        Returns what was sent, so a job can refer back to its own message --
+        the English quiz reads answers as replies to it.
+        """
         try:
             channel_id = self.secrets.channel_for(kind)
         except RuntimeError as exc:
             log.error("%s", exc)
-            return
+            return []
 
         channel = self.get_channel(channel_id)
         if channel is None:
@@ -123,17 +141,135 @@ class AlliegentBot(discord.Client):
                 channel = await self.fetch_channel(channel_id)
             except discord.HTTPException as exc:
                 log.error("Cannot reach channel %s (%s): %s", channel_id, kind, exc)
-                return
+                return []
         if not isinstance(channel, discord.abc.Messageable):
             log.error("Channel %s is not messageable", channel_id)
-            return
+            return []
+        sent = []
         for part in reports.chunk(message):
             # Link previews would undo the point of a compact digest: five
             # articles means five cards, each taller than the entry itself.
-            await channel.send(part, suppress_embeds=True)
+            sent.append(await channel.send(part, suppress_embeds=True))
+        return sent
 
     def today(self) -> date:
         return datetime.now(self.config.tz).date()
+
+    async def _english_message(self, message: discord.Message) -> None:
+        """A reply to a quiz is answers; anything else is lesson material."""
+        from .. import english as eng
+
+        api_key = self.secrets.anthropic_api_key
+        if not api_key:
+            await message.reply("⚠️ ANTHROPIC_API_KEY is not set.", mention_author=False)
+            return
+
+        reference = message.reference.message_id if message.reference else None
+        if reference:
+            pending = await self.english.pending_for(str(reference))
+            if pending:
+                await self._grade_quiz(message, pending)
+                return
+
+        async with message.channel.typing():
+            try:
+                await self._ingest_lesson(message, api_key)
+            except eng.EnglishUnavailable as exc:
+                log.error("english ingest failed: %s", exc)
+                await message.reply(
+                    f"⚠️ Could not read that lesson: {exc}", mention_author=False
+                )
+
+    async def _ingest_lesson(self, message: discord.Message, api_key: str) -> None:
+        from .. import english as eng
+
+        material = eng.Material()
+        sources: list[str] = []
+        links = eng.urls_in(message.content)
+        material.text = eng.URL_PATTERN.sub(" ", message.content).strip()
+        if material.text:
+            sources.append("text")
+
+        for attachment in message.attachments:
+            kind = (attachment.content_type or "").split(";")[0]
+            data = await attachment.read()
+            if kind == "application/pdf" or attachment.filename.lower().endswith(".pdf"):
+                text = eng.pdf_text(data)
+                if text:
+                    material.pdf_texts.append(text)
+                else:
+                    material.scanned_pdfs.append(data)
+                sources.append(attachment.filename)
+            elif kind.startswith("image/"):
+                material.images.append((kind, data))
+                sources.append(attachment.filename)
+
+        if not material.has_lesson:
+            # Only a link. A reference page is background, not a lesson, so it
+            # is attached to today's lesson rather than becoming a second one --
+            # the PDF and its link usually arrive as two messages.
+            if links:
+                todays = await self.english.lessons_on(self.today())
+                if todays:
+                    await self.english.attach_reference(todays[-1].id, links[0])
+                    await message.reply(
+                        f"🔗 Linked to today's lesson — {todays[-1].topic}",
+                        mention_author=False,
+                    )
+                    return
+            await message.reply(
+                "⚠️ Nothing to review there yet — the lesson itself is in the PDF. "
+                "Post the PDF, a screenshot or your notes; a reference link can come "
+                "with it or after.",
+                mention_author=False,
+            )
+            return
+
+        for link in links:
+            material.reference_urls.append(link)
+            material.reference_texts.append(await eng.fetch_reference(link))
+            sources.append(link)
+
+        notes = await eng.extract(api_key, material)
+        raw_text = "\n\n".join(
+            part for part in [material.text, *material.pdf_texts] if part
+        )
+        _, expressions, mistakes = await self.english.save_lesson(
+            self.today(), notes, raw_text, links[0] if links else None
+        )
+        await message.reply(
+            eng.saved_message(notes["topic"], expressions, mistakes, sources),
+            mention_author=False,
+        )
+
+    async def _grade_quiz(self, message: discord.Message, pending: list) -> None:
+        from .. import english as eng
+
+        answers = eng.split_answers(message.content, len(pending))
+        expressions = [
+            await self.english.expression(review.expression_id) if review.expression_id else None
+            for review in pending
+        ]
+        items = [
+            (review.prompt, (expr.tutor_version or expr.phrase) if expr else "", answer)
+            for review, expr, answer in zip(pending, expressions, answers, strict=True)
+        ]
+        async with message.channel.typing():
+            try:
+                grades = await eng.grade(self.secrets.anthropic_api_key, items)
+            except eng.EnglishUnavailable as exc:
+                log.error("english grading failed: %s", exc)
+                await message.reply(f"⚠️ Could not grade that: {exc}", mention_author=False)
+                return
+
+        rows = []
+        for review, expr, answer, (result, feedback) in zip(
+            pending, expressions, answers, grades, strict=True
+        ):
+            await self.english.save_grade(review.id, answer, result, feedback)
+            rows.append((review, expr, answer, result, feedback))
+        for part in reports.chunk(eng.graded_message(rows)):
+            await message.reply(part, mention_author=False)
 
     def spawn(self, coro: Coroutine[Any, Any, None]) -> None:
         """Run a slow command in the background.

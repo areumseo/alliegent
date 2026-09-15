@@ -228,8 +228,30 @@ def title(text: str) -> dict[str, Any]:
     return {"title": [{"type": "text", "text": {"content": text}}]}
 
 
+# Notion rejects a text object over 2000 characters and a property with more
+# than 100 of them. Nothing wrote long text until lesson material arrived, where
+# one PDF's worth of text is several times the per-object limit.
+TEXT_CHUNK = 2000
+TEXT_CHUNKS_MAX = 100
+
+
 def rich_text(text: str) -> dict[str, Any]:
-    return {"rich_text": [{"type": "text", "text": {"content": text}}]}
+    """Rich text split into pieces Notion will accept.
+
+    Anything beyond the property's hard ceiling is dropped rather than failing
+    the whole write -- a truncated transcript is still a saved lesson.
+    """
+    pieces = [text[i : i + TEXT_CHUNK] for i in range(0, len(text), TEXT_CHUNK)] or [""]
+    return {
+        "rich_text": [
+            {"type": "text", "text": {"content": piece}}
+            for piece in pieces[:TEXT_CHUNKS_MAX]
+        ]
+    }
+
+
+def url(value: str | None) -> dict[str, Any]:
+    return {"url": value or None}
 
 
 def date_prop(

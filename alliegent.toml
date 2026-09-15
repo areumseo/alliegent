@@ -18,6 +18,7 @@ karrot_report_weekday = "sat"       # Karrot: what the week sold
 karrot_report_time = "20:00"
 asset_prompt_weekday = "mon"        # Assets: record this week's balances
 asset_prompt_time = "09:00"
+english_quiz = "20:30"              # English: quiz on today's lesson, if any
 # Nudge about today's unfinished items. One in the afternoon while the day
 # can still change, one at night to close it out. Silent when nothing is left.
 incomplete_alert = ["14:00", "19:30"]

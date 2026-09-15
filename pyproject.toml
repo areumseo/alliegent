@@ -15,6 +15,7 @@ dependencies = [
     "icalendar>=7.2.2",
     "recurring-ical-events>=3.8.2",
     "caldav>=3.2.1",
+    "pypdf>=5",
 ]
 
 [project.scripts]

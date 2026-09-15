@@ -35,6 +35,7 @@ class Jobs:
         clock: Callable[[], date] | None = None,
         karrot=None,
         assets=None,
+        english=None,
         anthropic_api_key: str = "",
         calendar_source: Callable | None = None,
         secrets: Secrets | None = None,
@@ -44,6 +45,7 @@ class Jobs:
         self.projects = projects
         self.karrot = karrot
         self.assets = assets
+        self.english = english
         self.config = config
         self.notify = notify
         self._anthropic_api_key = anthropic_api_key
@@ -167,6 +169,37 @@ class Jobs:
         from . import assets as assets_module
 
         return assets_module.prompt_message(await self.assets.latest(), self.today())
+
+    async def run_english_quiz(self) -> None:
+        """Quiz on today's lessons, if there were any not quizzed yet.
+
+        Sent directly rather than through _send, because the quiz needs the id
+        of the message it was posted as: answers are replies to it, and that
+        is how a reply is told apart from new lesson material.
+        """
+        if self.english is None:
+            return
+        from . import english as eng
+
+        today = self.today()
+        lessons = [lesson for lesson in await self.english.lessons_on(today) if not lesson.quizzed]
+        if not lessons:
+            log.info("no new English lesson today; no quiz")
+            return
+        expressions = await self.english.expressions_for({lesson.id for lesson in lessons})
+        questions = [e for e in expressions if e.context][: eng.QUIZ_SIZE]
+        if not questions:
+            await self.english.mark_quizzed([lesson.id for lesson in lessons])
+            log.info("today's lessons had nothing to quiz on")
+            return
+
+        sent = await self.notify(
+            eng.quiz_message(questions, [lesson.topic for lesson in lessons]), "english"
+        )
+        message_id = str(sent[0].id) if sent else ""
+        await self.english.record_questions(today, questions, message_id)
+        await self.english.mark_quizzed([lesson.id for lesson in lessons])
+        log.info("sent english quiz (%d questions)", len(questions))
 
     async def build_weekly_planning(self) -> str:
         """Nudge to plan the coming week, with what is already in it.

@@ -26,6 +26,12 @@ class Secrets(BaseSettings):
     notion_projects_db_id: str = ""
     notion_karrot_db_id: str = ""
     notion_assets_db_id: str = ""
+    # English lesson review: four linked databases. Lessons alone switches the
+    # feature on; the other three are required with it.
+    notion_english_lessons_db_id: str = ""
+    notion_english_expressions_db_id: str = ""
+    notion_english_mistakes_db_id: str = ""
+    notion_english_reviews_db_id: str = ""
 
     anthropic_api_key: str = ""
 
@@ -66,6 +72,7 @@ class Secrets(BaseSettings):
     discord_news_channel_id: int = 0
     discord_karrot_channel_id: int = 0
     discord_assets_channel_id: int = 0
+    discord_english_channel_id: int = 0
 
     @field_validator(
         "discord_guild_id",
@@ -76,6 +83,7 @@ class Secrets(BaseSettings):
         "discord_news_channel_id",
         "discord_karrot_channel_id",
         "discord_assets_channel_id",
+        "discord_english_channel_id",
         mode="before",
     )
     @classmethod
@@ -106,6 +114,7 @@ class Secrets(BaseSettings):
             "news": self.discord_news_channel_id or self.discord_channel_id,
             "karrot": self.discord_karrot_channel_id or self.discord_channel_id,
             "assets": self.discord_assets_channel_id or self.discord_channel_id,
+            "english": self.discord_english_channel_id or self.discord_channel_id,
         }
         target = routes.get(kind, agenda)
         if not target:
@@ -171,6 +180,8 @@ class Schedule(BaseModel):
     # form to fill. Blank the time to switch it off.
     asset_prompt_weekday: str = "mon"
     asset_prompt_time: str = "09:00"
+    # Evenings only matter on lesson days; the job stays silent otherwise.
+    english_quiz: str = "20:30"
 
     @field_validator("incomplete_alert", mode="before")
     @classmethod

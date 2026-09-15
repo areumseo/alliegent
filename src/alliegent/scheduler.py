@@ -32,6 +32,7 @@ JOB_CHANNELS = {
     "karrot_report": "karrot",
     "karrot_candidates": "karrot",
     "asset_prompt": "assets",
+    "english_quiz": "english",
 }
 
 
@@ -106,6 +107,7 @@ def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
     # same alert don't collide on a single id.
     for when in sched.incomplete_alert:
         add(f"incomplete_alert@{when}", jobs.run_incomplete_alert, time=when)
+    add("english_quiz", jobs.run_english_quiz, time=sched.english_quiz)
     add(
         "asset_prompt",
         jobs.run_asset_prompt,

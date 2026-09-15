@@ -132,7 +132,12 @@ class FakeNotionClient:
 
     async def create_page(self, data_source_id, properties, *, children=None):
         self.created.append((data_source_id, properties))
-        title = properties["Name"]["title"][0]["text"]["content"]
+        # Whichever property is the title: not every database calls it Name.
+        title_prop = next(
+            (v for v in properties.values() if isinstance(v, dict) and "title" in v),
+            {"title": [{"text": {"content": ""}}]},
+        )
+        title = title_prop["title"][0]["text"]["content"]
         day = properties.get("Date", {}).get("date", {}).get("start")
         return make_page(f"new_{len(self.created)}", title, day=day)
 

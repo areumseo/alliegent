@@ -14,6 +14,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
 | Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
 | Stale project nudge | Wed 10:00 | Projects with no linked agenda activity for N days. Off until a projects database exists |
+| English quiz | 20:30 daily | Five questions on today's lesson, answered by replying. Silent on days without a lesson |
 | Asset prompt | Mon 09:00 | Asks for this week's balances, carrying last week's figures to edit |
 | Karrot candidates | Mon 09:00 | What is decided on but not yet listed. Silent when there is nothing waiting |
 | Karrot sales | Sat 20:00 | The week's sales, with the month, the year and the running total. Silent when nothing sold and nothing is owed |
@@ -87,6 +88,7 @@ Each job posts to the channel matching its kind:
 | `DISCORD_NEWS_CHANNEL_ID` | Daily AI news digest |
 | `DISCORD_KARROT_CHANNEL_ID` | Karrot listings report |
 | `DISCORD_ASSETS_CHANNEL_ID` | Weekly asset prompt |
+| `DISCORD_ENGLISH_CHANNEL_ID` | English lesson material in, quizzes and grading out |
 | `DISCORD_CHANNEL_ID` | Fallback for anything left blank |
 
 ### 3. Run locally
@@ -255,6 +257,20 @@ Reading feeds instead fixes those by construction rather than by tuning:
 The cost is a list to maintain. A feed that moves or dies goes quiet rather than failing, so any feed contributing nothing is named in a `no articles from:` warning — worth reading if the digest starts looking thin.
 
 Delivery is Discord, plus Gmail if `AI_NEWS_EMAIL_TO` is set.
+
+## English lesson review
+
+Post what a lesson left behind into `#english-review` — the PDF, screenshots, pasted notes, a reference link — and it becomes four linked Notion databases: the lesson, the expressions worth keeping, the corrections, and every quiz question asked. That evening a five-question quiz goes out; reply to it with your answers and each is graded against what the tutor taught. This is the one channel the bot reads without being mentioned, because receiving material is its whole job.
+
+**The PDF is the lesson; a reference link is background.** They are sent to the model labelled apart, and expressions and corrections come only from the lesson material. A public grammar page is the same for everyone, so a quiz built from it would be a grammar exercise, not a review of what you said. A link posted on its own is attached to today's lesson instead of creating a second one — the PDF and its link usually arrive as two messages.
+
+**British Council's pages refuse requests from servers** — HTTP/2 streams reset, HTTP/1.1 never answers, from both the laptop and the server. When the page cannot be read, its address is passed instead: it names the grammar topic, and standard grammar is something the model already knows.
+
+Cost is kept down deliberately. PDF text is extracted on the server with `pypdf` and only the text is sent; sending the file makes the model process every page as an image as well, several times the tokens for the same words. The original goes only when a PDF has no text layer. Quiz questions come from the stored context, so asking costs nothing — only extracting a lesson and grading call the model.
+
+Answers are read as a **reply to the quiz message**, which is how they are told apart from new lesson material posted while a quiz is open. Numbered lines land on their numbers, plain lines fill in order, and a skipped number stays empty rather than shifting every later answer onto the wrong question.
+
+Spaced repetition, the pre-lesson review and the monthly mistake report are the second phase; the Reviews database records every result from the start so they will have history to work from.
 
 ## Assets
 
