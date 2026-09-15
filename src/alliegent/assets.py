@@ -145,38 +145,106 @@ def _delta(now: int, before: int | None) -> str:
     return f"  ({arrow} {_won(abs(diff))}{share})"
 
 
+# Fixed-width layout for Discord, which has no tables: a code block with every
+# cell padded. Three constraints shape it:
+#
+# - ASCII only inside the block. Arrows (▲▼) and box-drawing lines (─) are
+#   "ambiguous width" and render two cells wide in East Asian fonts, which is
+#   exactly what a Korean-locale Discord client uses -- one arrow and every
+#   column after it shifts. Signs are + and -, rules are plain hyphens.
+# - No ₩ in the cells, for the same reason; the header says KRW once.
+# - Column widths come from the values, not constants. Fixed widths fit the
+#   figures they were tuned on and break silently on the first larger one;
+#   measured widths keep every line the same length at any magnitude. At this
+#   table's real scale that is under 40 columns, which a phone shows unwrapped.
+
+
+def _signed(diff: int | None) -> str:
+    if diff is None:
+        return ""
+    if diff == 0:
+        return "0"
+    return f"{diff:+,}"
+
+
+def _pct(now: int, before: int | None) -> str:
+    if before is None:
+        return ""
+    if not before:
+        return "-"
+    if now == before:
+        return "0.0"
+    return f"{(now - before) / before * 100:+.1f}"
+
+
+def _cells(label: str, now: int, before: int | None) -> tuple[str, str, str, str]:
+    diff = None if before is None else now - before
+    return label, f"{now:,}", _signed(diff), _pct(now, before)
+
+
+def _render(rows: list[tuple[str, str, str, str] | None]) -> list[str]:
+    """Pad every column to its widest cell. None is a rule line."""
+    header = ("KRW", "Amount", "Change", "%")
+    cells = [header, *(r for r in rows if r is not None)]
+    widths = [max(len(row[col]) for row in cells) for col in range(4)]
+    # One space between columns; the name column is left-aligned, numbers right.
+    total = widths[0] + sum(w + 1 for w in widths[1:])
+
+    def line(row: tuple[str, str, str, str]) -> str:
+        name, *numbers = row
+        return f"{name:<{widths[0]}}" + "".join(
+            f" {value:>{width}}" for value, width in zip(numbers, widths[1:], strict=True)
+        )
+
+    out = [line(header), "-" * total]
+    out += ["-" * total if row is None else line(row) for row in rows]
+    return out
+
+
 def snapshot_message(
     current: Snapshot, previous: Snapshot | None, *, title: str = "Assets"
 ) -> str:
-    """Total, liquid and locked together: any one of them alone misleads."""
+    """One aligned table: liquid buckets, their subtotal, locked buckets,
+    theirs, then the total.
+
+    The grouping is the point of the layout, not decoration -- it puts the
+    money you could spend and the money you could not on either side of a
+    line, which a flat list of seven buckets never showed.
+    """
     when = current.day.isoformat() if current.day else ""
 
-    def headline(label: str, now: int, before: int | None) -> str:
-        return f"{label:<8} {_won(now):>14}{_delta(now, before)}"
+    def before(name: str) -> int | None:
+        return previous.amounts.get(name) if previous else None
 
-    out = [
-        f"💰 **{title} — {when}**",
-        "```",
-        headline("Total", current.total, previous.total if previous else None),
-        headline("Liquid", current.liquid, previous.liquid if previous else None),
-        headline("Locked", current.locked, previous.locked if previous else None),
-        "```",
+    def buckets(names: tuple[str, ...]) -> list[tuple[str, str, str, str]]:
+        return [
+            _cells(
+                LABELS[name] + ("*" if name in TENTATIVE else ""),
+                current.amounts.get(name, 0),
+                before(name),
+            )
+            for name in names
+        ]
+
+    # Subtotals in capitals, so a sum reads as one without costing a line.
+    rows: list[tuple[str, str, str, str] | None] = [
+        *buckets(LIQUID),
+        _cells("LIQUID", current.liquid, previous.liquid if previous else None),
+        None,
+        *buckets(LOCKED),
+        _cells("LOCKED", current.locked, previous.locked if previous else None),
+        None,
+        _cells("TOTAL", current.total, previous.total if previous else None),
     ]
 
-    lines = []
-    for name in BUCKETS:
-        amount = current.amounts.get(name, 0)
-        if not amount:
-            continue
-        before = previous.amounts.get(name) if previous else None
-        mark = " *" if name in TENTATIVE else ""
-        lines.append(f"• {LABELS[name]}{mark} {_won(amount)}{_delta(amount, before)}")
-    if lines:
-        out += ["**By bucket**", *lines]
+    out = [f"💰 **{title} — {when}**", "```", *_render(rows), "```"]
+    notes = []
     if any(current.amounts.get(name) for name in TENTATIVE):
-        out.append("_* estimate_")
+        notes.append("* estimate")
     if previous and previous.day:
-        out.append(f"_previous: {previous.day.isoformat()}_")
+        notes.append(f"vs {previous.day.isoformat()}")
+    if notes:
+        out.append("_" + " · ".join(notes) + "_")
     return "\n".join(out)
 
 
@@ -202,19 +270,30 @@ def prompt_message(previous: Snapshot | None, today: date) -> str:
 
 
 def trend_message(history: list[Snapshot], weeks: int = 8) -> str:
-    """The last few weeks. One snapshot is a point; the trend is the message."""
+    """The last few weeks. One snapshot is a point; the trend is the message.
+
+    Same layout rules as the snapshot table: ASCII, measured widths.
+    """
     if not history:
         return "No records yet."
     recent = history[-weeks:]
-    out = [f"💰 **Trend — last {len(recent)}**", "```"]
-    for row in recent:
-        when = row.day.isoformat() if row.day else "?"
-        out.append(
-            f"{when}  total {_won(row.total):>14}  liquid {_won(row.liquid):>14}"
-        )
-    out.append("```")
+    header = ("Week", "Total", "Liquid")
+    rows = [
+        (row.day.strftime("%m-%d") if row.day else "?", f"{row.total:,}", f"{row.liquid:,}")
+        for row in recent
+    ]
+    cells = [header, *rows]
+    widths = [max(len(r[c]) for r in cells) for c in range(3)]
+
+    def line(r: tuple[str, str, str]) -> str:
+        return f"{r[0]:<{widths[0]}} {r[1]:>{widths[1]}} {r[2]:>{widths[2]}}"
+
+    out = [f"💰 **Trend — last {len(recent)}**", "```", line(header)]
+    out.append("-" * (sum(widths) + 2))
+    out += [line(r) for r in rows]
     if len(recent) >= 2:
         diff = recent[-1].total - recent[0].total
-        arrow = "▲" if diff > 0 else ("▼" if diff < 0 else "-")
-        out.append(f"Over the period  {arrow} {_won(abs(diff))}")
+        out.append("-" * (sum(widths) + 2))
+        out.append(f"{'Change':<{widths[0]}} {_signed(diff):>{widths[1]}}")
+    out.append("```")
     return "\n".join(out)

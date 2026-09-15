@@ -97,27 +97,62 @@ async def test_a_new_week_is_a_new_row():
 def test_the_snapshot_message_shows_all_three_headline_numbers():
     snap = A.Snapshot("p1", MONDAY, {"Savings": 1000, "Deposit": 5000})
     text = A.snapshot_message(snap, None)
-    assert "Total" in text and "Liquid" in text and "Locked" in text
+    assert "TOTAL" in text and "LIQUID" in text and "LOCKED" in text
 
 
 def test_a_change_is_reported_against_the_previous_week():
     before = A.Snapshot("p0", date(2026, 9, 7), {"Savings": 1000})
     now = A.Snapshot("p1", MONDAY, {"Savings": 1200})
     text = A.snapshot_message(now, before)
-    assert "▲" in text and "₩200" in text
+    assert "+200" in text and "+20.0" in text
 
 
-def test_an_unchanged_bucket_says_so_rather_than_showing_an_arrow():
+def test_an_unchanged_bucket_reads_as_zero_not_as_a_rise():
     before = A.Snapshot("p0", date(2026, 9, 7), {"Savings": 1000})
     now = A.Snapshot("p1", MONDAY, {"Savings": 1000})
-    assert "no change" in A.snapshot_message(now, before)
+    row = next(
+        line for line in A.snapshot_message(now, before).splitlines()
+        if line.startswith("Savings")
+    )
+    assert row.split()[-2:] == ["0", "0.0"]
+
+
+def _table(text: str) -> list[str]:
+    lines = text.splitlines()
+    start = lines.index("```") + 1
+    return lines[start : lines.index("```", start)]
+
+
+def test_every_table_line_is_the_same_width():
+    """Alignment is the whole feature; one ragged row and it is gone."""
+    before = A.Snapshot("p0", date(2026, 9, 7), {n: 99_999_999 for n in A.BUCKETS})
+    now = A.Snapshot("p1", MONDAY, {n: 1 for n in A.BUCKETS})
+    assert len({len(line) for line in _table(A.snapshot_message(now, before))}) == 1
+
+
+def test_the_table_is_ascii_so_no_glyph_renders_double_width():
+    """Arrows, box-drawing rules and ₩ are ambiguous-width and render two cells
+    wide in East Asian fonts — which is what a Korean-locale client uses."""
+    before = A.Snapshot("p0", date(2026, 9, 7), {"Savings": 1000, "ESPP": 50})
+    now = A.Snapshot("p1", MONDAY, {"Savings": 900, "ESPP": 60})
+    assert all(line.isascii() for line in _table(A.snapshot_message(now, before)))
+
+
+def test_the_table_fits_a_phone_at_the_scale_it_is_used():
+    """A phone wraps a code block at about 40 columns, and a wrapped table is
+    worse than no table. Widths are measured, so this holds for totals in the
+    hundreds of millions and weekly moves in the tens of millions."""
+    before = A.Snapshot("p0", date(2026, 9, 7), {n: 60_000_000 for n in A.BUCKETS})
+    now = A.Snapshot("p1", MONDAY, {n: 55_000_000 for n in A.BUCKETS})
+    assert max(len(line) for line in _table(A.snapshot_message(now, before))) <= 40
 
 
 def test_the_estimate_is_marked_wherever_it_is_counted():
     """ESPP is a tentative figure; a report that presents it like a bank
     balance invites reading the total as settled."""
     snap = A.Snapshot("p1", MONDAY, {"ESPP": 4500})
-    assert "estimate" in A.snapshot_message(snap, None)
+    text = A.snapshot_message(snap, None)
+    assert "ESPP*" in text and "estimate" in text
 
 
 def test_the_monday_prompt_carries_last_weeks_figures():
@@ -135,7 +170,7 @@ def test_the_first_prompt_explains_where_to_write():
 
 def test_the_trend_needs_two_points_before_it_reports_a_change():
     one = [A.Snapshot("p1", MONDAY, {"Savings": 1000})]
-    assert "Over the period" not in A.trend_message(one)
+    assert "Change" not in A.trend_message(one)
 
 
 def test_the_trend_reports_the_move_across_the_window():
@@ -144,4 +179,5 @@ def test_the_trend_reports_the_move_across_the_window():
         A.Snapshot("p1", MONDAY, {"Savings": 1500}),
     ]
     text = A.trend_message(history)
-    assert "▲" in text and "₩500" in text
+    assert "+500" in text
+    assert all(line.isascii() for line in _table(text))
