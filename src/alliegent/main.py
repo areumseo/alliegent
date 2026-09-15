@@ -31,6 +31,18 @@ def configure_logging() -> None:
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 
+def enabled_routes(secrets) -> list[str]:
+    """The channels that must exist, given which features are configured."""
+    routes = ["agenda", "review", "news"]
+    optional = {
+        "projects": secrets.notion_projects_db_id,
+        "karrot": secrets.notion_karrot_db_id,
+        "assets": secrets.notion_assets_db_id,
+        "english": secrets.notion_english_lessons_db_id,
+    }
+    return routes + [kind for kind, database in optional.items() if database]
+
+
 async def main() -> None:
     configure_logging()
     config = get_config()
@@ -46,8 +58,11 @@ async def main() -> None:
     secrets = get_secrets()
     secrets.require("notion_token", "notion_agenda_db_id", "discord_bot_token")
     # Resolve every route up front so a missing channel fails at boot rather
-    # than silently swallowing a scheduled message days later.
-    for kind in ("agenda", "projects", "review", "news", "karrot", "assets", "english"):
+    # than silently swallowing a scheduled message days later -- but only for
+    # features that are switched on. Requiring a channel for a feature with no
+    # database took the whole bot down on 2026-09-15: English was deployed off,
+    # and its missing channel stopped agenda, news and Karrot from starting.
+    for kind in enabled_routes(secrets):
         secrets.channel_for(kind)
     if not secrets.anthropic_api_key:
         log.warning("ANTHROPIC_API_KEY not set — the AI news digest is disabled")

@@ -325,3 +325,29 @@ def test_everything_after_the_first_word_belongs_to_the_day():
         "1",
         "day after tomorrow",
     )
+
+
+# -- starting up with features switched off ---------------------------------
+
+
+def test_a_feature_without_its_database_does_not_require_its_channel():
+    """Deploying a feature switched off must not stop the rest from starting.
+    Requiring the English channel before it existed did exactly that."""
+    from alliegent.main import enabled_routes
+
+    secrets = Secrets(discord_channel_id=0, discord_agenda_channel_id=1)
+    routes = enabled_routes(secrets)
+    assert "english" not in routes and "karrot" not in routes and "assets" not in routes
+
+
+def test_a_configured_feature_does_require_its_channel():
+    from alliegent.main import enabled_routes
+
+    secrets = Secrets(notion_english_lessons_db_id="db")
+    assert "english" in enabled_routes(secrets)
+
+
+def test_the_core_routes_are_always_required():
+    from alliegent.main import enabled_routes
+
+    assert {"agenda", "review", "news"} <= set(enabled_routes(Secrets()))
