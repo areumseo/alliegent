@@ -38,10 +38,10 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
 | `/assets show` · `/assets trend` | Latest snapshot with what changed, and the recent history |
-| `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `sales`, `summary`. This channel speaks Korean — see below |
+| `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `sales`, `summary` |
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
 
-Everything the bot shows in Discord is English, so nothing needs an input-method switch — with one deliberate exception, the Karrot channel, for the reason given below. Korean date words are still accepted as `when` values.
+Everything the bot writes in Discord is English, so nothing needs an input-method switch. Data keeps the language it arrived in — Karrot item names are Korean because they are quoted from a Korean marketplace. Korean date words are still accepted as `when` values.
 
 Every message that lists today's unfinished work numbers it the way `/today` does — counting completed rows too, so the numbers are gaps rather than 1,2,3. That is deliberate: `/done` and `/delete` resolve a number against the full day, so renumbering the unfinished subset would make "2" mean a different row depending on which message you read it in.
 
