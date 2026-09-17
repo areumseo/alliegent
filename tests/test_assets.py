@@ -54,14 +54,24 @@ async def test_locked_money_is_in_the_total_but_counted_apart():
     assert snap.total == 6000
 
 
-async def test_each_bucket_lands_in_the_right_half():
+async def test_each_bucket_lands_in_the_right_group():
     _, svc = service(
         [row("p1", "2026-09-14", savings=1, stock=2, rsu=4, espp=8,
-             pension=16, deposit=32, mom=64)]
+             pension=16, deposit=32, mom=64, bonus=128)]
     )
     snap = await svc.latest()
-    assert snap.liquid == 15  # savings + stock + rsu + espp
+    assert snap.liquid == 7  # savings + stock + rsu
     assert snap.locked == 112  # pension + deposit + mom
+    assert snap.expected == 136  # espp + bonus
+
+
+async def test_expected_money_is_kept_out_of_the_total():
+    """ESPP still accruing and an unpaid bonus are not held. In the total, every
+    weekly change would mix money earned with an estimate revised."""
+    _, svc = service([row("p1", "2026-09-14", savings=1000, espp=500, bonus=2000)])
+    snap = await svc.latest()
+    assert snap.total == 1000
+    assert snap.total_with_expected == 3500
 
 
 async def test_history_runs_oldest_first():
@@ -133,8 +143,8 @@ def test_every_table_line_is_the_same_width():
 def test_the_table_is_ascii_so_no_glyph_renders_double_width():
     """Arrows, box-drawing rules and ₩ are ambiguous-width and render two cells
     wide in East Asian fonts — which is what a Korean-locale client uses."""
-    before = A.Snapshot("p0", date(2026, 9, 7), {"Savings": 1000, "ESPP": 50})
-    now = A.Snapshot("p1", MONDAY, {"Savings": 900, "ESPP": 60})
+    before = A.Snapshot("p0", date(2026, 9, 7), {"Savings": 1000, "Bonus": 50})
+    now = A.Snapshot("p1", MONDAY, {"Savings": 900, "Bonus": 60})
     assert all(line.isascii() for line in _table(A.snapshot_message(now, before)))
 
 
@@ -147,12 +157,21 @@ def test_the_table_fits_a_phone_at_the_scale_it_is_used():
     assert max(len(line) for line in _table(A.snapshot_message(now, before))) <= 40
 
 
-def test_the_estimate_is_marked_wherever_it_is_counted():
-    """ESPP is a tentative figure; a report that presents it like a bank
-    balance invites reading the total as settled."""
-    snap = A.Snapshot("p1", MONDAY, {"ESPP": 4500})
+def test_expected_money_gets_its_own_section_and_a_combined_line():
+    snap = A.Snapshot("p1", MONDAY, {"Savings": 1000, "ESPP": 500, "Bonus": 2000})
     text = A.snapshot_message(snap, None)
-    assert "ESPP*" in text and "estimate" in text
+    table = _table(text)
+    assert any(line.startswith("EXPECTED") and "2,500" in line for line in table)
+    assert any(line.startswith("TOTAL+EXP") and "3,500" in line for line in table)
+    total = next(line for line in table if line.startswith("TOTAL "))
+    assert "1,000" in total  # the held total does not include it
+    assert "not in TOTAL" in text
+
+
+def test_no_expected_section_when_nothing_is_expected():
+    """An empty section every week is noise."""
+    snap = A.Snapshot("p1", MONDAY, {"Savings": 1000})
+    assert "EXPECTED" not in A.snapshot_message(snap, None)
 
 
 def test_the_monday_prompt_carries_last_weeks_figures():

@@ -9,6 +9,11 @@ person will not: compare, weigh, and show the trend.
 worth" figure reads as money you could spend, and a deposit or a pension is
 not. Keeping the two numbers side by side is half of what this module is for.
 
+**Expected money is not in the total at all.** ESPP still accruing and a bonus
+not yet paid are real, but not held; folded into the total, every weekly
+change would mix money earned with an estimate revised. They are summed on
+their own line, with a total that includes them shown beneath.
+
 The amounts live in Notion, never in this repository -- every example and
 fixture here is invented.
 """
@@ -26,22 +31,26 @@ from .integrations.notion import NotionClient
 log = logging.getLogger(__name__)
 
 # Liquid: could be cash within days.
-LIQUID = ("Savings", "Stock/Funds", "RSU", "ESPP")
+LIQUID = ("Savings", "Stock/Funds", "RSU")
 # Locked: assets, but not spendable now. Still counted in the total.
 LOCKED = ("Pension", "Deposit", "Mom")
-BUCKETS = LIQUID + LOCKED
+# Expected: on its way, not held. Kept out of the total. Two columns rather than
+# one, because they move differently -- ESPP builds up each payday, a bonus is a
+# single estimate -- and a single column would hide which one changed.
+EXPECTED = ("ESPP", "Bonus")
 
-# An estimate. Counted, but marked as one wherever it is shown.
-TENTATIVE = ("ESPP",)
+HELD = LIQUID + LOCKED
+BUCKETS = HELD + EXPECTED
 
 LABELS = {
     "Savings": "Savings",
     "Stock/Funds": "Stock/Funds",
     "RSU": "RSU",
-    "ESPP": "ESPP",
     "Pension": "Pension",
     "Deposit": "Deposit",
     "Mom": "Mom",
+    "ESPP": "ESPP (6mo)",
+    "Bonus": "Bonus",
 }
 
 
@@ -65,7 +74,16 @@ class Snapshot:
 
     @property
     def total(self) -> int:
-        return self.bucket(BUCKETS)
+        """What is held now. Expected money is deliberately not in here."""
+        return self.bucket(HELD)
+
+    @property
+    def expected(self) -> int:
+        return self.bucket(EXPECTED)
+
+    @property
+    def total_with_expected(self) -> int:
+        return self.total + self.expected
 
 
 class AssetService:
@@ -218,11 +236,7 @@ def snapshot_message(
 
     def buckets(names: tuple[str, ...]) -> list[tuple[str, str, str, str]]:
         return [
-            _cells(
-                LABELS[name] + ("*" if name in TENTATIVE else ""),
-                current.amounts.get(name, 0),
-                before(name),
-            )
+            _cells(LABELS[name], current.amounts.get(name, 0), before(name))
             for name in names
         ]
 
@@ -236,11 +250,22 @@ def snapshot_message(
         None,
         _cells("TOTAL", current.total, previous.total if previous else None),
     ]
+    if current.expected or (previous and previous.expected):
+        rows += [
+            None,
+            *buckets(EXPECTED),
+            _cells("EXPECTED", current.expected, previous.expected if previous else None),
+            _cells(
+                "TOTAL+EXP",
+                current.total_with_expected,
+                previous.total_with_expected if previous else None,
+            ),
+        ]
 
     out = [f"💰 **{title} — {when}**", "```", *_render(rows), "```"]
     notes = []
-    if any(current.amounts.get(name) for name in TENTATIVE):
-        notes.append("* estimate")
+    if current.expected:
+        notes.append("EXPECTED is not in TOTAL")
     if previous and previous.day:
         notes.append(f"vs {previous.day.isoformat()}")
     if notes:
@@ -261,9 +286,11 @@ def prompt_message(previous: Snapshot | None, today: date) -> str:
 
     out.append(f"Last recorded ({previous.day.isoformat() if previous.day else '?'})")
     out.append("```")
-    for name in BUCKETS:
+    for name in HELD:
         out.append(f"{LABELS[name]:<12} {_won(previous.amounts.get(name, 0)):>14}")
     out.append(f"{'Total':<12} {_won(previous.total):>14}")
+    for name in EXPECTED:
+        out.append(f"{LABELS[name]:<12} {_won(previous.amounts.get(name, 0)):>14}")
     out.append("```")
     out.append("_Add a row in Notion; next week this will show what changed._")
     return "\n".join(out)
