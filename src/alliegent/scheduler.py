@@ -33,6 +33,7 @@ JOB_CHANNELS = {
     "karrot_candidates": "karrot",
     "asset_prompt": "assets",
     "english_quiz": "english",
+    "bonus_rollover": "assets",
 }
 
 
@@ -108,6 +109,32 @@ def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
     for when in sched.incomplete_alert:
         add(f"incomplete_alert@{when}", jobs.run_incomplete_alert, time=when)
     add("english_quiz", jobs.run_english_quiz, time=sched.english_quiz)
+    if sched.bonus_rollover_time.strip() and sched.bonus_rollover_months:
+        hour, minute = _hhmm(sched.bonus_rollover_time)
+        months = ",".join(str(m) for m in sched.bonus_rollover_months)
+        scheduler.add_job(
+            _announcing(jobs, "bonus_rollover", jobs.run_bonus_rollover),
+            CronTrigger(
+                month=months,
+                day=sched.bonus_rollover_day,
+                hour=hour,
+                minute=minute,
+                timezone=config.tz,
+            ),
+            id="bonus_rollover",
+            name="bonus_rollover",
+            # A day's grace: this runs twice a year, and missing it because the
+            # server was restarting at 09:00 would leave a bonus counted twice.
+            misfire_grace_time=24 * 3600,
+            coalesce=True,
+            max_instances=1,
+        )
+        log.info(
+            "scheduled bonus_rollover on day %d of months %s at %s",
+            sched.bonus_rollover_day,
+            months,
+            sched.bonus_rollover_time,
+        )
     add(
         "asset_prompt",
         jobs.run_asset_prompt,

@@ -15,6 +15,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
 | Stale project nudge | Wed 10:00 | Projects with no linked agenda activity for N days. Off until a projects database exists |
 | English quiz | 20:30 daily | Five questions on today's lesson, answered by replying. Silent on days without a lesson |
+| Bonus rollover | 1 Apr and 1 Oct, 09:00 | Moves the half-yearly bonus from Expected into Savings once it has been paid |
 | Asset prompt | Mon 09:00 | Asks for this week's balances, carrying last week's figures to edit |
 | Karrot candidates | Mon 09:00 | What is decided on but not yet listed. Silent when there is nothing waiting |
 | Karrot sales | Sat 20:00 | The week's sales, with the month, the year and the running total. Silent when nothing sold and nothing is owed |
@@ -279,6 +280,8 @@ Spaced repetition, the pre-lesson review and the monthly mistake report are the 
 A weekly snapshot, typed in by hand. Korean banks have no personal API worth building on and scraping survives neither the certificates nor the one-time codes, so the division of labour is the other way round from everything else here: a person writes seven numbers into Notion once a week, and the bot does the part a person will not — compare, weigh, and show the trend.
 
 **Locked money is in the total and shown apart from it.** `Pension`, `Deposit` and `Mom` are assets that cannot be drawn on; a single net-worth figure reads as money you could spend. Both numbers appear together every time, which is half the point of the feature. **Expected money is kept out of the total.** `ESPP` still accruing and a `Bonus` not yet paid are real but not held; inside the total, every weekly change would mix money earned with an estimate revised. They get their own section, summed as `EXPECTED`, with `TOTAL+EXP` beneath for the combined figure. Two columns rather than one, because they move differently — ESPP builds up each payday, a bonus is a single estimate — and one column would hide which had changed.
+
+The bonus is paid at the end of September and March, and on the first of the following month it moves into `Savings` on its own. The move is written as that day's row with every other figure carried over, never as an edit to an earlier row: that row recorded what was held on its own date. It is announced in `#assets` with the amounts, since balances are also entered by hand — once the bonus is in `Savings`, adding it again from the bank balance would count it twice.
 
 Monday's prompt carries last week's figures rather than presenting a blank form: editing numbers is faster than recalling them, and a bucket you forgot shows up as one that did not change. Recording twice in the same week corrects that week's row instead of adding a second — otherwise the next comparison would measure a change of zero.
 

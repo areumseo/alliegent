@@ -201,6 +201,18 @@ class Jobs:
         await self.english.mark_quizzed([lesson.id for lesson in lessons])
         log.info("sent english quiz (%d questions)", len(questions))
 
+    async def run_bonus_rollover(self) -> None:
+        if self.assets is None:
+            return
+        from . import assets as assets_module
+
+        today = self.today()
+        moved = await self.assets.roll_bonus_into_savings(today)
+        if moved is None:
+            log.info("no bonus recorded; nothing to move into Savings")
+            return
+        await self._send(assets_module.bonus_moved_message(today, *moved), "assets")
+
     async def build_weekly_planning(self) -> str:
         """Nudge to plan the coming week, with what is already in it.
 

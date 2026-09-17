@@ -182,6 +182,12 @@ class Schedule(BaseModel):
     asset_prompt_time: str = "09:00"
     # Evenings only matter on lesson days; the job stays silent otherwise.
     english_quiz: str = "20:30"
+    # The half-yearly bonus arrives at the end of September and March. On the
+    # first of the following month it moves from Expected into Savings. Blank
+    # the time to switch it off.
+    bonus_rollover_months: list[int] = Field(default_factory=lambda: [4, 10])
+    bonus_rollover_day: int = 1
+    bonus_rollover_time: str = "09:00"
 
     @field_validator("incomplete_alert", mode="before")
     @classmethod

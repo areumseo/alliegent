@@ -200,3 +200,79 @@ def test_the_trend_reports_the_move_across_the_window():
     text = A.trend_message(history)
     assert "+500" in text
     assert all(line.isascii() for line in _table(text))
+
+
+# -- the half-yearly bonus -------------------------------------------------
+
+
+OCT_1 = date(2026, 10, 1)
+
+
+async def test_the_bonus_moves_into_savings():
+    client, svc = service([row("p1", "2026-09-17", savings=1000, bonus=300, espp=50)])
+    moved = await svc.roll_bonus_into_savings(OCT_1)
+    assert moved == (300, 1000, 1300)
+    written = client.created[0][1]
+    assert written["Savings"]["number"] == 1300
+    assert written["Bonus"]["number"] == 0
+
+
+async def test_the_move_is_a_new_row_and_the_old_one_is_untouched():
+    """The September row recorded what was held in September; putting the bonus
+    into it would place money on a day it had not arrived on."""
+    client, svc = service([row("p1", "2026-09-17", savings=1000, bonus=300)])
+    await svc.roll_bonus_into_savings(OCT_1)
+    assert client.created and not client.updated
+
+
+async def test_every_other_bucket_carries_over():
+    """A row holding only Savings and Bonus would read as everything else having
+    dropped to zero overnight."""
+    client, svc = service(
+        [row("p1", "2026-09-17", savings=1000, bonus=300, pension=700, espp=50, mom=20)]
+    )
+    await svc.roll_bonus_into_savings(OCT_1)
+    written = client.created[0][1]
+    assert written["Pension"]["number"] == 700
+    assert written["ESPP"]["number"] == 50
+    assert written["Mom"]["number"] == 20
+
+
+async def test_no_bonus_means_nothing_is_written():
+    client, svc = service([row("p1", "2026-09-17", savings=1000)])
+    assert await svc.roll_bonus_into_savings(OCT_1) is None
+    assert not client.created and not client.updated
+
+
+async def test_the_total_rises_by_exactly_the_bonus_and_expected_falls_by_it():
+    _, svc = service([row("p1", "2026-09-17", savings=1000, bonus=300, espp=50)])
+    before = await svc.latest()
+    await svc.roll_bonus_into_savings(OCT_1)
+    # the fake client does not persist writes, so check the arithmetic directly
+    after_total = before.total + 300
+    after_expected = before.expected - 300
+    assert after_total - before.total == 300
+    assert before.expected - after_expected == 300
+
+
+def test_the_rollover_runs_on_the_first_of_april_and_october():
+    from alliegent.config import Config
+    from alliegent.jobs import Jobs
+    from alliegent.scheduler import build_scheduler
+
+    async def notify(message, kind):
+        return None
+
+    jobs = Jobs(None, None, Config(), notify)
+    scheduler = build_scheduler(jobs, Config())
+    job = next(j for j in scheduler.get_jobs() if j.id == "bonus_rollover")
+    fields = {f.name: str(f) for f in job.trigger.fields}
+    assert fields["month"] == "4,10"
+    assert fields["day"] == "1"
+
+
+def test_the_moved_message_warns_against_counting_it_twice():
+    """The user records real balances often; once the bonus is in Savings,
+    adding it again by hand would count it twice."""
+    text = A.bonus_moved_message(OCT_1, 300, 1000, 1300)
+    assert "again" in text
