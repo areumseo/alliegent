@@ -213,6 +213,18 @@ class Jobs:
             return
         await self._send(assets_module.bonus_moved_message(today, *moved), "assets")
 
+    async def run_espp_rollover(self) -> None:
+        if self.assets is None:
+            return
+        from . import assets as assets_module
+
+        today = self.today()
+        moved = await self.assets.roll_espp_into_vested(today)
+        if moved is None:
+            log.info("no ESPP recorded; nothing to move into Vested")
+            return
+        await self._send(assets_module.espp_moved_message(today, *moved), "assets")
+
     async def build_weekly_planning(self) -> str:
         """Nudge to plan the coming week, with what is already in it.
 

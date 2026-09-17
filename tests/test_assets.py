@@ -25,7 +25,7 @@ def row(pid, day, **amounts):
     for name, value in amounts.items():
         key = {
             "stock": "Stock/Funds",
-            "rsu": "RSU",
+            "vested": "Vested",
             "espp": "ESPP",
         }.get(name, name.title())
         props[key] = {"type": "number", "number": value}
@@ -56,11 +56,11 @@ async def test_locked_money_is_in_the_total_but_counted_apart():
 
 async def test_each_bucket_lands_in_the_right_group():
     _, svc = service(
-        [row("p1", "2026-09-14", savings=1, stock=2, rsu=4, espp=8,
+        [row("p1", "2026-09-14", savings=1, stock=2, vested=4, espp=8,
              pension=16, deposit=32, mom=64, bonus=128)]
     )
     snap = await svc.latest()
-    assert snap.liquid == 7  # savings + stock + rsu
+    assert snap.liquid == 7  # savings + stock + vested
     assert snap.locked == 112  # pension + deposit + mom
     assert snap.expected == 136  # espp + bonus
 
@@ -276,3 +276,53 @@ def test_the_moved_message_warns_against_counting_it_twice():
     adding it again by hand would count it twice."""
     text = A.bonus_moved_message(OCT_1, 300, 1000, 1300)
     assert "again" in text
+
+
+
+# -- ESPP becomes shares -----------------------------------------------------
+
+
+async def test_espp_moves_into_vested_after_the_purchase():
+    client, svc = service([row("p1", "2027-03-10", vested=1000, espp=400, savings=5)])
+    moved = await svc.roll_espp_into_vested(date(2027, 3, 12))
+    assert moved == (400, 1000, 1400)
+    written = client.created[0][1]
+    assert written["Vested"]["number"] == 1400
+    assert written["ESPP"]["number"] == 0
+    assert written["Savings"]["number"] == 5
+
+
+def test_the_espp_message_asks_for_the_market_value():
+    """What moves is what was paid in; the shares are usually worth more."""
+    text = A.espp_moved_message(date(2027, 3, 12), 400, 1000, 1400)
+    assert "market value" in text
+
+
+def test_the_espp_move_is_scheduled_the_day_after_the_period_closes():
+    from alliegent.config import Config
+    from alliegent.jobs import Jobs
+    from alliegent.scheduler import build_scheduler
+
+    async def notify(message, kind):
+        return None
+
+    config = Config()
+    config.schedule.espp_purchase_dates = ["2099-03-11"]
+    scheduler = build_scheduler(Jobs(None, None, config, notify), config)
+    job = next(j for j in scheduler.get_jobs() if j.id.startswith("espp_rollover"))
+    assert job.id == "espp_rollover@2099-03-12"
+
+
+def test_a_purchase_date_already_past_is_not_scheduled():
+    """Listed dates accumulate; an old one must not fire again on restart."""
+    from alliegent.config import Config
+    from alliegent.jobs import Jobs
+    from alliegent.scheduler import build_scheduler
+
+    async def notify(message, kind):
+        return None
+
+    config = Config()
+    config.schedule.espp_purchase_dates = ["2001-01-01"]
+    scheduler = build_scheduler(Jobs(None, None, config, notify), config)
+    assert not [j for j in scheduler.get_jobs() if j.id.startswith("espp_rollover")]

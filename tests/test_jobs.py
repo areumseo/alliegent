@@ -273,7 +273,10 @@ def test_scheduler_registers_the_enabled_jobs():
         "weekly_planning",
         "stale_projects",
         "weekly_review",
-    } | {f"incomplete_alert@{when}" for when in config.schedule.incomplete_alert}
+    } | {f"incomplete_alert@{when}" for when in config.schedule.incomplete_alert} | {
+        # One-off, and only while the date is still ahead.
+        job_id for job_id in ids if job_id.startswith("espp_rollover@")
+    }
 
 
 def test_a_reminder_at_half_past_is_scheduled_on_the_minute():

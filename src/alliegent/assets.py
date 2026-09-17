@@ -31,7 +31,10 @@ from .integrations.notion import NotionClient
 log = logging.getLogger(__name__)
 
 # Liquid: could be cash within days.
-LIQUID = ("Savings", "Stock/Funds", "RSU")
+# Vested is company stock actually owned: vested RSUs and ESPP shares once
+# bought. They sit in the same brokerage account as the same shares, so one
+# column, not two.
+LIQUID = ("Savings", "Stock/Funds", "Vested")
 # Locked: assets, but not spendable now. Still counted in the total.
 LOCKED = ("Pension", "Deposit", "Mom")
 # Expected: on its way, not held. Kept out of the total. Two columns rather than
@@ -45,7 +48,7 @@ BUCKETS = HELD + EXPECTED
 LABELS = {
     "Savings": "Savings",
     "Stock/Funds": "Stock/Funds",
-    "RSU": "RSU",
+    "Vested": "Vested",
     "Pension": "Pension",
     "Deposit": "Deposit",
     "Mom": "Mom",
@@ -141,31 +144,39 @@ class AssetService:
         page = await self._client.create_page(await self.data_source_id(), props)
         return self._to_snapshot(page)
 
-    async def roll_bonus_into_savings(self, today: date) -> tuple[int, int, int] | None:
-        """Move the expected bonus into Savings, as of today.
+    async def move(
+        self, today: date, source: str, target: str
+    ) -> tuple[int, int, int] | None:
+        """Move one bucket's whole amount into another, as of today.
 
-        Returns (bonus, savings before, savings after), or None when there was
-        no bonus to move.
+        Returns (amount moved, target before, target after), or None when the
+        source was empty.
 
         Written as today's row rather than by editing the latest one: that row
-        records what was held on its own date, and rewriting it would put the
-        bonus into a day it had not arrived on and bend the trend. Every other
-        bucket is carried over, because a new row with only two figures would
-        read as everything else having gone to zero.
+        records what was held on its own date, and rewriting it would put money
+        into a day it had not arrived on and bend the trend. Every other bucket
+        is carried over, because a row holding only two figures would read as
+        everything else having gone to zero.
         """
         history = await self.history()
         if not history:
             return None
         base = next((row for row in history if row.day == today), history[-1])
-        bonus = base.amounts.get("Bonus", 0)
-        if not bonus:
+        amount = base.amounts.get(source, 0)
+        if not amount:
             return None
-        before = base.amounts.get("Savings", 0)
+        before = base.amounts.get(target, 0)
         amounts = {name: base.amounts.get(name, 0) for name in BUCKETS}
-        amounts["Savings"] = before + bonus
-        amounts["Bonus"] = 0
+        amounts[target] = before + amount
+        amounts[source] = 0
         await self.record(today, amounts)
-        return bonus, before, before + bonus
+        return amount, before, before + amount
+
+    async def roll_bonus_into_savings(self, today: date) -> tuple[int, int, int] | None:
+        return await self.move(today, "Bonus", "Savings")
+
+    async def roll_espp_into_vested(self, today: date) -> tuple[int, int, int] | None:
+        return await self.move(today, "ESPP", "Vested")
 
     def monday_of(self, today: date) -> date:
         return today - timedelta(days=today.weekday())
@@ -333,6 +344,21 @@ def bonus_moved_message(today: date, bonus: int, before: int, after: int) -> str
             "_Recorded as today's row. If the amount paid was different, "
             "correct Savings in Notion — and don't add the bonus to Savings "
             "again when you next enter your balances._",
+        ]
+    )
+
+
+def espp_moved_message(today: date, amount: int, before: int, after: int) -> str:
+    return "\n".join(
+        [
+            f"💰 **ESPP bought — moved to Vested — {today.isoformat()}**",
+            "```",
+            f"ESPP      {amount:>14,}",
+            f"Vested    {before:>14,}  ->  {after:,}",
+            "```",
+            "_This moves what was paid in. The shares are usually worth more "
+            "than that — the plan discount and the price lookback — so update "
+            "Vested to their market value once they are in your account._",
         ]
     )
 

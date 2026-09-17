@@ -186,6 +186,11 @@ class Schedule(BaseModel):
     # first of the following month it moves from Expected into Savings. Blank
     # the time to switch it off.
     bonus_rollover_months: list[int] = Field(default_factory=lambda: [4, 10])
+    # The last day of each ESPP offering period; contributions become shares
+    # the next day. Listed rather than recurring because each cycle's dates are
+    # set by the plan and drift. Add the next one when it is announced.
+    espp_purchase_dates: list[str] = Field(default_factory=lambda: ["2027-03-11"])
+    espp_rollover_time: str = "09:00"
     bonus_rollover_day: int = 1
     bonus_rollover_time: str = "09:00"
 

@@ -6,6 +6,7 @@ import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 
 from .config import Config
 from .jobs import Jobs
@@ -34,6 +35,7 @@ JOB_CHANNELS = {
     "asset_prompt": "assets",
     "english_quiz": "english",
     "bonus_rollover": "assets",
+    "espp_rollover": "assets",
 }
 
 
@@ -135,6 +137,30 @@ def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
             months,
             sched.bonus_rollover_time,
         )
+    if sched.espp_rollover_time.strip():
+        from datetime import date as _date
+        from datetime import datetime as _datetime
+        from datetime import time as _time
+        from datetime import timedelta as _timedelta
+
+        hour, minute = _hhmm(sched.espp_rollover_time)
+        now = _datetime.now(config.tz)
+        for end in sched.espp_purchase_dates:
+            # The day after the period closes: the purchase price is set at the
+            # close, so the contributions are shares from then on.
+            day = _date.fromisoformat(end) + _timedelta(days=1)
+            when = _datetime.combine(day, _time(hour, minute), tzinfo=config.tz)
+            if when <= now:
+                continue
+            scheduler.add_job(
+                _announcing(jobs, "espp_rollover", jobs.run_espp_rollover),
+                DateTrigger(run_date=when, timezone=config.tz),
+                id=f"espp_rollover@{day.isoformat()}",
+                name=f"espp_rollover@{day.isoformat()}",
+                misfire_grace_time=24 * 3600,
+                max_instances=1,
+            )
+            log.info("scheduled espp_rollover on %s at %s", day, sched.espp_rollover_time)
     add(
         "asset_prompt",
         jobs.run_asset_prompt,
