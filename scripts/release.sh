@@ -57,6 +57,11 @@ read -r -p "cut this release? [y/N] " reply
 grep -qE '^version = ".*"' pyproject.toml || { echo "no version line in pyproject.toml"; exit 1; }
 /usr/bin/sed -i '' -E "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
 
+# uv.lock records the project's own version too. Left out of the release
+# commit, the server's `uv sync` rewrites it, and a dirty tree there stops
+# every later update -- which is how v1.0.0 went.
+uv lock --quiet
+
 # Spliced in above the newest existing entry, so the file's preamble -- which
 # explains the format -- stays at the top.
 FIRST=$(grep -n '^## ' CHANGELOG.md | head -1 | cut -d: -f1)
@@ -71,7 +76,7 @@ FIRST=$(grep -n '^## ' CHANGELOG.md | head -1 | cut -d: -f1)
 
 ${EDITOR:-nano} CHANGELOG.md
 
-git add pyproject.toml CHANGELOG.md
+git add pyproject.toml uv.lock CHANGELOG.md
 git commit --quiet -m "Release $TAG"
 git tag -a "$TAG" -m "$TAG"
 git push --quiet origin main
