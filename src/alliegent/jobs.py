@@ -34,6 +34,7 @@ class Jobs:
         notify: Notifier,
         clock: Callable[[], date] | None = None,
         karrot=None,
+        expenses=None,
         assets=None,
         english=None,
         anthropic_api_key: str = "",
@@ -44,6 +45,7 @@ class Jobs:
         self.agenda = agenda
         self.projects = projects
         self.karrot = karrot
+        self.expenses = expenses
         self.assets = assets
         self.english = english
         self.config = config
@@ -152,7 +154,8 @@ class Jobs:
         today = self.today()
         data = await self.karrot.sales(today)
         unpaid = await self.karrot.unpaid()
-        return karrot_module.weekly_message(data, unpaid, today)
+        spending = await self.expenses.spending(today) if self.expenses else None
+        return karrot_module.weekly_message(data, unpaid, today, spending)
 
     async def build_karrot_candidates(self) -> str | None:
         """Monday's list of what is decided on but not yet listed."""

@@ -32,6 +32,7 @@ class AlliegentBot(discord.Client):
         projects: ProjectService | None,
         secrets: Secrets,
         karrot=None,
+        expenses=None,
         assets=None,
         english=None,
         guild_id: int = 0,
@@ -49,6 +50,7 @@ class AlliegentBot(discord.Client):
         self.agenda = agenda
         self.projects = projects
         self.karrot = karrot
+        self.expenses = expenses
         self.assets = assets
         self.english = english
         self.secrets = secrets
@@ -66,6 +68,7 @@ class AlliegentBot(discord.Client):
             config,
             self.notify,
             karrot=karrot,
+            expenses=expenses,
             assets=assets,
             english=english,
             anthropic_api_key=secrets.anthropic_api_key,
@@ -1028,7 +1031,49 @@ def _register(bot: AlliegentBot) -> None:
             return
         today = bot.today()
         data = await bot.karrot.sales(today)
-        await _deliver(bot, interaction, karrot.sales_message(data, today), "karrot")
+        spending = await bot.expenses.spending(today) if bot.expenses else None
+        await _deliver(
+            bot, interaction, karrot.sales_message(data, today, spending), "karrot"
+        )
+
+    @karrot_group.command(name="spent", description="Record a selling cost: an ad or packaging")
+    @app_commands.describe(
+        amount="How much, in won",
+        kind="What it was for",
+        note="Optional note",
+        when="When it was spent (defaults to today)",
+    )
+    @app_commands.choices(
+        kind=[
+            app_commands.Choice(name=karrot.ADS, value=karrot.ADS),
+            app_commands.Choice(name=karrot.PACKAGING, value=karrot.PACKAGING),
+        ]
+    )
+    async def karrot_spent(
+        interaction: discord.Interaction,
+        amount: int,
+        kind: str,
+        note: str | None = None,
+        when: str | None = None,
+    ) -> None:
+        await interaction.response.defer()
+        if bot.expenses is None:
+            await interaction.followup.send("⚠️ NOTION_KARROT_EXPENSES_DB_ID is not set.")
+            return
+        try:
+            day = parse_day(when, bot.today())
+            expense = await bot.expenses.add(amount, kind, day, note=note or "")
+        except ValueError as exc:
+            await interaction.followup.send(f"⚠️ {exc}")
+            return
+
+        spending = await bot.expenses.spending(bot.today())
+        await interaction.followup.send(
+            f"🧾 Recorded — {expense.kind} ₩{expense.amount:,} "
+            f"({reports.fmt_date(day)})\n"
+            f"_This week: ₩{spending['periods']['this_week']:,} · "
+            f"all time: ₩{spending['total']:,}_"
+        )
 
     @karrot_group.command(name="summary", description="Totals for the whole database")
     async def karrot_summary(interaction: discord.Interaction) -> None:

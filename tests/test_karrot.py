@@ -214,7 +214,7 @@ async def test_the_saturday_report_counts_the_week_and_the_running_total():
     _, svc = service(
         [sold("p1", "이번주", 10000, "2026-09-11"), sold("p2", "옛날", 5000, "2026-01-05")]
     )
-    text = K.weekly_message(await svc.sales(TODAY), [], TODAY)
+    text = K.weekly_message(await svc.sales(TODAY), [], SUNDAY)
     assert "This week   1 sold · ₩10,000" in text
     assert "All time    2 sold · ₩15,000" in text
 
@@ -222,7 +222,7 @@ async def test_the_saturday_report_counts_the_week_and_the_running_total():
 async def test_a_week_with_nothing_sold_and_nothing_owed_stays_silent():
     """A weekly report that says 0건 every week is one you stop opening."""
     _, svc = service([sold("p1", "옛날", 5000, "2026-01-05")])
-    assert K.weekly_message(await svc.sales(TODAY), [], TODAY) is None
+    assert K.weekly_message(await svc.sales(TODAY), [], SUNDAY) is None
 
 
 async def test_a_quiet_week_still_reports_money_owed():
@@ -255,3 +255,83 @@ async def test_a_note_is_shown_beside_the_item():
     _, svc = service([page("p1", "물건", note="어머니한테 판 것")])
     text = K.item_list(await svc.open_items(TODAY), TODAY)
     assert "어머니한테 판 것" in text
+
+
+# -- selling costs ---------------------------------------------------------
+# Ads and packaging come off revenue: an item that sold because an ad pushed
+# it did not earn its whole price. History before 2026-09-20 is two aggregate
+# rows, because the per-item receipts were never kept.
+
+def expense(amount, kind=K.ADS, spent_at=None, name="ad"):
+    return K.Expense(id=name, name=name, kind=kind, amount=amount, spent_at=spent_at)
+
+
+SUNDAY = date(2026, 9, 20)
+
+
+def test_costs_land_in_the_periods_they_were_spent_in():
+    data = K.spending_of(
+        [
+            expense(2_960, spent_at=date(2026, 9, 20)),
+            expense(224_011, spent_at=date(2026, 8, 15)),
+            expense(63_800, K.PACKAGING, spent_at=date(2026, 8, 15)),
+        ],
+        SUNDAY,
+    )
+    assert data["periods"]["this_week"] == 2_960
+    assert data["periods"]["this_month"] == 2_960
+    assert data["periods"]["last_month"] == 287_811
+    assert data["periods"]["this_year"] == 290_771
+    assert data["total"] == 290_771
+
+
+def test_costs_are_split_by_kind():
+    data = K.spending_of([expense(1_000), expense(500, K.PACKAGING)], SUNDAY)
+    assert data["by_kind"] == {K.ADS: 1_000, K.PACKAGING: 500}
+
+
+def test_an_undated_cost_still_counts_towards_the_total():
+    """The same rule the sales side uses: money that fits no period is in the
+    total and named, not quietly dropped."""
+    data = K.spending_of([expense(5_000, spent_at=None)], SUNDAY)
+    assert data["total"] == 5_000
+    assert data["undated"] == 5_000
+    assert data["periods"]["this_year"] == 0
+
+
+def test_the_weekly_report_nets_the_week_and_the_total():
+    data = {
+        "week_start": date(2026, 9, 14),
+        "periods": {
+            "this_week": (2, 30_000),
+            "last_week": (0, 0),
+            "this_month": (2, 30_000),
+            "this_year": (2, 30_000),
+        },
+        "total": (2, 30_000),
+        "undated": (0, 0),
+        "unpaid": (0, 0),
+    }
+    spending = K.spending_of([expense(2_960, spent_at=date(2026, 9, 20))], SUNDAY)
+    text = K.weekly_message(data, [], SUNDAY, spending)
+    assert "Spent this week  ₩2,960" in text
+    assert "Net this week    ₩27,040" in text
+
+
+def test_revenue_stays_gross_without_an_expense_database():
+    """The database is optional, and a bot with no costs recorded must not
+    start reporting a net that is just the gross under another name."""
+    data = {
+        "week_start": date(2026, 9, 14),
+        "periods": {
+            "this_week": (1, 10_000),
+            "last_week": (0, 0),
+            "this_month": (1, 10_000),
+            "this_year": (1, 10_000),
+        },
+        "total": (1, 10_000),
+        "undated": (0, 0),
+        "unpaid": (0, 0),
+    }
+    text = K.weekly_message(data, [], SUNDAY)
+    assert "Spent" not in text and "Net" not in text

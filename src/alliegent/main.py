@@ -13,7 +13,7 @@ from .config import duplicate_env_keys, get_config, get_secrets
 from .english import EnglishService
 from .integrations.discord_bot import AlliegentBot
 from .integrations.notion import NotionClient
-from .karrot import KarrotService
+from .karrot import ExpenseService, KarrotService
 from .scheduler import build_scheduler
 
 log = logging.getLogger(__name__)
@@ -113,12 +113,22 @@ async def main() -> None:
     if karrot is None:
         log.warning("NOTION_KARROT_DB_ID not set — the Karrot channel is disabled")
 
+    # Optional on top of Karrot: without it the revenue reported is gross.
+    expenses = (
+        ExpenseService(client, config, secrets.notion_karrot_expenses_db_id)
+        if karrot and secrets.notion_karrot_expenses_db_id
+        else None
+    )
+    if karrot and expenses is None:
+        log.warning("NOTION_KARROT_EXPENSES_DB_ID not set — Karrot revenue is gross")
+
     def make_bot(enable_chat: bool) -> AlliegentBot:
         return AlliegentBot(
             config=config,
             agenda=agenda,
             projects=projects,
             karrot=karrot,
+            expenses=expenses,
             assets=assets,
             english=english,
             secrets=secrets,

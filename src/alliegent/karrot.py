@@ -86,6 +86,109 @@ class Item:
         return f"₩{self.price:,}" if self.price is not None else "no price"
 
 
+# Selling on Karrot costs money: neighbourhood ads to push a listing, and
+# packaging to send what sold. Kept in their own database rather than as rows
+# in the item list -- an expense has no price, no buyer and no status, and
+# every count in the item reports would have to learn to skip it.
+ADS = "Ads"
+PACKAGING = "Packaging"
+KINDS = (ADS, PACKAGING)
+
+
+@dataclass(frozen=True)
+class Expense:
+    id: str
+    name: str
+    kind: str | None
+    amount: int
+    spent_at: date | None
+    note: str = ""
+
+
+class ExpenseService:
+    """Karrot selling costs. Optional: without the database, revenue is gross.
+
+    The history before 2026-09-20 is two aggregate rows -- one for ads, one
+    for packaging -- because the per-item receipts were never kept. They are
+    dated mid-August, which is when the ads stopped, so they land in the month
+    the spending actually happened in rather than skewing the current one.
+    """
+
+    def __init__(self, client: NotionClient, config: Config, db_id: str) -> None:
+        self._client = client
+        self._cfg = config
+        self._db_id = db_id
+        self._ds_id: str | None = None
+
+    async def data_source_id(self) -> str:
+        if self._ds_id is None:
+            self._ds_id = await self._client.resolve_data_source(self._db_id)
+        return self._ds_id
+
+    def _to_expense(self, page: dict) -> Expense:
+        return Expense(
+            id=page["id"],
+            name=n.read_title(page, "Name") or "(untitled)",
+            kind=n.read_select(page, "Kind"),
+            amount=int(n.read_number(page, "Amount") or 0),
+            spent_at=n.read_date(page, "Spent At"),
+            note=n.read_text(page, "Note"),
+        )
+
+    async def all_expenses(self) -> list[Expense]:
+        ds = await self.data_source_id()
+        return [self._to_expense(page) async for page in self._client.query(ds)]
+
+    async def add(
+        self, amount: int, kind: str, day: date, *, name: str = "", note: str = ""
+    ) -> Expense:
+        if kind not in KINDS:
+            raise ValueError(f"Kind must be one of: {', '.join(KINDS)}")
+        if amount <= 0:
+            raise ValueError("An expense has to be a positive amount.")
+        props = {
+            "Name": n.title(name or ("Neighbourhood ad" if kind == ADS else "Packaging")),
+            "Kind": n.select(kind),
+            "Amount": {"number": amount},
+            "Spent At": n.date_prop(day, tz=self._cfg.tz),
+        }
+        if note:
+            props["Note"] = n.rich_text(note)
+        page = await self._client.create_page(await self.data_source_id(), props)
+        return self._to_expense(page)
+
+    async def spending(self, today: date) -> dict:
+        """Costs over the same periods `sales` reports revenue for."""
+        return spending_of(await self.all_expenses(), today)
+
+
+def spending_of(expenses: list[Expense], today: date) -> dict:
+    week_start = today - timedelta(days=today.weekday())
+    last_week = week_start - timedelta(days=7)
+    month_start = today.replace(day=1)
+    last_month_end = month_start - timedelta(days=1)
+    last_month_start = last_month_end.replace(day=1)
+    dated = [e for e in expenses if e.spent_at]
+
+    def between(start: date, end: date) -> int:
+        return sum(e.amount for e in dated if e.spent_at and start <= e.spent_at <= end)
+
+    return {
+        "periods": {
+            "this_week": between(week_start, today),
+            "last_week": between(last_week, week_start - timedelta(days=1)),
+            "this_month": between(month_start, today),
+            "last_month": between(last_month_start, last_month_end),
+            "this_year": between(today.replace(month=1, day=1), today),
+        },
+        "total": sum(e.amount for e in expenses),
+        "by_kind": {
+            kind: sum(e.amount for e in expenses if e.kind == kind) for kind in KINDS
+        },
+        "undated": sum(e.amount for e in expenses if not e.spent_at),
+    }
+
+
 class KarrotService:
     def __init__(self, client: NotionClient, config: Config, db_id: str) -> None:
         self._client = client
@@ -309,7 +412,9 @@ def read_only_list(items: list[Item], today: date, *, title: str) -> str:
     return "\n".join(lines)
 
 
-def weekly_message(data: dict, unpaid: list[Item], today: date) -> str | None:
+def weekly_message(
+    data: dict, unpaid: list[Item], today: date, spending: dict | None = None
+) -> str | None:
     """Saturday's week. None when nothing sold and nothing is owed.
 
     A weekly report that reads 0 every week is one you stop opening. Money
@@ -341,6 +446,18 @@ def weekly_message(data: dict, unpaid: list[Item], today: date) -> str | None:
     total_count, total_amount = data["total"]
     out.append(f"All time    {total_count} sold · ₩{total_amount:,}")
 
+    # What the selling cost, and what is actually left. A week whose sales
+    # were driven by ads did not earn the gross figure above it.
+    if spending is not None and spending["total"]:
+        week_cost = spending["periods"]["this_week"]
+        out += ["", f"Spent this week  ₩{week_cost:,}"]
+        if week_cost:
+            out.append(f"Net this week    ₩{amount - week_cost:,}")
+        out.append(
+            f"Spent all time   ₩{spending['total']:,}"
+            f"  ->  net ₩{total_amount - spending['total']:,}"
+        )
+
     undated_count, undated_amount = data["undated"]
     if undated_count:
         out.append(
@@ -354,24 +471,35 @@ def weekly_message(data: dict, unpaid: list[Item], today: date) -> str | None:
     return "\n".join(out)
 
 
-def sales_message(data: dict, today: date) -> str:
-    """Revenue by period, naming the money that fits in none of them."""
+def sales_message(data: dict, today: date, spending: dict | None = None) -> str:
+    """Revenue by period, naming the money that fits in none of them.
 
-    def line(label: str, pair: tuple[int, int]) -> str:
+    With `spending`, each period also shows what selling cost and what is
+    left. Gross revenue overstates what the sales were worth -- an item that
+    sold because an ad pushed it did not earn its whole price.
+    """
+
+    def line(label: str, pair: tuple[int, int], cost: int | None = None) -> str:
         count, amount = pair
-        return f"{label:<11} {count:>3} · ₩{amount:,}"
+        text = f"{label:<11} {count:>3} · ₩{amount:,}"
+        if cost:
+            text += f"  -₩{cost:,} = ₩{amount - cost:,}"
+        return text
+
+    def cost(name: str) -> int | None:
+        return None if spending is None else spending["periods"].get(name, 0)
 
     week_end = data["week_start"] + timedelta(days=6)
     p = data["periods"]
     out = [
         f"🥕 **Sales — {today.isoformat()}**",
         "```",
-        line("This week", p["this_week"]),
-        line("Last week", p["last_week"]),
-        line("This month", p["this_month"]),
-        line("Last month", p["last_month"]),
-        line("This year", p["this_year"]),
-        line("All time", data["total"]),
+        line("This week", p["this_week"], cost("this_week")),
+        line("Last week", p["last_week"], cost("last_week")),
+        line("This month", p["this_month"], cost("this_month")),
+        line("Last month", p["last_month"], cost("last_month")),
+        line("This year", p["this_year"], cost("this_year")),
+        line("All time", data["total"], None if spending is None else spending["total"]),
         "```",
         f"_This week: {data['week_start'].month}/{data['week_start'].day}"
         f"–{week_end.month}/{week_end.day}_",
@@ -385,6 +513,13 @@ def sales_message(data: dict, today: date) -> str:
     unpaid_count, unpaid_amount = data["unpaid"]
     if unpaid_count:
         out.append(f"⚠️ Of these, {unpaid_count} unpaid · ₩{unpaid_amount:,}")
+    if spending is not None and spending["total"]:
+        kinds = ", ".join(
+            f"{kind.casefold()} ₩{amount:,}"
+            for kind, amount in spending["by_kind"].items()
+            if amount
+        )
+        out.append(f"_Costs to date: {kinds}._")
     return "\n".join(out)
 
 

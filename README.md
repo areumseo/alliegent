@@ -39,7 +39,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/projects` | Active projects and their next actions |
 | `/brief` | Run the daily brief now |
 | `/assets show` · `/assets trend` | Latest snapshot with what changed, and the recent history |
-| `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `sales`, `summary` |
+| `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `spent`, `sales`, `summary` |
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
 
 Everything the bot writes in Discord is English, so nothing needs an input-method switch — except English quiz situations, for the reason given below. Data keeps the language it arrived in — Karrot item names are Korean because they are quoted from a Korean marketplace. Korean date words are still accepted as `when` values.
@@ -316,6 +316,10 @@ Three judgements carried over from the script this was ported from, each earned:
 `/karrot sales` breaks revenue down by week, month and year, and **names the money it could not place**. A sale with no `Sold At` belongs to no period, and 109 of them had none when this was written — reporting "이번 달 ₩0" without saying why would read as a month with no sales rather than a month with no dates. Unpaid sales count as revenue, with the outstanding amount on its own line: the item is gone and the price is settled, so netting it out would hide a sale that happened.
 
 `NOTION_KARROT_DB_ID` switches the whole feature off when blank.
+
+**Selling costs come off revenue.** Neighbourhood ads and packaging are recorded in their own small database — an expense has no price, no buyer and no status, so keeping it as a row in the item list would mean teaching every count to skip it. `/karrot spent <amount> <kind>` records one; `sales` and the Saturday report then show what each period cost and what is left. Without `NOTION_KARROT_EXPENSES_DB_ID` the revenue reported is gross, and no net figure is shown at all.
+
+The history before 2026-09-20 is two aggregate rows, one for ads and one for packaging, because the per-purchase receipts were never kept. They are dated 2026-08-15 — when the ads stopped — so they fall in the month the money was actually spent rather than flattening the current one.
 
 ## The agenda database
 

@@ -25,6 +25,8 @@ class Secrets(BaseSettings):
     notion_agenda_db_id: str = ""
     notion_projects_db_id: str = ""
     notion_karrot_db_id: str = ""
+    # Optional: selling costs, netted off revenue. Without it revenue is gross.
+    notion_karrot_expenses_db_id: str = ""
     notion_assets_db_id: str = ""
     # English lesson review: four linked databases. Lessons alone switches the
     # feature on; the other three are required with it.
