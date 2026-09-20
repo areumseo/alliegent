@@ -43,7 +43,7 @@ def test_daily_brief_lists_pending_and_overdue():
         [Project("p", "프로젝트", "In progress", "다음 단계", "")],
     )
     assert "오늘 할 일" in text
-    assert "이미 한 것" not in text  # completed items aren't repeated back
+    assert "이미 한 것" in text  # the day is shown whole, finished work included
     assert "밀린 것" in text
     assert "다음 단계" in text
 
@@ -190,7 +190,7 @@ def test_all_three_agree_on_the_numbers():
     brief = reports.daily_brief(TODAY, MIXED, [], [])
     alert = reports.incomplete_alert(TODAY, MIXED, [])
     stat = reports.status(TODAY, MIXED, [], MIXED)
-    for line in reports.pending_lines(MIXED):
+    for line in reports.day_table(MIXED):
         assert line in brief and line in alert and line in stat
 
 
@@ -475,9 +475,9 @@ def test_started_items_are_marked_in_a_day_list():
     assert row(text, 2).startswith("2 -") and "untouched" in row(text, 2)
 
 
-def test_started_items_are_marked_in_the_pending_list():
+def test_started_items_are_marked_in_the_day_table():
     """The brief, the evening alert and /status all read from this."""
-    lines = reports.pending_lines([started_item("underway", started=True)])
+    lines = reports.day_table([started_item("underway", started=True)])
     assert [line for line in lines if line.startswith("1 ")] == ["1 > -    underway"]
 
 
@@ -714,7 +714,7 @@ def test_every_header_count_matches_the_rows_below_it():
         reports.incomplete_alert(TODAY, todays, []),
     ]
     for text in messages:
-        header = next(line for line in text.splitlines() if line.startswith("**"))
-        assert "(3)" in header, header
-        rows = [n for n in range(1, 6) if row(text, n)]
-        assert rows == [2, 4, 5], text
+        header = next(line for line in text.splitlines() if line.startswith("**Today"))
+        assert header == "**Today — 3 left of 5**", header
+        # The whole day is listed, so the numbers run without gaps.
+        assert [n for n in range(1, 6) if row(text, n)] == [1, 2, 3, 4, 5], text

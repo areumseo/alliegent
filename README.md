@@ -8,9 +8,9 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 
 | Job | Default time (Asia/Seoul) | Description |
 | --- | --- | --- |
-| Daily brief | 08:00 daily | Today's items, anything overdue, and active projects, in one message |
+| Daily brief | 08:00 daily | The whole day, anything overdue, and active projects, in one message |
 | AI news digest | 09:00 daily | Five of yesterday's AI stories, read from publication feeds — a topics line, then linked headlines with a short summary in English and Korean |
-| Incomplete alert | 14:00 and 19:30 daily | Today's unfinished items and anything past its date. Two runs: one while the day can still change, one to close it out |
+| Incomplete alert | 14:00 and 19:30 daily | The day so far — what is left, what is done — and anything past its date. Two runs: one while the day can still change, one to close it out |
 | Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
 | Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
 | Stale project nudge | Wed 10:00 | Projects with no linked agenda activity for N days. Off until a projects database exists |
@@ -49,7 +49,7 @@ Everything the bot writes in Discord is English, so nothing needs an input-metho
 
 The weekly review is one table for the whole week rather than a block per day, with the date printed on each day's first row: the date column groups it just as well, and a dozen two-row blocks is harder to read down than a single column of dates. The weekly plan gives every day of the coming week a row, empty ones included — the shape of the week is the thing being planned, and a day with nothing on it is the row that most needs to be seen.
 
-Every message that lists today's unfinished work numbers it the way `/today` does — counting completed rows too, so the numbers are gaps rather than 1,2,3. That is deliberate: `/done` and `/delete` resolve a number against the full day, so renumbering the unfinished subset would make "2" mean a different row depending on which message you read it in.
+Every message that shows the day shows all of it, finished items included and ticked. What you have already done is context for what is left, and the heading carries the live number — `Today — 4 left of 7`. It also keeps the numbering honest: `/done` and `/delete` resolve a number against the whole day, so a list that hid the finished rows had to number the rest 1, 3, 4 to stay safe to type from.
 
 `overdue` is a list in its own right: `/done 2 overdue`, `/delete 1,3 overdue`. Type it straight through — Discord only moves to the next option when you press Tab, so the day usually lands in the numbers field, and the commands read it back out from there rather than answering "Not a number". Delayed items span days, so no day argument reaches them, and a backlog that can only be looked at is a backlog that stays.
 

@@ -191,6 +191,17 @@ def day_table(items: list[AgendaItem]) -> list[str]:
     return _task_table(rows, "Time")
 
 
+def day_header(todays: list[AgendaItem]) -> str:
+    """How the day stands, for the heading above its table.
+
+    The whole day is listed, finished items included, so the heading has to
+    say how much of it is still live -- "Today (7)" above four open rows and
+    three ticked ones tells you nothing you wanted to know.
+    """
+    left = open_count(todays)
+    return f"**Today — {left} left of {len(todays)}**"
+
+
 def open_count(todays: list[AgendaItem]) -> int:
     """How many of a day's items are unfinished.
 
@@ -200,13 +211,6 @@ def open_count(todays: list[AgendaItem]) -> int:
     a header reading "Left today (8)" above four rows is worse than no count.
     """
     return len([i for i in todays if not i.done])
-
-
-def pending_lines(todays: list[AgendaItem]) -> list[str]:
-    """The unfinished items, numbered against the whole day."""
-    rows, _ = _rows(todays, when=_clock, keep=None)
-    open_rows = [row for row, item in zip(rows, todays, strict=True) if not item.done]
-    return _task_table(open_rows, "Time")
 
 
 def overdue_lines(
@@ -280,10 +284,13 @@ def daily_brief(
         out += [CALENDAR_PROBLEMS.get(calendar_problem, CALENDAR_PROBLEMS["error"]), ""]
     out += calendar_block(events or [])
 
-    pending = pending_lines(todays)
-    if pending:
-        out.append(f"**Today ({open_count(todays)})**")
-        out += pending
+    # Finished items are shown rather than dropped: what you have already
+    # done is context for what is left, and hiding it was also what made the
+    # numbers skip -- they count the whole day, because /done resolves them
+    # against the whole day.
+    if open_count(todays):
+        out.append(day_header(todays))
+        out += day_table(todays)
     elif todays:
         # An empty day and a finished one both leave nothing to list, but
         # telling someone who cleared seven items that nothing was scheduled
@@ -311,14 +318,13 @@ def incomplete_alert(
 ) -> str | None:
     """Return None when there is nothing to nag about — a silent evening is the
     correct output, not an 'all clear' ping."""
-    pending = pending_lines(todays)
-    if not pending and not overdue:
+    if not open_count(todays) and not overdue:
         return None
 
     out = [f"🌙 **End of day — {fmt_date(today)}**", ""]
-    if pending:
-        out.append(f"**Still open ({open_count(todays)})**")
-        out += pending
+    if open_count(todays):
+        out.append(day_header(todays))
+        out += day_table(todays)
         out.append("")
     if overdue:
         out.append(f"**Past due ({len(overdue)})**")
@@ -515,10 +521,13 @@ def status(
         # that includes everything still open between now and then.
         out.append(f"Overdue — {len(overdue)}")
 
-    pending = pending_lines(todays)
-    left = "Left today" if is_today else f"Left on {fmt_date(day)}"
-    if pending:
-        out += ["", f"**{left} ({open_count(todays)})**", *pending]
+    if open_count(todays):
+        header = (
+            day_header(todays)
+            if is_today
+            else f"**{fmt_date(day)} — {open_count(todays)} left of {len(todays)}**"
+        )
+        out += ["", header, *day_table(todays)]
         if not is_today:
             out.append(f"_`/done <n> {day.isoformat()}` to tick one off._")
     elif todays:
