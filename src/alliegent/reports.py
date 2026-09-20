@@ -191,6 +191,17 @@ def day_table(items: list[AgendaItem]) -> list[str]:
     return _task_table(rows, "Time")
 
 
+def open_count(todays: list[AgendaItem]) -> int:
+    """How many of a day's items are unfinished.
+
+    Counted from the items rather than from the rendered lines. The rendered
+    block carries a fence, a header and a rule of its own, so its length
+    stopped being the number of tasks the moment lists became tables -- and
+    a header reading "Left today (8)" above four rows is worse than no count.
+    """
+    return len([i for i in todays if not i.done])
+
+
 def pending_lines(todays: list[AgendaItem]) -> list[str]:
     """The unfinished items, numbered against the whole day."""
     rows, _ = _rows(todays, when=_clock, keep=None)
@@ -269,12 +280,9 @@ def daily_brief(
         out += [CALENDAR_PROBLEMS.get(calendar_problem, CALENDAR_PROBLEMS["error"]), ""]
     out += calendar_block(events or [])
 
-    # Counted from the items, not the rendered lines: the table brings its own
-    # header and fences, so its length stopped being the number of tasks.
-    open_count = len([i for i in todays if not i.done])
     pending = pending_lines(todays)
     if pending:
-        out.append(f"**Today ({open_count})**")
+        out.append(f"**Today ({open_count(todays)})**")
         out += pending
     elif todays:
         # An empty day and a finished one both leave nothing to list, but
@@ -303,14 +311,13 @@ def incomplete_alert(
 ) -> str | None:
     """Return None when there is nothing to nag about — a silent evening is the
     correct output, not an 'all clear' ping."""
-    open_count = len([i for i in todays if not i.done])
     pending = pending_lines(todays)
     if not pending and not overdue:
         return None
 
     out = [f"🌙 **End of day — {fmt_date(today)}**", ""]
     if pending:
-        out.append(f"**Still open ({open_count})**")
+        out.append(f"**Still open ({open_count(todays)})**")
         out += pending
         out.append("")
     if overdue:
@@ -511,7 +518,7 @@ def status(
     pending = pending_lines(todays)
     left = "Left today" if is_today else f"Left on {fmt_date(day)}"
     if pending:
-        out += ["", f"**{left} ({len(pending)})**", *pending]
+        out += ["", f"**{left} ({open_count(todays)})**", *pending]
         if not is_today:
             out.append(f"_`/done <n> {day.isoformat()}` to tick one off._")
     elif todays:

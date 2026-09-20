@@ -692,3 +692,29 @@ def test_the_rule_spans_the_columns_not_the_longest_line():
     rule = next(line for line in text.splitlines() if set(line) == {"-"})
     body = [line for line in text.splitlines() if "Draft" in line]
     assert reports._width(rule) >= max(reports._width(line) for line in body)
+
+
+def test_every_header_count_matches_the_rows_below_it():
+    """The count comes from the items, not from the rendered lines.
+
+    A table brings its own fence, header and rule, so line-counting turned
+    "Left today (4)" into "Left today (8)" the moment lists became tables --
+    and the same expression was written in three places.
+    """
+    todays = [
+        task("done one", done=True),
+        task("open one", at=time(20, 0)),
+        task("done two", done=True),
+        task("open two"),
+        task("open three"),
+    ]
+    messages = [
+        reports.status(TODAY, todays, [], todays, today=TODAY),
+        reports.daily_brief(TODAY, todays, [], []),
+        reports.incomplete_alert(TODAY, todays, []),
+    ]
+    for text in messages:
+        header = next(line for line in text.splitlines() if line.startswith("**"))
+        assert "(3)" in header, header
+        rows = [n for n in range(1, 6) if row(text, n)]
+        assert rows == [2, 4, 5], text
