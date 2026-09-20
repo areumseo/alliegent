@@ -167,7 +167,7 @@ Fly is no longer where this runs — the mini replaced it, and the machines were
 
 This is exactly how the mini migration went wrong, twice. `fly scale count 0` was run, but machines were present and `started` afterwards, and Fly kept serving alongside the mini until the duplicate posts gave it away. Destroying them didn't hold either: `.github/workflows/fly-deploy.yml` deployed on every push to `main`, so the next commit rebuilt the machines within a minute — including the commit that documented them as destroyed.
 
-That workflow is now `workflow_dispatch` only. With the mini pulling `main` itself, a push is already a deploy, and a second automatic one lands a second bot. `fly status` showing no machines is the check — not that a scale or destroy command was issued at some point.
+That workflow was cut back to `workflow_dispatch`, and has since been deleted along with its `FLY_API_TOKEN`. With the mini pulling `main` itself, a push is already a deploy, and a second automatic one lands a second bot — a deploy to Fly is now something that has to be run by hand, with the mini stopped first. `fly status` showing no machines is the check — not that a scale or destroy command was issued at some point.
 
 
 ```bash
