@@ -403,6 +403,32 @@ uv run pytest
 uv run ruff check .
 ```
 
+### Releases
+
+The mini follows `main`, so a release does not deploy anything — it names a
+state that worked, so there is somewhere to go back to. Cut one from a clean,
+pushed `main`:
+
+```bash
+scripts/release.sh 1.1.0
+```
+
+It runs the tests, shows the commits since the last tag, bumps the version in
+`pyproject.toml`, writes a [CHANGELOG](CHANGELOG.md) entry from those commits
+and opens it in `$EDITOR` to edit, then tags, pushes and creates the GitHub
+release from the entry as edited.
+
+If a release turns out to be broken, put the server back on the last good one.
+The updater has to be stopped as well as the code changed, or it would
+fast-forward to `main` again within the hour:
+
+```bash
+ssh <server> 'bash ~/work/alliegent/scripts/rollback.sh v1.0.0'
+```
+
+Once `main` carries the fix, `--resume` returns the server to it and starts
+the updater again.
+
 ### Secrets and personal data
 
 This repo is public. Enable the hooks once per clone:
