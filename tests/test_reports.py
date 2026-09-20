@@ -256,9 +256,11 @@ def test_weekly_review_groups_by_day():
             item("Diary", day=date(2026, 8, 4)),
         ],
     )
-    assert "**Mon 8/3**" in text
-    assert "**Tue 8/4**" in text
+    assert "Mon 8/3" in text and "Tue 8/4" in text
     assert text.index("Cafe shift 5PM") < text.index("Dance class")
+    # The date labels one day's first row only; repeating it is the noise
+    # the grouping avoids.
+    assert text.count("Tue 8/4") == 1
 
 
 def test_a_day_with_unfinished_items_shows_its_own_count():
@@ -270,7 +272,7 @@ def test_a_day_with_unfinished_items_shows_its_own_count():
             item("b", day=date(2026, 8, 4)),
         ],
     )
-    assert "**Tue 8/4**  (1/2)" in text
+    assert "Tue 8/4 1/2" in text
 
 
 def test_a_fully_finished_day_carries_no_count():
@@ -280,8 +282,8 @@ def test_a_fully_finished_day_carries_no_count():
         date(2026, 8, 9),
         [item("a", done=True, day=date(2026, 8, 4))],
     )
-    assert "**Tue 8/4**\n" in text
-    assert "(1/1)" not in text
+    assert "Tue 8/4" in text
+    assert "1/1" not in text
 
 
 def test_days_with_nothing_on_them_are_skipped():
@@ -307,7 +309,7 @@ def test_undated_items_are_kept_at_the_end():
         date(2026, 8, 9),
         [item("floating", day=None), item("dated", done=True, day=date(2026, 8, 4))],
     )
-    assert "**No date**" in text
+    assert "no date" in text
     assert text.index("dated") < text.index("floating")
 
 
@@ -323,7 +325,10 @@ def test_weekly_planning_lists_empty_days():
         [],
     )
     assert "1 item(s) scheduled" in text
-    assert "Tue 8/11" not in text.split("Empty days")[1]
+    # Every day of the week is a row; an empty one shows a hyphen, which is
+    # the row a planner most needs to see.
+    assert "Tue 8/11 1" in " ".join(text.split())
+    assert "Wed 8/12 -" in " ".join(text.split())
 
 
 def test_weekly_planning_prompts_when_the_week_is_empty():
@@ -349,8 +354,8 @@ def test_stale_projects_distinguishes_no_activity_from_old_activity():
             (Project("b", "기록 없음", None, "", ""), None),
         ]
     )
-    assert "last activity Wed 7/1" in text
-    assert "no linked activity" in text
+    assert "Wed 7/1" in text
+    assert "never" in text
 
 
 # -- chunking --------------------------------------------------------------
@@ -678,3 +683,12 @@ def test_a_split_inside_a_table_closes_and_reopens_the_block():
         assert part.count("```") % 2 == 0, part[:80]
     # And no row is lost to the fences that were added.
     assert sum(part.count("item number ") for part in parts) == 119
+
+
+def test_the_rule_spans_the_columns_not_the_longest_line():
+    """Every line is right-stripped, so a header narrower than its column
+    would otherwise pull the rule in and leave the rows overhanging it."""
+    text = reports.project_list([Project("p", "Sole", "In progress", "Draft the copy", "")])
+    rule = next(line for line in text.splitlines() if set(line) == {"-"})
+    body = [line for line in text.splitlines() if "Draft" in line]
+    assert reports._width(rule) >= max(reports._width(line) for line in body)

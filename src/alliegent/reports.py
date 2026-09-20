@@ -122,35 +122,53 @@ def _rows(
     return rows, matched - len(rows)
 
 
-def _table(rows: list[tuple[str, ...]], when_header: str) -> list[str]:
-    """Render cells as a padded code block. Empty when there is nothing."""
+def _table(
+    header: tuple[str, ...],
+    rows: list[tuple[str, ...]],
+    *,
+    flex: int,
+    right: tuple[int, ...] = (),
+) -> list[str]:
+    """Render cells as a padded code block. Empty when there is nothing.
+
+    `flex` names the one column allowed to give way when the table would pass
+    TABLE_COLS -- the free-text one, which is the only column whose width is
+    not a property of the data. `right` names the columns aligned right.
+    """
     if not rows:
         return []
-    header = ("#", "", when_header, "Task", "Category")
     cells = [header, *rows]
-    widths = [max(_width(row[col]) for row in cells) for col in range(5)]
+    widths = [max(_width(row[col]) for row in cells) for col in range(len(header))]
 
-    # The title column absorbs whatever the others leave, down to a floor:
-    # past that a truncated title stops being recognisable, and a table that
-    # wraps on a phone is worse than one a little too wide.
+    # Down to a floor: past that a truncated title stops being recognisable,
+    # and a table a little too wide beats one that wraps on a phone.
     over = sum(widths) + len(widths) - 1 - TABLE_COLS
     if over > 0:
-        widths[3] = max(MIN_TASK_COLS, widths[3] - over)
+        widths[flex] = max(MIN_TASK_COLS, widths[flex] - over)
 
     def line(row: tuple[str, ...]) -> str:
-        number, mark, *rest = row
-        padded = [f"{number:>{widths[0]}}", _pad(mark, widths[1])]
-        padded += [
-            _pad(_fit(value, width), width)
-            for value, width in zip(rest, widths[2:], strict=True)
-        ]
-        return " ".join(padded).rstrip()
+        out = []
+        for col, (value, width) in enumerate(zip(row, widths, strict=True)):
+            fitted = _fit(value, width)
+            out.append(f"{fitted:>{width}}" if col in right else _pad(fitted, width))
+        return " ".join(out).rstrip()
 
-    # The rule spans the header, which is the full table width -- rows are
-    # right-stripped and the last cell is often empty, so the widest row
-    # understates it.
-    head = line(header)
-    return ["```", head, "-" * _width(head), *(line(row) for row in rows), "```"]
+    # The rule spans the columns, not the widest rendered line: every line is
+    # right-stripped, so a short last cell -- an empty category, a header
+    # narrower than its column -- would pull the rule in with it.
+    span = sum(widths) + len(widths) - 1
+    return ["```", line(header), "-" * span, *(line(row) for row in rows), "```"]
+
+
+def _task_table(rows: list[tuple[str, ...]], when_header: str) -> list[str]:
+    """Numbered task rows: number, state, when, title, category."""
+    return _table(("#", "", when_header, "Task", "Category"), rows, flex=3, right=(0,))
+
+
+def _project_table(projects: list[Project]) -> list[str]:
+    """Projects and what each is waiting on, which is the actionable half."""
+    rows = [(p.title, p.next_action or "") for p in projects]
+    return _table(("Project", "Next"), rows, flex=1)
 
 
 def _bullets(items: list[AgendaItem], *, numbered: bool = False) -> list[str]:
@@ -170,14 +188,14 @@ def _clock(item: AgendaItem) -> str:
 def day_table(items: list[AgendaItem]) -> list[str]:
     """A whole day, finished items included."""
     rows, _ = _rows(items, when=_clock)
-    return _table(rows, "Time")
+    return _task_table(rows, "Time")
 
 
 def pending_lines(todays: list[AgendaItem]) -> list[str]:
     """The unfinished items, numbered against the whole day."""
     rows, _ = _rows(todays, when=_clock, keep=None)
     open_rows = [row for row, item in zip(rows, todays, strict=True) if not item.done]
-    return _table(open_rows, "Time")
+    return _task_table(open_rows, "Time")
 
 
 def overdue_lines(
@@ -202,7 +220,7 @@ def overdue_lines(
         keep=keep,
         limit=limit,
     )
-    lines = _table(rows, "Due")
+    lines = _task_table(rows, "Due")
     if lines and remaining > 0:
         lines.append(f"_…and {remaining} more — `/overdue` for the rest._")
     return lines
@@ -217,12 +235,14 @@ def calendar_block(events: list) -> list[str]:
     a 'no events' line every morning is noise."""
     if not events:
         return []
-    out = ["**📅 Calendar**"]
-    for event in events:
-        when = "all day" if event.all_day or event.start is None else event.start.strftime("%H:%M")
-        out.append(f"`{when:>7}`  {event.summary}")
-    out.append("")
-    return out
+    rows = [
+        (
+            "all day" if event.all_day or event.start is None else event.start.strftime("%H:%M"),
+            event.summary,
+        )
+        for event in events
+    ]
+    return ["**📅 Calendar**", *_table(("Time", "Event"), rows, flex=1), ""]
 
 
 CALENDAR_PROBLEMS = {
@@ -273,9 +293,7 @@ def daily_brief(
 
     if active_projects:
         out.append(f"**Active projects ({len(active_projects)})**")
-        for project in active_projects[:5]:
-            tail = f" → {project.next_action}" if project.next_action else ""
-            out.append(f"• {project.title}{tail}")
+        out += _project_table(active_projects[:5])
 
     return "\n".join(out).strip()
 
@@ -312,9 +330,12 @@ def week_scaffold(
         f"🗓️ **Week of {fmt_date(week_start)}** — added {len(created)} recurring item(s)",
         "",
     ]
+    rows: list[tuple[str, ...]] = []
     for day in sorted({d for _, d, _ in created}):
-        out.append(f"**{fmt_date(day)}**")
-        out += [f"• {title}" for title, d, _ in created if d == day]
+        titles = [(title, category) for title, d, category in created if d == day]
+        for offset, (title, category) in enumerate(titles):
+            rows.append((fmt_date(day) if offset == 0 else "", title, category or ""))
+    out += _table(("Day", "Task", "Category"), rows, flex=1)
     return "\n".join(out)
 
 
@@ -326,14 +347,19 @@ def weekly_planning(
 
     if items:
         out.append(f"{len(items)} item(s) scheduled")
-        scheduled_days = {item.day for item in items if item.day}
-        empty = [
-            week_start + timedelta(days=offset)
-            for offset in range(7)
-            if (week_start + timedelta(days=offset)) not in scheduled_days
-        ]
-        if empty:
-            out.append("Empty days — " + ", ".join(fmt_date(d) for d in empty))
+        # Every day of the week, empty ones included: the shape of the week is
+        # the thing being planned, and a day with nothing on it is the row
+        # that most needs to be seen.
+        counts: dict[date, int] = {}
+        for item in items:
+            if item.day:
+                counts[item.day] = counts.get(item.day, 0) + 1
+        rows = []
+        for offset in range(7):
+            day = week_start + timedelta(days=offset)
+            count = counts.get(day, 0)
+            rows.append((fmt_date(day), str(count) if count else "-"))
+        out += _table(("Day", "Items"), rows, flex=0, right=(1,))
     else:
         out.append("Nothing scheduled for next week yet.")
     out.append("")
@@ -351,11 +377,12 @@ def weekly_planning(
 def stale_projects(items: list[tuple[Project, date | None]]) -> str | None:
     if not items:
         return None
+    rows = [
+        (project.title, fmt_date(last) if last else "never", project.next_action or "")
+        for project, last in items
+    ]
     out = [f"🐢 **Stalled projects ({len(items)})**", ""]
-    for project, last in items:
-        when = f"last activity {fmt_date(last)}" if last else "no linked activity"
-        tail = f"\n   Next: {project.next_action}" if project.next_action else ""
-        out.append(f"• **{project.title}** — {when}{tail}")
+    out += _table(("Project", "Last", "Next"), rows, flex=2)
     return "\n".join(out)
 
 
@@ -387,22 +414,31 @@ def weekly_review(start: date, end: date, items: list[AgendaItem]) -> str:
         else:
             by_day.setdefault(item.day, []).append(item)
 
+    # One table for the week rather than one per day: the date column groups
+    # it just as well, and a dozen two-row blocks is harder to read down than
+    # a single column of dates. The date is printed once per day, since
+    # repeating it on every row is the noise the grouping was avoiding.
+    # Days with nothing on them are skipped -- a rest day is not a finding.
+    rows: list[tuple[str, ...]] = []
     for day in sorted(by_day):
-        # Days with nothing on them are skipped rather than printed empty —
-        # a rest day is not a finding.
         entries = by_day[day]
         finished = sum(1 for i in entries if i.done)
-        header = f"**{fmt_date(day)}**"
+        label = fmt_date(day)
         if finished < len(entries):
-            header += f"  ({finished}/{len(entries)})"
-        out.append(header)
-        out += [f"{'✅' if i.done else '•'} {i.title}" for i in entries]
-        out.append("")
+            label += f" {finished}/{len(entries)}"
+        for offset, entry in enumerate(entries):
+            rows.append(
+                (label if offset == 0 else "", _table_mark(entry), entry.title,
+                 entry.category or "")
+            )
+    for offset, entry in enumerate(undated):
+        rows.append(
+            ("no date" if offset == 0 else "", _table_mark(entry), entry.title,
+             entry.category or "")
+        )
 
-    if undated:
-        out.append("**No date**")
-        out += [f"{'✅' if i.done else '•'} {i.title}" for i in undated]
-        out.append("")
+    out += _table(("Day", "", "Task", "Category"), rows, flex=2)
+    out.append("")
 
     out.append("_What went well, what got stuck, what to change next week._")
     return "\n".join(out).strip()
@@ -520,11 +556,7 @@ def overdue_list(
 def project_list(projects: list[Project]) -> str:
     if not projects:
         return "No active projects."
-    out = [f"**Active projects ({len(projects)})**"]
-    for project in projects:
-        tail = f" → {project.next_action}" if project.next_action else ""
-        out.append(f"• {project.title}{tail}")
-    return "\n".join(out)
+    return "\n".join([f"**Active projects ({len(projects)})**", *_project_table(projects)])
 
 
 FENCE = "```"
