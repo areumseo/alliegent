@@ -1,7 +1,7 @@
 """What order a day comes back in.
 
 This is load-bearing: the numbers printed in one message are typed into
-another (`/done 3`, `/time 2 14:00`), so if adding a task can renumber the
+another (`/done 3`, `/change 2 at:14:00`), so if adding a task can renumber the
 ones already listed, the wrong task gets ticked off. That is exactly what
 happened while ordering was left to Notion.
 """
@@ -125,7 +125,7 @@ async def test_setting_a_time_keeps_the_day():
 
 
 async def test_clearing_a_time_leaves_a_plain_date():
-    """`/time 1 none` sends an item to the end of the day, not to midnight."""
+    """`/change 1 at:none` sends an item to the end of the day, not to midnight."""
     client, svc = service([row("p1", "task", at="09:00")])
     await svc.set_time("p1", DAY, None)
     assert client.updated[0][1]["Date"]["date"]["start"] == "2026-08-18"
@@ -134,7 +134,7 @@ async def test_clearing_a_time_leaves_a_plain_date():
 async def test_moving_a_day_carries_the_time_along():
     client, svc = service([row("p1", "class", at="11:00")])
     target = date(2026, 8, 20)
-    await svc.reschedule("p1", target, time(11, 0))
+    await svc.set_time("p1", target, time(11, 0))
     assert client.updated[0][1]["Date"]["date"]["start"].startswith("2026-08-20T11:00")
 
 

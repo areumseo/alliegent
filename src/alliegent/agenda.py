@@ -344,12 +344,6 @@ class AgendaService:
             page_id, {self.props.category: n.select(category)}
         )
 
-    async def reschedule(self, page_id: str, day: date, at: time | None = None) -> None:
-        """Move an item to another day, keeping its time of day."""
-        await self._client.update_page(
-            page_id, {self.props.date: n.date_prop(day, at=at, tz=self._cfg.tz)}
-        )
-
     async def plan_week(self, week_start: date) -> list[tuple[str, date, str | None]]:
         """Work out which recurring items are missing from the given week.
 

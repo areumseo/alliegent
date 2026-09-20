@@ -23,8 +23,6 @@ EXPECTED = {
     "add",
     "done",
     "delete",
-    "move",
-    "time",
     "change",
     "overdue",
     "projects",
@@ -238,7 +236,7 @@ COMMAND_CHANNELS = {
 
 # Short write confirmations answer in place: routing a one-line "Added — X"
 # would turn every write into two messages.
-INLINE_COMMANDS = {"add", "done", "delete", "move", "time", "change"}
+INLINE_COMMANDS = {"add", "done", "delete", "change"}
 
 
 def test_every_command_either_routes_or_is_deliberately_inline():
@@ -361,8 +359,9 @@ def test_the_core_routes_are_always_required():
 
 
 # -- /change ---------------------------------------------------------------
-# One command for the edits that were spread across /move and /time, plus the
-# two there was no command for at all: the category and the title.
+# The one command for editing an item: the day and the time it replaced
+# /move and /time with, plus the category and the title, which had no command
+# at all and meant opening Notion.
 
 
 def test_change_covers_every_editable_field():
