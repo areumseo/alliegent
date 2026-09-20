@@ -141,6 +141,25 @@ class AgendaService:
             if option.get("name")
         ]
 
+    async def category_names(self) -> list[str]:
+        """Every category the database offers, in the order Notion lists them.
+
+        Read from the schema rather than configured here, for the same reason
+        the statuses are: renaming a select option is the user's business, and
+        a copy kept in the code would go stale without anything saying so.
+        """
+        if not self.props.category:
+            return []
+        schema = await self._client.get_schema(await self.data_source_id())
+        definition = schema.get(self.props.category) or {}
+        if definition.get("type") != "select":
+            return []
+        return [
+            option["name"]
+            for option in (definition.get("select") or {}).get("options", [])
+            if option.get("name")
+        ]
+
     async def started(self) -> set[str]:
         """Statuses that mean the item is underway."""
         if self._started is None:

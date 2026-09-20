@@ -126,6 +126,62 @@ async def test_inference_is_opt_in():
     assert "Category" not in props
 
 
+# -- choosing one by hand --------------------------------------------------
+
+
+def categorised_client(options):
+    return FakeNotionClient(
+        {DS: []},
+        schema={
+            "Name": {"type": "title"},
+            "Date": {"type": "date"},
+            "Status": {"type": "status"},
+            "Category": {
+                "type": "select",
+                "select": {"options": [{"name": name} for name in options]},
+            },
+        },
+    )
+
+
+async def test_the_offered_categories_come_from_notion():
+    """Renaming a select option is the user's business; a copy in the code
+    would go stale without anything saying so."""
+    client = categorised_client(["Work", "Personal", "Exercise"])
+    svc = AgendaService(client, Config(), "agenda-db")
+    assert await svc.category_names() == ["Work", "Personal", "Exercise"]
+
+
+async def test_a_typed_category_need_not_match_case():
+    from alliegent.integrations.discord_bot import resolve_category
+
+    class Bot:
+        agenda = AgendaService(categorised_client(["Work"]), Config(), "agenda-db")
+
+    assert await resolve_category(Bot(), "work") == "Work"
+
+
+async def test_an_unknown_category_is_refused_rather_than_created():
+    """Notion would happily add the typo as a new option, and a category that
+    exists twice under two spellings quietly splits every filter."""
+    import pytest
+
+    from alliegent.integrations.discord_bot import resolve_category
+
+    class Bot:
+        agenda = AgendaService(categorised_client(["Work"]), Config(), "agenda-db")
+
+    with pytest.raises(ValueError, match="Wrok"):
+        await resolve_category(Bot(), "Wrok")
+
+
+async def test_no_category_property_means_nothing_to_offer():
+    config = Config()
+    config.agenda.props.category = ""
+    svc = AgendaService(categorised_client(["Work"]), config, "agenda-db")
+    assert await svc.category_names() == []
+
+
 async def test_no_category_property_means_no_lookup():
     """A workspace without a Category column shouldn't pay for the query."""
     from alliegent.config import Config as C

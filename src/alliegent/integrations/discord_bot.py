@@ -531,6 +531,24 @@ async def status_filter(bot: AlliegentBot, text: str) -> tuple[set[str], str]:
     )
 
 
+async def resolve_category(bot: AlliegentBot, text: str) -> str:
+    """Match a typed category to one the database already has.
+
+    Case-insensitively, so the autocomplete's spelling is not something to
+    reproduce by hand. Unknown names are refused rather than created: Notion
+    would happily add a new select option, and a typo would become a category
+    that quietly splits a filter in two.
+    """
+    names = await bot.agenda.category_names()
+    if not names:
+        raise ValueError("This agenda has no Category column.")
+    wanted = _normalise(text)
+    for name in names:
+        if _normalise(name) == wanted:
+            return name
+    raise ValueError(f"No category called {text!r}. Try: " + ", ".join(names))
+
+
 def wants_overdue(when: str | None) -> bool:
     """Whether `when` names the backlog rather than a day.
 
@@ -649,6 +667,7 @@ def _register(bot: AlliegentBot) -> None:
         # belong here and not just in the README.
         when="오늘 / 내일 / 모레 / today / tomorrow / 2026-08-15 / 08-15 (default: today)",
         at="Time of day, e.g. 14:00 or 2pm. Without one it goes to the end of the day",
+        category="Which category. Left out, it is guessed from how you filed this before",
         cal="Also put it in the calendar. Defaults to on for items with a time",
     )
     async def add_cmd(
@@ -656,6 +675,7 @@ def _register(bot: AlliegentBot) -> None:
         task: str,
         when: str | None = None,
         at: str | None = None,
+        category: str | None = None,
         cal: bool | None = None,
     ) -> None:
         await interaction.response.defer()
@@ -665,11 +685,16 @@ def _register(bot: AlliegentBot) -> None:
             # information, so it counts -- otherwise the habit of writing it
             # there would quietly leave the day unordered.
             clock = parse_time(at) or time_in_title(task)
+            filed_as = await resolve_category(bot, category) if category else None
         except ValueError as exc:
             await interaction.followup.send(f"⚠️ {exc}")
             return
 
-        item = await bot.agenda.add_item(task, day, at=clock, infer_category=True)
+        # Guessing only fills a gap: a category typed out is a decision, and
+        # history should not get a vote against it.
+        item = await bot.agenda.add_item(
+            task, day, at=clock, category=filed_as, infer_category=filed_as is None
+        )
 
         filed = f" · {item.category}" if item.category else ""
         when_text = reports.fmt_date(day)
@@ -683,6 +708,22 @@ def _register(bot: AlliegentBot) -> None:
         if cal if cal is not None else clock is not None:
             lines.append(await _add_to_calendar(bot, item.title, day, clock))
         await interaction.followup.send("\n".join(lines))
+
+    @add_cmd.autocomplete("category")
+    async def _add_category_options(
+        interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        try:
+            names = await bot.agenda.category_names()
+        except Exception:
+            log.exception("category autocomplete failed")
+            names = []
+        typed = current.casefold()
+        return [
+            app_commands.Choice(name=name, value=name)
+            for name in names
+            if typed in name.casefold()
+        ][:25]
 
     @tree.command(name="done", description="Mark items done by their listed number")
     @app_commands.describe(

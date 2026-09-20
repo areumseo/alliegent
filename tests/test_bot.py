@@ -93,7 +93,13 @@ def test_every_command_has_a_description():
 def test_add_command_options():
     bot = make_bot()
     add = next(c for c in leaf_commands(bot) if c.qualified_name == "add")
-    assert {p.display_name for p in add.parameters} == {"task", "when", "at", "cal"}
+    assert {p.display_name for p in add.parameters} == {
+        "task",
+        "when",
+        "at",
+        "category",
+        "cal",
+    }
 
 
 def test_descriptions_are_english_too():
