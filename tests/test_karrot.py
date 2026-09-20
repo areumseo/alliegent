@@ -215,8 +215,8 @@ async def test_the_saturday_report_counts_the_week_and_the_running_total():
         [sold("p1", "이번주", 10000, "2026-09-11"), sold("p2", "옛날", 5000, "2026-01-05")]
     )
     text = K.weekly_message(await svc.sales(TODAY), [], SUNDAY)
-    assert "This week   1 sold · ₩10,000" in text
-    assert "All time    2 sold · ₩15,000" in text
+    assert "This week  1  10,000" in text
+    assert "All time   2  15,000" in text
 
 
 async def test_a_week_with_nothing_sold_and_nothing_owed_stays_silent():
@@ -314,8 +314,13 @@ def test_the_weekly_report_nets_the_week_and_the_total():
     }
     spending = K.spending_of([expense(2_960, spent_at=date(2026, 9, 20))], SUNDAY)
     text = K.weekly_message(data, [], SUNDAY, spending)
-    assert "Spent this week  ₩2,960" in text
-    assert "Net this week    ₩27,040" in text
+    # The cost is one line under the table, not a column repeated per row:
+    # it is the same few purchases being divided up over and over.
+    assert "This week  2  30,000 27,040" in text
+    # Named once: in this week the cost and the all-time cost are the same
+    # figure, and printing it twice reads as two separate costs.
+    assert "_Net is after ₩2,960 of ads and packaging._" in text
+    assert text.count("2,960") == 1
 
 
 def test_revenue_stays_gross_without_an_expense_database():
@@ -334,4 +339,29 @@ def test_revenue_stays_gross_without_an_expense_database():
         "unpaid": (0, 0),
     }
     text = K.weekly_message(data, [], SUNDAY)
-    assert "Spent" not in text and "Net" not in text
+    assert "Net" not in text
+    assert "This week  1  10,000" in text
+
+
+def test_both_costs_are_named_when_the_week_is_only_part_of_the_spending():
+    data = {
+        "week_start": date(2026, 9, 14),
+        "periods": {
+            "this_week": (1, 50_000),
+            "last_week": (0, 0),
+            "this_month": (1, 50_000),
+            "this_year": (1, 50_000),
+        },
+        "total": (1, 50_000),
+        "undated": (0, 0),
+        "unpaid": (0, 0),
+    }
+    spending = K.spending_of(
+        [
+            expense(2_960, spent_at=date(2026, 9, 20)),
+            expense(287_811, spent_at=date(2026, 8, 15)),
+        ],
+        SUNDAY,
+    )
+    text = K.weekly_message(data, [], SUNDAY, spending)
+    assert "₩2,960 this week, ₩290,771 all time" in text

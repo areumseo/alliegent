@@ -317,7 +317,7 @@ Three judgements carried over from the script this was ported from, each earned:
 
 `NOTION_KARROT_DB_ID` switches the whole feature off when blank.
 
-**Selling costs come off revenue.** Neighbourhood ads and packaging are recorded in their own small database — an expense has no price, no buyer and no status, so keeping it as a row in the item list would mean teaching every count to skip it. `/karrot spent <amount> <kind>` records one; `sales` and the Saturday report then show what each period cost and what is left. Without `NOTION_KARROT_EXPENSES_DB_ID` the revenue reported is gross, and no net figure is shown at all.
+**Selling costs come off revenue.** Neighbourhood ads and packaging are recorded in their own small database — an expense has no price, no buyer and no status, so keeping it as a row in the item list would mean teaching every count to skip it. `/karrot spent <amount> <kind>` records one; `sales` and the Saturday report then show revenue and net side by side, with the cost named once underneath rather than repeated as a column against every period — it is the same few purchases being divided up over and over, and a column of them buries the two numbers being compared. Without `NOTION_KARROT_EXPENSES_DB_ID` the revenue reported is gross, and no net figure is shown at all.
 
 The history before 2026-09-20 is two aggregate rows, one for ads and one for packaging, because the per-purchase receipts were never kept. They are dated 2026-08-15 — when the ads stopped — so they fall in the month the money was actually spent rather than flattening the current one.
 

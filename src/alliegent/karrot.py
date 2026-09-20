@@ -426,37 +426,43 @@ def weekly_message(
 
     start = data["week_start"]
     end = start + timedelta(days=6)
+    p = data["periods"]
+    costs = None if spending is None else spending["periods"]
+
+    def row(label: str, pair: tuple[int, int], cost: int | None) -> tuple[str, ...]:
+        n_sold, money = pair
+        cells = (label, str(n_sold), f"{money:,}")
+        return cells if spending is None else cells + (f"{money - (cost or 0):,}",)
+
+    header = ("KRW", "n", "Revenue") + (() if spending is None else ("Net",))
+    rows = [
+        row("This week", p["this_week"], costs and costs["this_week"]),
+        row("Last week", p["last_week"], costs and costs["last_week"]),
+        row("This month", p["this_month"], costs and costs["this_month"]),
+        row("This year", p["this_year"], costs and costs["this_year"]),
+        row("All time", data["total"], spending and spending["total"]),
+    ]
+
     out = [
         f"🥕 **This week — {start.month}/{start.day}–{end.month}/{end.day}**",
-        "",
-        f"This week   {count} sold · ₩{amount:,}",
+        *_money_table(header, rows),
     ]
-    last_count, last_amount = data["periods"]["last_week"]
-    if last_count or last_amount:
-        diff = amount - last_amount
-        arrow = "▲" if diff > 0 else ("▼" if diff < 0 else "-")
-        out.append(
-            f"Last week   {last_count} sold · ₩{last_amount:,}"
-            f"  ({arrow} ₩{abs(diff):,})"
-        )
-    month_count, month_amount = data["periods"]["this_month"]
-    out.append(f"This month  {month_count} sold · ₩{month_amount:,}")
-    year_count, year_amount = data["periods"]["this_year"]
-    out.append(f"This year   {year_count} sold · ₩{year_amount:,}")
-    total_count, total_amount = data["total"]
-    out.append(f"All time    {total_count} sold · ₩{total_amount:,}")
 
-    # What the selling cost, and what is actually left. A week whose sales
-    # were driven by ads did not earn the gross figure above it.
+    last_amount = p["last_week"][1]
+    if last_amount:
+        diff = amount - last_amount
+        out.append(f"_vs last week: {diff:+,}_")
     if spending is not None and spending["total"]:
-        week_cost = spending["periods"]["this_week"]
-        out += ["", f"Spent this week  ₩{week_cost:,}"]
-        if week_cost:
-            out.append(f"Net this week    ₩{amount - week_cost:,}")
-        out.append(
-            f"Spent all time   ₩{spending['total']:,}"
-            f"  ->  net ₩{total_amount - spending['total']:,}"
+        # Both figures only when they differ: in a week that carries the whole
+        # of the spending, naming it twice reads as two separate costs.
+        week_cost = costs["this_week"]
+        total_cost = spending["total"]
+        spent = (
+            f"₩{week_cost:,} this week, ₩{total_cost:,} all time"
+            if week_cost and week_cost != total_cost
+            else f"₩{total_cost:,}"
         )
+        out.append(f"_Net is after {spent} of ads and packaging._")
 
     undated_count, undated_amount = data["undated"]
     if undated_count:
@@ -471,39 +477,71 @@ def weekly_message(
     return "\n".join(out)
 
 
+def _money_table(header: tuple[str, ...], rows: list[tuple[str, ...]]) -> list[str]:
+    """The same fixed-width table the agenda and the assets use.
+
+    Shared rather than reimplemented: ASCII inside the block, widths measured
+    from the values, and the whole thing inside the width a phone shows
+    unwrapped. The label column is the one with any give, and every money
+    column is right-aligned so the digits line up to compare.
+    """
+    from . import reports
+
+    return reports._table(
+        header, rows, flex=0, right=tuple(range(1, len(header)))
+    )
+
+
 def sales_message(data: dict, today: date, spending: dict | None = None) -> str:
     """Revenue by period, naming the money that fits in none of them.
 
-    With `spending`, each period also shows what selling cost and what is
-    left. Gross revenue overstates what the sales were worth -- an item that
+    With `spending`, each period also shows what is left after what selling
+    cost. Gross revenue overstates what the sales were worth -- an item that
     sold because an ad pushed it did not earn its whole price.
+
+    The cost itself is one line under the table, not a column beside every
+    period: it is the same few purchases being divided up over and over, and
+    repeating them per row buries the two numbers actually being compared.
     """
-
-    def line(label: str, pair: tuple[int, int], cost: int | None = None) -> str:
-        count, amount = pair
-        text = f"{label:<11} {count:>3} · ₩{amount:,}"
-        if cost:
-            text += f"  -₩{cost:,} = ₩{amount - cost:,}"
-        return text
-
-    def cost(name: str) -> int | None:
-        return None if spending is None else spending["periods"].get(name, 0)
-
-    week_end = data["week_start"] + timedelta(days=6)
     p = data["periods"]
+    order = [
+        ("This week", p["this_week"]),
+        ("Last week", p["last_week"]),
+        ("This month", p["this_month"]),
+        ("Last month", p["last_month"]),
+        ("This year", p["this_year"]),
+        ("All time", data["total"]),
+    ]
+    costs = None if spending is None else spending["periods"]
+    total_cost = None if spending is None else spending["total"]
+
+    def net(label: str, amount: int) -> str:
+        if spending is None:
+            return ""
+        key = {
+            "This week": "this_week",
+            "Last week": "last_week",
+            "This month": "this_month",
+            "Last month": "last_month",
+            "This year": "this_year",
+        }.get(label)
+        cost = total_cost if key is None else costs[key]
+        return f"{amount - cost:,}"
+
+    header = ("KRW", "n", "Revenue") + (() if spending is None else ("Net",))
+    rows = [
+        (label, str(count), f"{amount:,}") + (() if spending is None else (net(label, amount),))
+        for label, (count, amount) in order
+    ]
+    week_end = data["week_start"] + timedelta(days=6)
     out = [
         f"🥕 **Sales — {today.isoformat()}**",
-        "```",
-        line("This week", p["this_week"], cost("this_week")),
-        line("Last week", p["last_week"], cost("last_week")),
-        line("This month", p["this_month"], cost("this_month")),
-        line("Last month", p["last_month"], cost("last_month")),
-        line("This year", p["this_year"], cost("this_year")),
-        line("All time", data["total"], None if spending is None else spending["total"]),
-        "```",
+        *_money_table(header, rows),
         f"_This week: {data['week_start'].month}/{data['week_start'].day}"
         f"–{week_end.month}/{week_end.day}_",
     ]
+    if total_cost:
+        out.append(f"_Net is after ₩{total_cost:,} of ads and packaging._")
     undated_count, undated_amount = data["undated"]
     if undated_count:
         out.append(
@@ -513,13 +551,6 @@ def sales_message(data: dict, today: date, spending: dict | None = None) -> str:
     unpaid_count, unpaid_amount = data["unpaid"]
     if unpaid_count:
         out.append(f"⚠️ Of these, {unpaid_count} unpaid · ₩{unpaid_amount:,}")
-    if spending is not None and spending["total"]:
-        kinds = ", ".join(
-            f"{kind.casefold()} ₩{amount:,}"
-            for kind, amount in spending["by_kind"].items()
-            if amount
-        )
-        out.append(f"_Costs to date: {kinds}._")
     return "\n".join(out)
 
 
