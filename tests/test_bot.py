@@ -25,6 +25,7 @@ EXPECTED = {
     "delete",
     "move",
     "time",
+    "change",
     "overdue",
     "projects",
     "brief",
@@ -67,7 +68,7 @@ def make_bot() -> AlliegentBot:
 # words /add accepts, and the categories the Karrot database uses. Listing a
 # value is not the same as writing the interface in Korean — every command and
 # option description is English, including Karrot's, whose *replies* are not.
-KOREAN_VALUE_OPTIONS = {("add", "when")}
+KOREAN_VALUE_OPTIONS = {("add", "when"), ("change", "day")}
 
 
 def test_command_names_pass_discord_validation():
@@ -122,7 +123,7 @@ def test_korean_values_are_still_advertised_where_they_are_the_values():
     Korean words, nobody learns they can be typed."""
     # Qualified, because /add and /karrot add share a name.
     commands = {c.qualified_name: c for c in leaf_commands(make_bot())}
-    for qualified, option_name, word in (("add", "when", "내일"),):
+    for qualified, option_name, word in (("add", "when", "내일"), ("change", "day", "내일")):
         option = next(
             p for p in commands[qualified].parameters if p.display_name == option_name
         )
@@ -237,7 +238,7 @@ COMMAND_CHANNELS = {
 
 # Short write confirmations answer in place: routing a one-line "Added — X"
 # would turn every write into two messages.
-INLINE_COMMANDS = {"add", "done", "delete", "move", "time"}
+INLINE_COMMANDS = {"add", "done", "delete", "move", "time", "change"}
 
 
 def test_every_command_either_routes_or_is_deliberately_inline():
@@ -357,3 +358,29 @@ def test_the_core_routes_are_always_required():
     from alliegent.main import enabled_routes
 
     assert {"agenda", "review", "news"} <= set(enabled_routes(Secrets()))
+
+
+# -- /change ---------------------------------------------------------------
+# One command for the edits that were spread across /move and /time, plus the
+# two there was no command for at all: the category and the title.
+
+
+def test_change_covers_every_editable_field():
+    change = next(c for c in leaf_commands(make_bot()) if c.qualified_name == "change")
+    assert {p.display_name for p in change.parameters} == {
+        "numbers",
+        "day",
+        "at",
+        "category",
+        "name",
+        "from",
+    }
+
+
+def test_change_asks_for_nothing_required_but_the_numbers():
+    """Every field is optional on its own; the command checks that at least
+    one was given, so `/change 3` alone is refused with a message rather than
+    by Discord's own validation."""
+    change = next(c for c in leaf_commands(make_bot()) if c.qualified_name == "change")
+    required = {p.display_name for p in change.parameters if p.required}
+    assert required == {"numbers"}

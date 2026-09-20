@@ -855,6 +855,80 @@ def _register(bot: AlliegentBot) -> None:
         on = reports.fmt_date(day) if day else "their own days"
         await interaction.followup.send(f"🕘 {titles} — {moved_to} on {on}")
 
+    @tree.command(name="change", description="Change an item's day, time, category or name")
+    @app_commands.describe(
+        numbers="Which items, by their listed number (3 or 3,5)",
+        day="New day, e.g. 내일 / tomorrow / 08-20",
+        at="New time: 14:00, 2pm, or 'none' to clear it and send it to the end",
+        category="New category",
+        name="New title. One item at a time, since it replaces the title outright",
+        frm="Which list they're on now: a day, or `overdue` (defaults to today)",
+    )
+    @app_commands.rename(frm="from")
+    async def change_cmd(
+        interaction: discord.Interaction,
+        numbers: str,
+        day: str | None = None,
+        at: str | None = None,
+        category: str | None = None,
+        name: str | None = None,
+        frm: str | None = None,
+    ) -> None:
+        await interaction.response.defer()
+        if not any((day, at, category, name)):
+            await interaction.followup.send(
+                "⚠️ Say what to change: `day`, `at`, `category` or `name`."
+            )
+            return
+
+        resolved = await _resolve(bot, interaction, numbers, frm)
+        if resolved is None:
+            return
+        items, source = resolved
+
+        try:
+            target = parse_day(day, bot.today()) if day else None
+            # Parsed even when unchanged, so a bad time is refused before any
+            # of the other edits have been written.
+            clock = parse_time(at) if at else None
+            filed_as = await resolve_category(bot, category) if category else None
+        except ValueError as exc:
+            await interaction.followup.send(f"⚠️ {exc}")
+            return
+
+        if name and len(items) > 1:
+            await interaction.followup.send(
+                "⚠️ `name` replaces a title outright, so it takes one item at a time."
+            )
+            return
+
+        changes: list[str] = []
+        for item in items:
+            # The item's own day, not the argument: an overdue item keeps the
+            # day it was scheduled for, and for a day list the two are equal.
+            on = target or item.day or source or bot.today()
+            if target or at:
+                # One write for both, since they are one Notion date property:
+                # setting them separately would clear whichever went second.
+                await bot.agenda.set_time(item.id, on, clock if at else item.at)
+            if filed_as:
+                await bot.agenda.set_category(item.id, filed_as)
+            if name:
+                await bot.agenda.rename(item.id, name)
+
+        if name:
+            changes.append(f"name → **{name}**")
+        if target:
+            changes.append(f"{reports.fmt_date(source) if source else 'its day'} → "
+                           f"**{reports.fmt_date(target)}**")
+        if at:
+            changes.append(f"time → **{reports.fmt_time(clock) if clock else 'end of day'}**")
+        if filed_as:
+            changes.append(f"category → **{filed_as}**")
+
+        titles = ", ".join(f"**{item.title}**" for item in items)
+        await interaction.followup.send(f"✏️ {titles} — " + ", ".join(changes))
+
     @tree.command(name="overdue", description="Show overdue, unfinished items")
     @app_commands.describe(
         status="Only items with this status, e.g. In progress (default: all)"

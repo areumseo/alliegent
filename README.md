@@ -34,7 +34,8 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/add <task> [when] [at] [category] [cal]` | Add an item, optionally at a time. `category` is offered from the database's own options; left out, it is inferred from how the same activity was filed before. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow` / `tmr` (any capitalisation), `2026-08-15`, `08-15`, or `08/15`; defaults to today. An item with a time also lands in the calendar — `cal` forces that on or off |
 | `/done <numbers> [when]` | Complete items by their listed number — one or several (`3` or `3,5`). `when` picks the day, or `overdue` for the backlog; defaults to today |
 | `/delete <numbers> [when]` | Move items to Notion's trash by number — recoverable there. Takes `when` the same way, `overdue` included |
-| `/move <numbers> <to> [from]` | Move items to another day. `from` defaults to today |
+| `/move <numbers> <to> [from]` | Move items to another day. `from` defaults to today. `/change` does the same thing alongside the other fields; both are kept because this one is shorter to type |
+| `/change <numbers> [day] [at] [category] [name] [from]` | Change what an item is or when it is — any combination of day, time, category and title in one edit. `at` takes `none` to clear the time; `name` takes one item at a time. `from` picks the list the numbers came off, `overdue` included |
 | `/time <numbers> <at> [when]` | Set an item's time — `14:00`, `2pm`, `9:30am` — which is what moves it in the day. `none` clears it and sends it to the end |
 | `/overdue` | Overdue, unfinished items — numbered, so they can be cleared |
 | `/projects` | Active projects and their next actions |
@@ -61,7 +62,7 @@ Numbers are per-day, and `/done` and `/delete` take the day as an argument (`/do
 
 **Commands post to the same channel their scheduled equivalent uses**, wherever you invoke them from — agenda commands to the agenda channel, `/projects` to the projects channel, `/news` to the news channel. Run one from somewhere else and you get a one-line "Posted to #channel" instead, so the archive never splits across whichever channel you happened to be in. Run it from the destination channel and it just answers in place.
 
-`/add`, `/done`, `/delete`, `/move`, and `/time` are the exception: they answer where you typed them, since routing a one-line confirmation would turn every write into two messages.
+`/add`, `/done`, `/delete`, `/move`, `/time`, and `/change` are the exception: they answer where you typed them, since routing a one-line confirmation would turn every write into two messages.
 
 ## Setup
 

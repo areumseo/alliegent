@@ -334,6 +334,16 @@ class AgendaService:
         """Move an item to Notion's trash — recoverable, not a hard delete."""
         await self._client.trash_page(page_id)
 
+    async def rename(self, page_id: str, title: str) -> None:
+        await self._client.update_page(page_id, {self.props.title: n.title(title)})
+
+    async def set_category(self, page_id: str, category: str) -> None:
+        if not self.props.category:
+            raise ValueError("This agenda has no Category column.")
+        await self._client.update_page(
+            page_id, {self.props.category: n.select(category)}
+        )
+
     async def reschedule(self, page_id: str, day: date, at: time | None = None) -> None:
         """Move an item to another day, keeping its time of day."""
         await self._client.update_page(
