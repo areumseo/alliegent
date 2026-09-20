@@ -1,6 +1,6 @@
 [project]
 name = "alliegent"
-version = "0.1.0"
+version = "1.0.0"
 description = "A personal AI agent for task management, project organization, and workflow automation."
 readme = "README.md"
 requires-python = ">=3.12"
