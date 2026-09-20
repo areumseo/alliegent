@@ -190,7 +190,7 @@ def test_all_three_agree_on_the_numbers():
     brief = reports.daily_brief(TODAY, MIXED, [], [])
     alert = reports.incomplete_alert(TODAY, MIXED, [])
     stat = reports.status(TODAY, MIXED, [], MIXED)
-    for line in reports.day_table(MIXED):
+    for line in reports.left_table(MIXED) + reports.done_table(MIXED):
         assert line in brief and line in alert and line in stat
 
 
@@ -714,7 +714,8 @@ def test_every_header_count_matches_the_rows_below_it():
         reports.incomplete_alert(TODAY, todays, []),
     ]
     for text in messages:
-        header = next(line for line in text.splitlines() if line.startswith("**Today"))
-        assert header == "**Today — 3 left of 5**", header
-        # The whole day is listed, so the numbers run without gaps.
+        assert "**Left today (3)**" in text
+        assert "**Done (2)**" in text
+        # Both sections carry the day's own numbers, which is what /done
+        # resolves -- so each skips the other's rows rather than restarting.
         assert [n for n in range(1, 6) if row(text, n)] == [1, 2, 3, 4, 5], text

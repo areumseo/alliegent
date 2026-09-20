@@ -186,20 +186,52 @@ def _clock(item: AgendaItem) -> str:
 
 
 def day_table(items: list[AgendaItem]) -> list[str]:
-    """A whole day, finished items included."""
+    """A whole day in one table, finished items included and ticked."""
     rows, _ = _rows(items, when=_clock)
     return _task_table(rows, "Time")
 
 
-def day_header(todays: list[AgendaItem]) -> str:
-    """How the day stands, for the heading above its table.
+def left_table(todays: list[AgendaItem]) -> list[str]:
+    """What is still open, keeping each item's number for the whole day."""
+    rows, _ = _rows(todays, when=_clock)
+    return _task_table(
+        [row for row, item in zip(rows, todays, strict=True) if not item.done], "Time"
+    )
 
-    The whole day is listed, finished items included, so the heading has to
-    say how much of it is still live -- "Today (7)" above four open rows and
-    three ticked ones tells you nothing you wanted to know.
+
+def done_table(todays: list[AgendaItem]) -> list[str]:
+    """What is finished, listed apart from what is not.
+
+    The state column is dropped: every row in this table is done, and a
+    column of identical ticks is a column that says nothing. The numbers are
+    still the day's own, so they stay the ones /done and /delete resolve --
+    which is why they skip here.
     """
-    left = open_count(todays)
-    return f"**Today — {left} left of {len(todays)}**"
+    rows, _ = _rows(todays, when=_clock)
+    finished = [row for row, item in zip(rows, todays, strict=True) if item.done]
+    return _table(
+        ("#", "Time", "Task", "Category"),
+        [(number, when, title, category) for number, _, when, title, category in finished],
+        flex=2,
+        right=(0,),
+    )
+
+
+def done_count(todays: list[AgendaItem]) -> int:
+    return len([i for i in todays if i.done])
+
+
+def _done_block(todays: list[AgendaItem]) -> list[str]:
+    """The day's finished work, as its own section under what is left.
+
+    Separate rather than ticked in place: the open items are the ones being
+    read for what to do next, and interleaving what is behind you with what
+    is ahead of you makes the list you actually act on something to pick out
+    of a longer one. Empty when nothing is done yet.
+    """
+    if not done_count(todays):
+        return []
+    return ["", f"**Done ({done_count(todays)})**", *done_table(todays)]
 
 
 def open_count(todays: list[AgendaItem]) -> int:
@@ -289,8 +321,9 @@ def daily_brief(
     # numbers skip -- they count the whole day, because /done resolves them
     # against the whole day.
     if open_count(todays):
-        out.append(day_header(todays))
-        out += day_table(todays)
+        out.append(f"**Left today ({open_count(todays)})**")
+        out += left_table(todays)
+        out += _done_block(todays)
     elif todays:
         # An empty day and a finished one both leave nothing to list, but
         # telling someone who cleared seven items that nothing was scheduled
@@ -323,8 +356,9 @@ def incomplete_alert(
 
     out = [f"🌙 **End of day — {fmt_date(today)}**", ""]
     if open_count(todays):
-        out.append(day_header(todays))
-        out += day_table(todays)
+        out.append(f"**Left today ({open_count(todays)})**")
+        out += left_table(todays)
+        out += _done_block(todays)
         out.append("")
     if overdue:
         out.append(f"**Past due ({len(overdue)})**")
@@ -522,12 +556,9 @@ def status(
         out.append(f"Overdue — {len(overdue)}")
 
     if open_count(todays):
-        header = (
-            day_header(todays)
-            if is_today
-            else f"**{fmt_date(day)} — {open_count(todays)} left of {len(todays)}**"
-        )
-        out += ["", header, *day_table(todays)]
+        left = "Left today" if is_today else f"Left on {fmt_date(day)}"
+        out += ["", f"**{left} ({open_count(todays)})**", *left_table(todays)]
+        out += _done_block(todays)
         if not is_today:
             out.append(f"_`/done <n> {day.isoformat()}` to tick one off._")
     elif todays:
