@@ -4,6 +4,8 @@ without touching Notion or Discord."""
 from __future__ import annotations
 
 import re
+import unicodedata
+from collections.abc import Callable
 from datetime import date, time, timedelta
 
 from .agenda import AgendaItem, Project
@@ -50,6 +52,107 @@ def _mark(item: AgendaItem) -> str:
     return ""
 
 
+# Fixed-width layout, by the same rules as the asset table: a code block with
+# every cell padded, ASCII only, and widths measured from the values rather
+# than fixed. Two things are specific to task lists:
+#
+# - Titles are Korean as often as not, and a Korean glyph occupies two cells
+#   in a monospace font. Padding by len() would leave every column after the
+#   title ragged, so width is counted in cells, not characters.
+# - Titles are also the one cell with no natural bound, so the title column
+#   is the one that gives way when the table would pass TABLE_COLS.
+TABLE_COLS = 40
+MIN_TASK_COLS = 12
+# Ticks and diamonds are emoji, which a code block renders at an unpredictable
+# width; inside the table the state is ASCII.
+MARKS = {"done": "v", "started": ">", "": ""}
+
+
+def _width(text: str) -> int:
+    """Display width in monospace cells: East Asian wide glyphs count twice."""
+    return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
+
+
+def _fit(text: str, cells: int) -> str:
+    """Cut to a display width, marking the cut. Never splits a wide glyph."""
+    if _width(text) <= cells:
+        return text
+    out = ""
+    for ch in text:
+        if _width(out + ch) > cells - 2:
+            break
+        out += ch
+    return out + ".." + " " * (cells - _width(out) - 2)
+
+
+def _pad(text: str, cells: int) -> str:
+    return text + " " * max(0, cells - _width(text))
+
+
+def _table_mark(item: AgendaItem) -> str:
+    if item.done:
+        return MARKS["done"]
+    if item.started:
+        return MARKS["started"]
+    return MARKS[""]
+
+
+def _rows(
+    items: list[AgendaItem],
+    *,
+    when: Callable[[AgendaItem], str],
+    keep: set[str] | None = None,
+    limit: int | None = None,
+) -> tuple[list[tuple[str, ...]], int]:
+    """Cells for each item, plus how many matched but were not rendered.
+
+    Numbered against the *whole* list even when filtered or truncated: /done
+    and /delete recount the full list, so renumbering a subset from 1 would
+    send "2" to a different row than the one being read.
+    """
+    rows: list[tuple[str, ...]] = []
+    matched = 0
+    for idx, item in enumerate(items, start=1):
+        if keep is not None and (item.status or "") not in keep:
+            continue
+        matched += 1
+        if limit is not None and len(rows) >= limit:
+            continue
+        rows.append((str(idx), _table_mark(item), when(item), item.title, item.category or ""))
+    return rows, matched - len(rows)
+
+
+def _table(rows: list[tuple[str, ...]], when_header: str) -> list[str]:
+    """Render cells as a padded code block. Empty when there is nothing."""
+    if not rows:
+        return []
+    header = ("#", "", when_header, "Task", "Category")
+    cells = [header, *rows]
+    widths = [max(_width(row[col]) for row in cells) for col in range(5)]
+
+    # The title column absorbs whatever the others leave, down to a floor:
+    # past that a truncated title stops being recognisable, and a table that
+    # wraps on a phone is worse than one a little too wide.
+    over = sum(widths) + len(widths) - 1 - TABLE_COLS
+    if over > 0:
+        widths[3] = max(MIN_TASK_COLS, widths[3] - over)
+
+    def line(row: tuple[str, ...]) -> str:
+        number, mark, *rest = row
+        padded = [f"{number:>{widths[0]}}", _pad(mark, widths[1])]
+        padded += [
+            _pad(_fit(value, width), width)
+            for value, width in zip(rest, widths[2:], strict=True)
+        ]
+        return " ".join(padded).rstrip()
+
+    # The rule spans the header, which is the full table width -- rows are
+    # right-stripped and the last cell is often empty, so the widest row
+    # understates it.
+    head = line(header)
+    return ["```", head, "-" * _width(head), *(line(row) for row in rows), "```"]
+
+
 def _bullets(items: list[AgendaItem], *, numbered: bool = False) -> list[str]:
     lines = []
     for idx, item in enumerate(items, start=1):
@@ -58,19 +161,23 @@ def _bullets(items: list[AgendaItem], *, numbered: bool = False) -> list[str]:
     return lines
 
 
-def pending_lines(todays: list[AgendaItem]) -> list[str]:
-    """The unfinished items, numbered against the *whole* day.
+def _clock(item: AgendaItem) -> str:
+    """The item's time, or a hyphen. Items without one sort to the day's end,
+    and an empty cell there reads as a missing value rather than a choice."""
+    return fmt_time(item.at) if item.at else "-"
 
-    /done and /delete resolve a number the way /today prints it, which counts
-    completed rows too. Renumbering just the unfinished ones from 1 gives a
-    list where "2" means a different row depending on which message you read
-    it in — and completes the wrong task.
-    """
-    return [
-        f"`{idx}.` {_mark(item)}{_with_time(item)}"
-        for idx, item in enumerate(todays, start=1)
-        if not item.done
-    ]
+
+def day_table(items: list[AgendaItem]) -> list[str]:
+    """A whole day, finished items included."""
+    rows, _ = _rows(items, when=_clock)
+    return _table(rows, "Time")
+
+
+def pending_lines(todays: list[AgendaItem]) -> list[str]:
+    """The unfinished items, numbered against the whole day."""
+    rows, _ = _rows(todays, when=_clock, keep=None)
+    open_rows = [row for row, item in zip(rows, todays, strict=True) if not item.done]
+    return _table(open_rows, "Time")
 
 
 def overdue_lines(
@@ -86,24 +193,17 @@ def overdue_lines(
     match what /done and /delete resolve, since both count this same list --
     so the brief, the evening alert and /overdue all agree.
 
-    Dated because these span days by definition, and a number alone doesn't
-    say which day it came from.
+    Dated rather than timed: these span days by definition, and which day a
+    row came from is what a reader needs before its hour.
     """
-    lines = []
-    for idx, item in enumerate(items, start=1):
-        # Numbered against the whole backlog even when filtered: /done recounts
-        # the full list, so renumbering a subset from 1 would send "1" to a
-        # different row than the one being read.
-        if keep is not None and (item.status or "") not in keep:
-            continue
-        when = fmt_date(item.day) if item.day else "no date"
-        lines.append(f"`{idx}.` {_mark(item)}{_with_time(item)} — {when}")
-        if limit is not None and len(lines) == limit:
-            break
-    remaining = (len(items) if keep is None else len(
-        [i for i in items if (i.status or "") in keep]
-    )) - len(lines)
-    if limit is not None and remaining > 0:
+    rows, remaining = _rows(
+        items,
+        when=lambda i: fmt_date(i.day) if i.day else "no date",
+        keep=keep,
+        limit=limit,
+    )
+    lines = _table(rows, "Due")
+    if lines and remaining > 0:
         lines.append(f"_…and {remaining} more — `/overdue` for the rest._")
     return lines
 
@@ -149,9 +249,12 @@ def daily_brief(
         out += [CALENDAR_PROBLEMS.get(calendar_problem, CALENDAR_PROBLEMS["error"]), ""]
     out += calendar_block(events or [])
 
+    # Counted from the items, not the rendered lines: the table brings its own
+    # header and fences, so its length stopped being the number of tasks.
+    open_count = len([i for i in todays if not i.done])
     pending = pending_lines(todays)
     if pending:
-        out.append(f"**Today ({len(pending)})**")
+        out.append(f"**Today ({open_count})**")
         out += pending
     elif todays:
         # An empty day and a finished one both leave nothing to list, but
@@ -182,13 +285,14 @@ def incomplete_alert(
 ) -> str | None:
     """Return None when there is nothing to nag about — a silent evening is the
     correct output, not an 'all clear' ping."""
+    open_count = len([i for i in todays if not i.done])
     pending = pending_lines(todays)
     if not pending and not overdue:
         return None
 
     out = [f"🌙 **End of day — {fmt_date(today)}**", ""]
     if pending:
-        out.append(f"**Still open ({len(pending)})**")
+        out.append(f"**Still open ({open_count})**")
         out += pending
         out.append("")
     if overdue:
@@ -316,7 +420,7 @@ def day_list(
     if not items:
         return f"{fmt_date(day)} — nothing scheduled."
     header = f"**{fmt_date(day)} — {len(items)} item(s)**"
-    lines = [header, *_bullets(items, numbered=numbered)]
+    lines = [header, *(day_table(items) if numbered else _bullets(items))]
     if numbered and today is not None and day != today:
         lines.append(f"_`/done <n> {day.isoformat()}` to tick one off._")
     return "\n".join(lines)
@@ -401,11 +505,12 @@ def overdue_list(
     """
     if not items:
         return "🎉 Nothing overdue."
+    shown = len(items) if keep is None else len([i for i in items if (i.status or "") in keep])
     lines = overdue_lines(items, keep=keep)
     if not lines:
         return f"🎉 Nothing overdue is {label}." if label else "🎉 Nothing overdue."
     header = (
-        f"**Overdue — {label} ({len(lines)} of {len(items)})**"
+        f"**Overdue — {label} ({shown} of {len(items)})**"
         if label
         else f"**Overdue ({len(items)})**"
     )
@@ -422,27 +527,45 @@ def project_list(projects: list[Project]) -> str:
     return "\n".join(out)
 
 
+FENCE = "```"
+
+
 def chunk(message: str, limit: int = DISCORD_LIMIT) -> list[str]:
-    """Split on line boundaries to stay under Discord's per-message limit."""
+    """Split on line boundaries to stay under Discord's per-message limit.
+
+    A split inside a code block closes it and reopens it in the next message.
+    Otherwise the break leaves one message with an unclosed fence and the next
+    with none, and the table loses its alignment in exactly the case -- a long
+    backlog -- where the rows are hardest to read without it.
+    """
     if len(message) <= limit:
         return [message]
 
     chunks: list[str] = []
     current: list[str] = []
     size = 0
+    fenced = False  # whether the lines held in `current` are inside a block
+
+    def flush() -> None:
+        nonlocal current, size
+        if not current:
+            return
+        chunks.append("\n".join([*current, FENCE] if fenced else current))
+        current = [FENCE] if fenced else []
+        size = sum(len(line) + 1 for line in current)
+
     for line in message.split("\n"):
         # A single line longer than the limit has to be hard-split.
         while len(line) > limit:
-            if current:
-                chunks.append("\n".join(current))
-                current, size = [], 0
+            flush()
             chunks.append(line[:limit])
             line = line[limit:]
         if size + len(line) + 1 > limit and current:
-            chunks.append("\n".join(current))
-            current, size = [], 0
+            flush()
         current.append(line)
         size += len(line) + 1
+        if line.startswith(FENCE):
+            fenced = not fenced
     if current:
         chunks.append("\n".join(current))
     return chunks

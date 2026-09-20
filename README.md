@@ -31,7 +31,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/today` | Show today's agenda |
 | `/tomorrow` | Show tomorrow's agenda, numbered |
 | `/status [when]` | Completion for a day and the week containing it, plus what's left on it. `when` defaults to today |
-| `/add <task> [when] [at] [cal]` | Add an item, optionally at a time. Its Category is inferred from history. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow` / `tmr` (any capitalisation), `2026-08-15`, `08-15`, or `08/15`; defaults to today. An item with a time also lands in the calendar — `cal` forces that on or off |
+| `/add <task> [when] [at] [category] [cal]` | Add an item, optionally at a time. `category` is offered from the database's own options; left out, it is inferred from how the same activity was filed before. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow` / `tmr` (any capitalisation), `2026-08-15`, `08-15`, or `08/15`; defaults to today. An item with a time also lands in the calendar — `cal` forces that on or off |
 | `/done <numbers> [when]` | Complete items by their listed number — one or several (`3` or `3,5`). `when` picks the day, or `overdue` for the backlog; defaults to today |
 | `/delete <numbers> [when]` | Move items to Notion's trash by number — recoverable there. Takes `when` the same way, `overdue` included |
 | `/move <numbers> <to> [from]` | Move items to another day. `from` defaults to today |
@@ -44,6 +44,8 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
 
 Everything the bot writes in Discord is English, so nothing needs an input-method switch — except English quiz situations, for the reason given below. Data keeps the language it arrived in — Karrot item names are Korean because they are quoted from a Korean marketplace. Korean date words are still accepted as `when` values.
+
+**Lists are rendered as fixed-width tables** — number, time, task, category — in a code block, by the same rules as the asset table: ASCII only inside the block, and column widths measured from the values rather than fixed. Items with no time show `-`, since an empty cell there reads as a value that went missing rather than a task that deliberately has no hour. Titles are frequently Korean, where one glyph occupies two monospace cells, so width is counted in cells and not characters; the title column is the one that gives way when a row would pass 40 columns, which is what a phone shows unwrapped. A list long enough to split across two Discord messages closes the block and reopens it.
 
 Every message that lists today's unfinished work numbers it the way `/today` does — counting completed rows too, so the numbers are gaps rather than 1,2,3. That is deliberate: `/done` and `/delete` resolve a number against the full day, so renumbering the unfinished subset would make "2" mean a different row depending on which message you read it in.
 
@@ -347,8 +349,8 @@ Any job can be switched off the same way: blank its time in `alliegent.toml`.
 
 | Group | Shown as | Why |
 | --- | --- | --- |
-| Complete (`Done`, `Canceled`) | `✅` | Needs no more attention. Cancelling is a decision, not an omission — until this was read properly, cancelled items kept appearing in the brief and the overdue list |
-| In progress (`In progress`, `On hold`) | `🔸` | Already begun, so it needs finishing rather than starting. "2 of 7 done" reads the same whether two things are half-finished or nothing has been touched |
+| Complete (`Done`, `Canceled`) | `✅`, or `v` in a table |  Needs no more attention. Cancelling is a decision, not an omission — until this was read properly, cancelled items kept appearing in the brief and the overdue list |
+| In progress (`In progress`, `On hold`) | `🔸`, or `>` in a table |  Already begun, so it needs finishing rather than starting. "2 of 7 done" reads the same whether two things are half-finished or nothing has been touched |
 | To-do (`Not started`, `Ready`) | *nothing* | An unchecked box on every line of a mostly-unstarted list is noise |
 
 `/status` counts the middle group separately for the same reason: `2 of 7 done (29%), 2 in progress`.

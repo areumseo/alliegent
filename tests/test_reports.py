@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 
 import pytest
 
@@ -15,6 +15,20 @@ def item(title, *, done=False, day=TODAY):
     return AgendaItem(
         id=title, title=title, day=day, status=None, done=done, url="", project_ids=()
     )
+
+
+def row(text: str, number: int) -> str:
+    """The table row a number labels, with its padding collapsed.
+
+    Lists are rendered as padded tables, so an assertion on the exact spacing
+    would be an assertion about the widest title in the fixture rather than
+    about anything the test cares about.
+    """
+    for line in text.splitlines():
+        cells = line.split()
+        if cells and cells[0] == str(number):
+            return " ".join(cells)
+    return ""
 
 
 def test_fmt_date_shows_weekday_and_day():
@@ -48,8 +62,8 @@ def test_no_empty_checkbox_anywhere():
 
 def test_done_items_stay_marked_where_they_mix_with_pending():
     text = reports.today_list(TODAY, [item("한 것", done=True), item("남은 것")])
-    assert "✅ 한 것" in text
-    assert "✅ 남은 것" not in text
+    assert row(text, 1).startswith("1 v") and "한 것" in row(text, 1)
+    assert row(text, 2).startswith("2 -") and "남은 것" in row(text, 2)
 
 
 def test_a_future_day_is_numbered_and_says_which_day():
@@ -57,19 +71,19 @@ def test_a_future_day_is_numbered_and_says_which_day():
     carries the argument you need with it."""
     tomorrow = date(2026, 8, 9)
     text = reports.day_list(tomorrow, [item("내일 할 것")], today=TODAY)
-    assert "`1.` 내일 할 것" in text
+    assert "내일 할 것" in row(text, 1)
     assert "/done <n> 2026-08-09" in text
 
 
 def test_todays_list_carries_no_such_hint():
     text = reports.day_list(TODAY, [item("오늘 할 것")], today=TODAY)
-    assert "`1.` 오늘 할 것" in text
+    assert "오늘 할 것" in row(text, 1)
     assert "/done <n>" not in text
 
 
 def test_day_list_can_still_omit_numbers():
     text = reports.day_list(TODAY, [item("x")], numbered=False)
-    assert "`1.`" not in text
+    assert "• x" in text
 
 
 def test_day_list_reports_an_empty_day():
@@ -92,8 +106,8 @@ def test_status_numbers_match_the_today_list():
     resolves them the way /today prints them."""
     todays = [item("done one", done=True), item("still open")]
     text = reports.status(TODAY, todays, [], todays)
-    assert "`2.` still open" in text
-    assert "`1.` still open" not in text
+    assert "still open" in row(text, 2)
+    assert "still open" not in row(text, 1)
 
 
 def test_status_celebrates_a_finished_day():
@@ -153,22 +167,22 @@ MIXED = [item("first", done=True), item("second"), item("third", done=True), ite
 
 def test_the_brief_numbers_against_the_whole_day():
     text = reports.daily_brief(TODAY, MIXED, [], [])
-    assert "`2.` second" in text
-    assert "`4.` fourth" in text
-    assert "`1.` second" not in text
+    assert "second" in row(text, 2)
+    assert "fourth" in row(text, 4)
+    assert "second" not in row(text, 1)
 
 
 def test_the_evening_alert_numbers_against_the_whole_day():
     text = reports.incomplete_alert(TODAY, MIXED, [])
     assert text is not None
-    assert "`2.` second" in text
-    assert "`4.` fourth" in text
+    assert "second" in row(text, 2)
+    assert "fourth" in row(text, 4)
 
 
 def test_status_numbers_the_same_way():
     text = reports.status(TODAY, MIXED, [], MIXED)
-    assert "`2.` second" in text
-    assert "`4.` fourth" in text
+    assert "second" in row(text, 2)
+    assert "fourth" in row(text, 4)
 
 
 def test_all_three_agree_on_the_numbers():
@@ -409,8 +423,8 @@ def test_overdue_items_are_numbered_so_they_can_be_cleared():
     text = reports.overdue_list(
         [overdue_item("old thing", date(2026, 8, 1)), overdue_item("older", date(2026, 7, 30))]
     )
-    assert "`1.` old thing" in text
-    assert "`2.` older" in text
+    assert "old thing" in row(text, 1)
+    assert "older" in row(text, 2)
 
 
 def test_the_overdue_list_says_how_to_act_on_it():
@@ -430,7 +444,7 @@ def test_the_overdue_list_is_not_truncated():
     a number against the full list, not against what fitted on screen."""
     items = [overdue_item(f"item {n}", date(2026, 8, 1)) for n in range(1, 16)]
     text = reports.overdue_list(items)
-    assert "`15.` item 15" in text
+    assert "item 15" in row(text, 15)
     assert "more" not in text
 
 
@@ -452,19 +466,19 @@ def test_started_items_are_marked_in_a_day_list():
     text = reports.day_list(
         TODAY, [started_item("underway", started=True), started_item("untouched")]
     )
-    assert "🔸 underway" in text
-    assert "🔸 untouched" not in text
+    assert row(text, 1).startswith("1 >") and "underway" in row(text, 1)
+    assert row(text, 2).startswith("2 -") and "untouched" in row(text, 2)
 
 
 def test_started_items_are_marked_in_the_pending_list():
     """The brief, the evening alert and /status all read from this."""
     lines = reports.pending_lines([started_item("underway", started=True)])
-    assert lines == ["`1.` 🔸 underway"]
+    assert [line for line in lines if line.startswith("1 ")] == ["1 > -    underway"]
 
 
 def test_a_finished_item_keeps_its_tick():
     text = reports.day_list(TODAY, [started_item("finished", done=True)])
-    assert "✅ finished" in text
+    assert row(text, 1).startswith("1 v") and "finished" in row(text, 1)
 
 
 def test_status_counts_what_is_underway():
@@ -498,8 +512,8 @@ def test_the_brief_numbers_its_overdue_block():
     """The brief is where the backlog is actually read, so it is where someone
     decides to clear it — and `/done 2 overdue` needs a 2 to type."""
     text = reports.daily_brief(TODAY, [], BACKLOG, [])
-    assert "`1.` Unpacking — " in text
-    assert "`2.` Nail — " in text
+    assert "Unpacking" in row(text, 1)
+    assert "Nail" in row(text, 2)
 
 
 def test_every_message_numbers_the_backlog_identically():
@@ -511,8 +525,8 @@ def test_every_message_numbers_the_backlog_identically():
     listing = reports.overdue_list(BACKLOG)
     planning = reports.weekly_planning(TODAY, [], BACKLOG)
     for text in (brief, evening, listing, planning):
-        assert "`1.` Unpacking" in text
-        assert "`2.` Nail" in text
+        assert "Unpacking" in row(text, 1)
+        assert "Nail" in row(text, 2)
 
 
 def test_the_backlog_says_how_to_act_on_it():
@@ -524,11 +538,11 @@ def test_a_long_backlog_is_trimmed_in_the_brief_but_points_at_the_rest():
     valid, and the rest are one command away."""
     many = [overdue_row(f"item {n}", date(2026, 8, 1)) for n in range(1, 15)]
     brief = reports.daily_brief(TODAY, [], many, [])
-    assert "`10.` item 10" in brief
-    assert "`11.`" not in brief
+    assert "item 10" in row(brief, 10)
+    assert not row(brief, 11)
     assert "4 more" in brief and "/overdue" in brief
     # The full list is not trimmed, and keeps the same numbering.
-    assert "`14.` item 14" in reports.overdue_list(many)
+    assert "item 14" in row(reports.overdue_list(many), 14)
 
 
 # -- filtering the backlog by status ---------------------------------------
@@ -555,8 +569,8 @@ def test_filtering_keeps_the_numbers_of_the_whole_backlog():
     text = reports.overdue_list(
         MIXED_BACKLOG, keep={"In progress", "On hold"}, label="in progress"
     )
-    assert "`1.` 🔸 started one" in text
-    assert "`3.` 🔸 paused" in text
+    assert row(text, 1).startswith("1 >") and "started one" in row(text, 1)
+    assert row(text, 3).startswith("3 >") and "paused" in row(text, 3)
     assert "untouched" not in text
 
 
@@ -568,10 +582,99 @@ def test_a_filtered_header_says_how_much_is_hidden():
 def test_an_unfiltered_list_is_unchanged():
     text = reports.overdue_list(MIXED_BACKLOG)
     assert "**Overdue (3)**" in text
-    assert "`2.` untouched" in text
+    assert "untouched" in row(text, 2)
 
 
 def test_a_filter_matching_nothing_says_so():
     """Silence would read as an empty backlog, which is the opposite of true."""
     text = reports.overdue_list(MIXED_BACKLOG, keep={"Ready"}, label="Ready")
     assert "Nothing overdue is Ready" in text
+
+
+# -- the table layout -------------------------------------------------------
+# Same rules as the asset table: ASCII inside a code block, widths measured
+# from the values. The addition here is that titles are frequently Korean,
+# where one glyph occupies two monospace cells.
+
+
+def task(title, *, at=None, category=None, done=False, started=False, day=TODAY):
+    return AgendaItem(
+        id=title, title=title, day=day, status=None, done=done, url="",
+        project_ids=(), at=at, category=category, started=started,
+    )
+
+
+def test_a_day_shows_time_task_and_category():
+    text = reports.today_list(TODAY, [task("Cafe shift", at=time(9, 0), category="Work")])
+    assert row(text, 1) == "1 09:00 Cafe shift Work"
+
+
+def test_an_item_without_a_time_shows_a_hyphen():
+    """An empty cell in the time column reads as a value that went missing,
+    rather than a task that deliberately has no hour."""
+    text = reports.today_list(TODAY, [task("Read", category="Personal")])
+    assert row(text, 1) == "1 - Read Personal"
+
+
+def test_an_uncategorised_item_leaves_the_column_empty():
+    text = reports.today_list(TODAY, [task("Read")])
+    assert row(text, 1) == "1 - Read"
+
+
+def test_korean_titles_keep_the_columns_aligned():
+    """A Korean glyph is two cells wide, so padding by character count would
+    leave every column after the title ragged -- in the font this is actually
+    read in, which is the Korean-locale one."""
+    text = reports.today_list(
+        TODAY,
+        [
+            task("당근 물건 발송", at=time(9, 0), category="Karrot"),
+            task("Dentist", at=time(10, 0), category="Health"),
+        ],
+    )
+    rows = [line for line in text.splitlines() if line.startswith(("1 ", "2 "))]
+    assert reports._width(rows[0]) == reports._width(rows[1])
+
+
+def test_the_table_stays_within_a_phone_screen():
+    text = reports.today_list(
+        TODAY,
+        [task("A task with a genuinely very long title indeed", category="Personal")],
+    )
+    body = text.split("```")[1]
+    assert max(reports._width(line) for line in body.splitlines()) <= reports.TABLE_COLS
+
+
+def test_a_title_too_long_to_fit_is_cut_and_says_so():
+    text = reports.today_list(
+        TODAY, [task("A task with a genuinely very long title indeed", category="Personal")]
+    )
+    assert ".." in row(text, 1)
+    assert "Personal" in row(text, 1)
+
+
+def test_a_cut_never_splits_a_korean_glyph():
+    """Half a wide glyph is a replacement character, and one cell of drift."""
+    assert reports._width(reports._fit("당근 물건 발송 정리하기", 10)) == 10
+
+
+def test_the_marks_are_ascii_inside_the_table():
+    """Emoji render at an unpredictable width in a code block, which would
+    shift every column after them."""
+    text = reports.today_list(TODAY, [task("done", done=True), task("doing", started=True)])
+    block = text.split("```")[1]
+    assert "✅" not in block and "🔸" not in block
+
+
+def test_a_split_inside_a_table_closes_and_reopens_the_block():
+    """A long backlog is exactly the case that both overflows one message and
+    most needs its columns."""
+    many = [
+        overdue_row(f"item number {n}", date(2026, 8, 1)) for n in range(1, 120)
+    ]
+    parts = reports.chunk(reports.overdue_list(many))
+    assert len(parts) > 1
+    for part in parts:
+        assert part.count("```") % 2 == 0, part[:80]
+    # And no row is lost to the fences that were added.
+    assert sum(part.count("item number ") for part in parts) == 119
