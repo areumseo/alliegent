@@ -36,9 +36,16 @@ FEEDS: tuple[str, ...] = (
     "https://techcrunch.com/category/artificial-intelligence/feed/",
     "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
     "https://arstechnica.com/ai/feed/",
-    "https://venturebeat.com/category/ai/feed/",
     "https://www.technologyreview.com/topic/artificial-intelligence/feed",
 )
+
+# VentureBeat was dropped on 2026-09-24. Its feed had been silent since around
+# the 18th, and `cli feeds` found why: HTTP 429 on a request made once a day.
+# That is not rate limiting, it is a bot check answering with a rate-limit
+# code -- it returns 429 to a browser user agent too, and the other four
+# publications serve the same request fine. The URL is still correct, so there
+# is no better one to move to. Re-add it only if a plain
+# `curl https://venturebeat.com/category/ai/feed/` starts returning 200.
 
 # Per feed, so one prolific publication cannot crowd out the rest.
 MAX_PER_FEED = 15
