@@ -259,28 +259,26 @@ def test_routed_kinds_all_resolve_to_a_channel():
 # -- /add and the calendar -------------------------------------------------
 
 
-def _should_mirror(cal: bool | None, has_time: bool) -> bool:
-    """The rule /add applies, written out so it can be checked directly."""
-    return cal if cal is not None else has_time
+def _cal_option():
+    add = next(c for c in leaf_commands(make_bot()) if c.qualified_name == "add")
+    return next(p for p in add.parameters if p.display_name == "cal")
 
 
-def test_a_timed_item_goes_to_the_calendar_by_default():
-    """Something happening at an hour is what a calendar is for."""
-    assert _should_mirror(None, True)
+def test_the_calendar_is_opt_in():
+    """It used to follow the time: an item at an hour went in, a bare task did
+    not. That put shifts and classes already in the calendar into it a second
+    time, and each one had to be deleted from both places. Read off the
+    registered command rather than restating the rule, so the test fails if
+    the default ever drifts back."""
+    option = _cal_option()
+    assert option.required is False
+    assert option.default is False
 
 
-def test_a_bare_task_stays_out_of_the_calendar():
-    """The reason this is not always-on: most agenda rows are chores, and a
-    calendar full of them stops showing what the day is committed to."""
-    assert not _should_mirror(None, False)
-
-
-def test_cal_false_keeps_a_timed_item_out():
-    assert not _should_mirror(False, True)
-
-
-def test_cal_true_puts_an_untimed_item_in():
-    assert _should_mirror(True, False)
+def test_the_calendar_option_says_it_is_off_by_default():
+    """The option description is the only place this is visible while typing
+    the command, and the old one promised the opposite."""
+    assert "Off unless" in _cal_option().description
 
 
 # -- acting on the backlog -------------------------------------------------
