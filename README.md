@@ -252,7 +252,9 @@ At 09:00 the digest covers **yesterday** — at nine in the morning the day's ow
 
 The digest is built to be scanned, not read through. A `🏷️` line of the day's subjects comes first, so the question "is there anything for me today" is answered without scrolling; each headline is itself the link, which removes a line per item; and summaries are a sentence or two rather than three. Link previews are suppressed on send — five articles would otherwise drag in five cards, each taller than the entry above it.
 
-Stories come from the feeds listed in `news_feeds.py` (TechCrunch, The Verge, Ars Technica, VentureBeat, MIT Technology Review). The model picks five and writes them up in English and Korean; it does not go looking for news itself.
+Stories come from the feeds listed in `news_feeds.py` (TechCrunch, The Verge, Ars Technica, MIT Technology Review). The model picks five and writes them up in English and Korean; it does not go looking for news itself.
+
+**VentureBeat was dropped on 2026-09-24.** Its feed answers 429 to one request a day, and to a browser user agent as well, so it is a bot check rather than a rate limit and there is no URL to move to. This is the failure `cli feeds` exists for: the feed had been quiet since around the 18th and the morning log could only say it had contributed nothing, which reads the same as a slow news day.
 
 **It used to search, and that is worth knowing about before changing it back.** Letting the model search read well, but every search result stayed in its context and was re-read on each following step, so the input grew with roughly the square of the search count. One digest measured anywhere from 89k to 437k input tokens with no way to predict which, and on 2026-08-21 the call ran past its fifteen-minute ceiling and delivered nothing at all. Below about seven searches the model would rather stop than guess, and it started citing "top AI news today" roundups instead of articles.
 
