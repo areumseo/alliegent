@@ -365,3 +365,91 @@ def test_both_costs_are_named_when_the_week_is_only_part_of_the_spending():
     )
     text = K.weekly_message(data, [], SUNDAY, spending)
     assert "₩2,960 this week, ₩290,771 all time" in text
+
+
+# -- buying on Karrot ------------------------------------------------------
+# Money spent buying shares the expenses database but never the Net: packaging
+# is what a sale cost to make, a purchase is not, and one Net covering both
+# would move without saying which half moved it.
+
+
+def week_of(revenue: int) -> dict:
+    return {
+        "week_start": date(2026, 9, 14),
+        "periods": {
+            "this_week": (1, revenue),
+            "last_week": (0, 0),
+            "this_month": (1, revenue),
+            "this_year": (1, revenue),
+        },
+        "total": (1, revenue),
+        "undated": (0, 0),
+        "unpaid": (0, 0),
+    }
+
+
+def test_a_purchase_never_reaches_net():
+    """The whole reason it is a separate kind. A purchase counted as a selling
+    cost would read as a week that sold badly."""
+    spending = K.spending_of(
+        [
+            expense(2_000, K.PACKAGING, spent_at=SUNDAY),
+            expense(50_000, K.PURCHASE, spent_at=SUNDAY, name="산 것"),
+        ],
+        SUNDAY,
+    )
+    assert spending["periods"]["this_week"] == 2_000
+    assert spending["total"] == 2_000
+    assert spending["purchases"]["total"] == 50_000
+    text = K.weekly_message(week_of(30_000), [], SUNDAY, spending)
+    assert "This week  1  30,000 28,000" in text
+
+
+def test_purchases_are_reported_on_their_own_line():
+    spending = K.spending_of(
+        [expense(50_000, K.PURCHASE, spent_at=SUNDAY, name="산 것")], SUNDAY
+    )
+    text = K.weekly_message(week_of(30_000), [], SUNDAY, spending)
+    assert "Bought on Karrot: ₩50,000 this week, ₩50,000 all time" in text
+    assert "Not in Net" in text
+
+
+def test_a_week_with_no_purchases_says_nothing_about_buying():
+    """A line reading ₩0 every week is one you stop seeing."""
+    spending = K.spending_of([expense(2_000, K.PACKAGING, spent_at=SUNDAY)], SUNDAY)
+    assert "Bought on Karrot" not in K.weekly_message(week_of(30_000), [], SUNDAY, spending)
+
+
+def test_purchases_keep_their_own_periods():
+    spending = K.spending_of(
+        [
+            expense(10_000, K.PURCHASE, spent_at=SUNDAY, name="이번 주"),
+            expense(70_000, K.PURCHASE, spent_at=date(2026, 8, 15), name="지난달"),
+        ],
+        SUNDAY,
+    )
+    bought = spending["purchases"]
+    assert bought["periods"]["this_week"] == 10_000
+    assert bought["periods"]["last_month"] == 70_000
+    assert bought["total"] == 80_000
+    # And none of it is anywhere near the selling costs.
+    assert spending["total"] == 0
+
+
+def test_by_kind_stays_about_selling():
+    spending = K.spending_of(
+        [
+            expense(1_000),
+            expense(500, K.PACKAGING),
+            expense(9_000, K.PURCHASE, spent_at=SUNDAY, name="산 것"),
+        ],
+        SUNDAY,
+    )
+    assert spending["by_kind"] == {K.ADS: 1_000, K.PACKAGING: 500}
+    assert spending["purchases"]["by_kind"] == {K.PURCHASE: 9_000}
+
+
+def test_a_purchase_is_a_kind_the_database_accepts():
+    """`add` validates against KINDS, so leaving Purchase out of it would make
+    /karrot bought refuse every row it was given."""
+    assert K.PURCHASE in K.KINDS and K.PURCHASE not in K.SELLING_KINDS
