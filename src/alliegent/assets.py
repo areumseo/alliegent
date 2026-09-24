@@ -310,7 +310,61 @@ def snapshot_message(
     return "\n".join(out)
 
 
-def prompt_message(previous: Snapshot | None, today: date) -> str:
+@dataclass(frozen=True)
+class PendingMove:
+    """A rollover that will happen before the next weekly prompt."""
+
+    source: str
+    target: str
+    day: date
+
+
+def moves_before(today: date, schedule, *, days: int = 7) -> list[PendingMove]:
+    """Rollovers falling in the next `days`, soonest first.
+
+    This week's figures are what such a rollover will move: `move` takes the
+    row dated that day if one exists and otherwise the latest, and between two
+    Mondays the latest is this Monday's. So an estimate typed in today is the
+    number that lands in Savings on the first — which is exactly the moment to
+    say so, rather than in a message nobody is reading on the day.
+
+    Today itself is left out: a rollover running this morning announces
+    itself, and warning about a move that has already happened is worse than
+    saying nothing.
+    """
+    window = [today + timedelta(days=n) for n in range(1, days + 1)]
+    pending: list[PendingMove] = []
+    if schedule.bonus_rollover_time.strip():
+        pending += [
+            PendingMove("Bonus", "Savings", day)
+            for day in window
+            if day.month in schedule.bonus_rollover_months
+            and day.day == schedule.bonus_rollover_day
+        ]
+    if schedule.espp_rollover_time.strip():
+        for end in schedule.espp_purchase_dates:
+            # The day after the period closes, as the scheduler has it.
+            day = date.fromisoformat(end) + timedelta(days=1)
+            if day in window:
+                pending.append(PendingMove("ESPP", "Vested", day))
+    return sorted(pending, key=lambda move: move.day)
+
+
+def _pending_line(move: PendingMove) -> str:
+    return (
+        f"⚠️ **{move.source} moves into {move.target} on {move.day.isoformat()}.** "
+        f"Whatever {move.source} holds then is what moves, so put the real amount "
+        f"in it this week — and leave {move.target} as your bank shows it: adding "
+        "it there yourself as well would count it twice."
+    )
+
+
+def prompt_message(
+    previous: Snapshot | None,
+    today: date,
+    *,
+    pending: list[PendingMove] | tuple[()] = (),
+) -> str:
     """Monday's reminder, carrying last week's figures.
 
     Editing last week's numbers is faster than filling a blank form, and a
@@ -319,6 +373,7 @@ def prompt_message(previous: Snapshot | None, today: date) -> str:
     out = [f"💰 **This week's balances — {today.isoformat()}**", ""]
     if previous is None:
         out.append("No records yet. Add a row to the Assets database in Notion.")
+        out += [line for move in pending for line in ("", _pending_line(move))]
         return "\n".join(out)
 
     out.append(f"Last recorded ({previous.day.isoformat() if previous.day else '?'})")
@@ -329,6 +384,10 @@ def prompt_message(previous: Snapshot | None, today: date) -> str:
     for name in EXPECTED:
         out.append(f"{LABELS[name]:<12} {_won(previous.amounts.get(name, 0)):>14}")
     out.append("```")
+    # Above the sign-off rather than below it: the sign-off is the line you
+    # stop reading at, and this one has to be read before the numbers go in.
+    if pending:
+        out += ["", *(_pending_line(move) for move in pending), ""]
     out.append("_Add a row in Notion; next week this will show what changed._")
     return "\n".join(out)
 

@@ -173,7 +173,12 @@ class Jobs:
             return None
         from . import assets as assets_module
 
-        return assets_module.prompt_message(await self.assets.latest(), self.today())
+        today = self.today()
+        return assets_module.prompt_message(
+            await self.assets.latest(),
+            today,
+            pending=assets_module.moves_before(today, self.config.schedule),
+        )
 
     async def run_english_quiz(self) -> None:
         """Quiz on today's lessons, if there were any not quizzed yet.

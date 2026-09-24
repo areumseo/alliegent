@@ -295,6 +295,8 @@ A weekly snapshot, typed in by hand. Korean banks have no personal API worth bui
 
 The bonus is paid at the end of September and March, and on the first of the following month it moves into `Savings` on its own. The move is written as that day's row with every other figure carried over, never as an edit to an earlier row: that row recorded what was held on its own date. It is announced in `#assets` with the amounts, since balances are also entered by hand — once the bonus is in `Savings`, adding it again from the bank balance would count it twice.
 
+**A rollover due before the next Monday is announced in Monday's prompt.** The move takes whatever the bucket holds when it runs, which between two Mondays is the figure typed into Monday's row — so an estimate left in `Bonus` on the 29th is the estimate that lands in `Savings` on the 1st. The warning names both buckets and the date, and says not to add the money to the target by hand, which is the way to count it twice. It appears only in the week the move falls in: a warning repeated for a month is one that is no longer read.
+
 Monday's prompt carries last week's figures rather than presenting a blank form: editing numbers is faster than recalling them, and a bucket you forgot shows up as one that did not change. Recording twice in the same week corrects that week's row instead of adding a second — otherwise the next comparison would measure a change of zero.
 
 Every amount lives in Notion. Nothing in this repository contains one, and the examples and fixtures are invented.
