@@ -134,6 +134,12 @@ uv run python -m alliegent.cli brief --send
 uv run python -m alliegent.cli scaffold --commit
 ```
 
+`feeds` is a check rather than a job: it fetches each news feed and prints what came back, so a publication missing from the digest can be told apart from one that simply had a quiet day. It needs no Notion token, and exits non-zero if any feed returned nothing usable:
+
+```bash
+uv run python -m alliegent.cli feeds
+```
+
 Start the bot:
 
 ```bash

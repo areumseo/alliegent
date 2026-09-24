@@ -8,14 +8,16 @@ timezone question of what "yesterday" means.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
+from httpx import ConnectError
 
 from alliegent.integrations.news_feeds import (
     Entry,
+    check,
     entries_for,
     parse_feed,
     recent_window,
@@ -50,6 +52,12 @@ ATOM = """<?xml version="1.0"?>
     <summary>What happened.</summary>
   </entry>
 </feed>
+"""
+
+# A feed that is alive and simply has nothing in it, which is not the same as
+# a feed that has gone.
+EMPTY_RSS = """<?xml version="1.0"?>
+<rss version="2.0"><channel><title>Quiet</title></channel></rss>
 """
 
 
@@ -134,6 +142,39 @@ def test_the_window_is_the_day_that_just_finished():
     assert recent_window(date(2026, 8, 21)) == date(2026, 8, 20)
 
 
+# -- the health check ------------------------------------------------------
+# A silent publication reads the same in the morning log however it went
+# quiet. Telling a moved feed from a blocked one from a slow news day is the
+# whole point of checking on demand.
+
+
+async def test_check_reports_a_working_feed_with_its_newest_story(monkeypatch):
+    health = await _check(monkeypatch, {"https://a.example/feed": RSS})
+    assert health[0].ok
+    assert health[0].entries == 2
+    assert health[0].newest == datetime(2026, 8, 20, 13, 0, 35, tzinfo=UTC)
+
+
+async def test_check_names_the_status_a_refusing_feed_returned(monkeypatch):
+    """403 and 404 need different answers — one is the user agent, the other
+    is a URL that has moved — so the number itself has to survive."""
+    health = await _check(monkeypatch, {"https://a.example/feed": 403})
+    assert not health[0].ok
+    assert health[0].detail == "HTTP 403"
+
+
+async def test_check_names_the_error_when_the_host_never_answers(monkeypatch):
+    health = await _check(monkeypatch, {"https://a.example/feed": ConnectError})
+    assert health[0].detail == "ConnectError"
+
+
+async def test_check_tells_an_empty_feed_from_a_broken_one(monkeypatch):
+    """A feed that parses but carries nothing is still a feed, and saying so
+    is what stops a quiet publication being mistaken for a dead one."""
+    health = await _check(monkeypatch, {"https://a.example/feed": EMPTY_RSS})
+    assert health[0].detail == "no entries"
+
+
 # -- helpers ---------------------------------------------------------------
 
 
@@ -153,6 +194,32 @@ async def _collect(monkeypatch, feeds: dict[str, str | None], day: date):
 
     monkeypatch.setattr(httpx, "AsyncClient", fake_client)
     return await entries_for(day, SEOUL, feeds=tuple(feeds))
+
+
+async def _check(monkeypatch, feeds: dict[str, object]):
+    """Run `check` against canned responses.
+
+    A value is the feed body, an HTTP status to return instead, or an
+    exception class to raise — the three ways a publication goes quiet.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        outcome = feeds[str(request.url)]
+        if isinstance(outcome, type) and issubclass(outcome, Exception):
+            raise outcome("no route to host")
+        if isinstance(outcome, int):
+            return httpx.Response(outcome)
+        return httpx.Response(200, text=outcome)
+
+    transport = httpx.MockTransport(handler)
+    real = httpx.AsyncClient
+
+    def fake_client(*args, **kwargs):
+        kwargs["transport"] = transport
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", fake_client)
+    return await check(feeds=tuple(feeds))
 
 
 async def _assert_titles(monkeypatch, feeds, day, expected):
