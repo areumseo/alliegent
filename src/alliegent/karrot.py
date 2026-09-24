@@ -92,7 +92,21 @@ class Item:
 # every count in the item reports would have to learn to skip it.
 ADS = "Ads"
 PACKAGING = "Packaging"
-KINDS = (ADS, PACKAGING)
+# Money spent buying on Karrot, which is not a cost of selling. It shares the
+# database -- an outgoing amount on a date, with the same three fields -- but
+# never the Net: packaging is what a sale cost to make, a purchase is not, and
+# summing them would leave a smaller Net with no way to tell which half moved.
+PURCHASE = "Purchase"
+# What Net is after.
+SELLING_KINDS = (ADS, PACKAGING)
+KINDS = (*SELLING_KINDS, PURCHASE)
+
+# What a row is called when nothing was typed in.
+DEFAULT_NAMES = {
+    ADS: "Neighbourhood ad",
+    PACKAGING: "Packaging",
+    PURCHASE: "Purchase",
+}
 
 
 @dataclass(frozen=True)
@@ -147,7 +161,7 @@ class ExpenseService:
         if amount <= 0:
             raise ValueError("An expense has to be a positive amount.")
         props = {
-            "Name": n.title(name or ("Neighbourhood ad" if kind == ADS else "Packaging")),
+            "Name": n.title(name or DEFAULT_NAMES[kind]),
             "Kind": n.select(kind),
             "Amount": {"number": amount},
             "Spent At": n.date_prop(day, tz=self._cfg.tz),
@@ -163,6 +177,22 @@ class ExpenseService:
 
 
 def spending_of(expenses: list[Expense], today: date) -> dict:
+    """Selling costs, with what was bought on Karrot kept beside them.
+
+    One database, two questions. `periods` and `total` are the selling costs
+    alone, because that is what Net is after and every caller reading them
+    already means that; buying something has nothing to do with how the week's
+    selling went. The purchases are the same shape under `purchases`, so a
+    report can show them without a second query or a second service.
+    """
+    selling = [e for e in expenses if e.kind != PURCHASE]
+    bought = [e for e in expenses if e.kind == PURCHASE]
+    totals = _totals_of(selling, today, kinds=SELLING_KINDS)
+    totals["purchases"] = _totals_of(bought, today, kinds=(PURCHASE,))
+    return totals
+
+
+def _totals_of(expenses: list[Expense], today: date, *, kinds: tuple[str, ...]) -> dict:
     week_start = today - timedelta(days=today.weekday())
     last_week = week_start - timedelta(days=7)
     month_start = today.replace(day=1)
@@ -183,7 +213,7 @@ def spending_of(expenses: list[Expense], today: date) -> dict:
         },
         "total": sum(e.amount for e in expenses),
         "by_kind": {
-            kind: sum(e.amount for e in expenses if e.kind == kind) for kind in KINDS
+            kind: sum(e.amount for e in expenses if e.kind == kind) for kind in kinds
         },
         "undated": sum(e.amount for e in expenses if not e.spent_at),
     }
@@ -463,6 +493,17 @@ def weekly_message(
             else f"₩{total_cost:,}"
         )
         out.append(f"_Net is after {spent} of ads and packaging._")
+
+    # On its own line, never in Net: what a sale cost to make and what was
+    # bought are different kinds of money, and one Net covering both would
+    # move without saying which half moved it.
+    if spending is not None and spending["purchases"]["total"]:
+        bought = spending["purchases"]
+        week_spent = bought["periods"]["this_week"]
+        out.append(
+            f"_Bought on Karrot: ₩{week_spent:,} this week, "
+            f"₩{bought['total']:,} all time. Not in Net._"
+        )
 
     undated_count, undated_amount = data["undated"]
     if undated_count:

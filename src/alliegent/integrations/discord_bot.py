@@ -1141,6 +1141,44 @@ def _register(bot: AlliegentBot) -> None:
             f"all time: ₩{spending['total']:,}_"
         )
 
+    @karrot_group.command(name="bought", description="Record something you bought on Karrot")
+    @app_commands.describe(
+        item="What you bought",
+        amount="How much, in won",
+        when="When you bought it (defaults to today)",
+        note="Optional note",
+    )
+    async def karrot_bought(
+        interaction: discord.Interaction,
+        item: str,
+        amount: int,
+        when: str | None = None,
+        note: str | None = None,
+    ) -> None:
+        # Its own command rather than a third choice on /karrot spent: that one
+        # records what selling cost, and a purchase filed there by mistake
+        # would come off Net and read as a bad week of selling.
+        await interaction.response.defer()
+        if bot.expenses is None:
+            await interaction.followup.send("⚠️ NOTION_KARROT_EXPENSES_DB_ID is not set.")
+            return
+        try:
+            day = parse_day(when, bot.today())
+            expense = await bot.expenses.add(
+                amount, karrot.PURCHASE, day, name=item, note=note or ""
+            )
+        except ValueError as exc:
+            await interaction.followup.send(f"⚠️ {exc}")
+            return
+
+        bought = (await bot.expenses.spending(bot.today()))["purchases"]
+        await interaction.followup.send(
+            f"🛒 Recorded — **{expense.name}** ₩{expense.amount:,} "
+            f"({reports.fmt_date(day)})\n"
+            f"_Bought this week: ₩{bought['periods']['this_week']:,} · "
+            f"all time: ₩{bought['total']:,}_"
+        )
+
     @karrot_group.command(name="summary", description="Totals for the whole database")
     async def karrot_summary(interaction: discord.Interaction) -> None:
         await interaction.response.defer()

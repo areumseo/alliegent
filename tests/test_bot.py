@@ -364,6 +364,13 @@ def test_the_core_routes_are_always_required():
     assert {"agenda", "review", "news"} <= set(enabled_routes(Secrets()))
 
 
+def test_buying_on_karrot_has_its_own_subcommand():
+    """Not a third choice on /karrot spent: that one records what selling
+    cost, and a purchase filed there would come off Net."""
+    names = {c.qualified_name for c in leaf_commands(make_bot())}
+    assert "karrot bought" in names and "karrot spent" in names
+
+
 # -- projects --------------------------------------------------------------
 
 

@@ -39,7 +39,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/projects` | Active projects and their next actions, both read off the agenda items linked to them |
 | `/brief` | Run the daily brief now |
 | `/assets show` · `/assets trend` | Latest snapshot with what changed, and the recent history |
-| `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `spent`, `sales`, `summary` |
+| `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `spent`, `bought`, `sales`, `summary` |
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
 
 Everything the bot writes in Discord is English, so nothing needs an input-method switch — except English quiz situations, for the reason given below. Data keeps the language it arrived in — Karrot item names are Korean because they are quoted from a Korean marketplace. Korean date words are still accepted as `when` values.
@@ -326,6 +326,8 @@ Three judgements carried over from the script this was ported from, each earned:
 `NOTION_KARROT_DB_ID` switches the whole feature off when blank.
 
 **Selling costs come off revenue.** Neighbourhood ads and packaging are recorded in their own small database — an expense has no price, no buyer and no status, so keeping it as a row in the item list would mean teaching every count to skip it. `/karrot spent <amount> <kind>` records one; `sales` and the Saturday report then show revenue and net side by side, with the cost named once underneath rather than repeated as a column against every period — it is the same few purchases being divided up over and over, and a column of them buries the two numbers being compared. Without `NOTION_KARROT_EXPENSES_DB_ID` the revenue reported is gross, and no net figure is shown at all.
+
+**What you buy on Karrot is tracked, and deliberately kept out of net.** `/karrot bought <item> <amount>` files a purchase in the same expenses database, under the `Purchase` kind, and the Saturday report gives it its own line: `Bought on Karrot: ₩X this week, ₩Y all time. Not in Net.` Packaging is what a sale cost to make and a purchase is not, so a single net covering both would move without saying which half moved it — a week of buying would read as a week that sold badly. It is a separate command rather than a third choice on `/karrot spent` for the same reason: the two are one mistyped option apart, and the mistake is invisible once it is in.
 
 The history before 2026-09-20 is two aggregate rows, one for ads and one for packaging, because the per-purchase receipts were never kept. They are dated 2026-08-15 — when the ads stopped — so they fall in the month the money was actually spent rather than flattening the current one.
 
