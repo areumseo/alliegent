@@ -14,7 +14,7 @@ from discord import app_commands
 
 from .. import assets as assets_module
 from .. import karrot, reports
-from ..agenda import AgendaService, ProjectService
+from ..agenda import AgendaService, Project, ProjectService
 from ..chat import ChatAgent, strip_mentions
 from ..config import Config, Secrets
 from ..jobs import Jobs
@@ -319,7 +319,13 @@ async def _deliver(
     await interaction.followup.send(f"📨 Posted to {name}.")
 
 
-CLEAR_TIME = {"none", "clear", "off", "없음", "-"}
+# Words that mean "take the value off" rather than "set it to this". Shared by
+# every argument that can be cleared, so the habit carries from one to the next.
+CLEAR_WORDS = {"none", "clear", "off", "없음", "-"}
+
+
+def means_clear(text: str) -> bool:
+    return text.strip().strip(".!,").casefold().replace(" ", "") in CLEAR_WORDS
 
 
 def parse_time(text: str | None) -> time | None:
@@ -332,7 +338,7 @@ def parse_time(text: str | None) -> time | None:
     if not text:
         return None
     value = text.strip().strip(".!,").strip().casefold().replace(" ", "")
-    if value in CLEAR_TIME:
+    if value in CLEAR_WORDS:
         return None
     match = re.fullmatch(r"(\d{1,2})(?::(\d{2}))?(am|pm)?", value)
     if not match:
@@ -552,6 +558,18 @@ async def resolve_category(bot: AlliegentBot, text: str) -> str:
     raise ValueError(f"No category called {text!r}. Try: " + ", ".join(names))
 
 
+async def resolve_project(bot: AlliegentBot, text: str) -> Project:
+    """Match a typed project name to an open project.
+
+    The matching itself lives in `ProjectService.find`; this only turns "no
+    projects database configured" into the same refusal the user gets from
+    /projects, rather than an AttributeError in the log.
+    """
+    if bot.projects is None:
+        raise ValueError("No projects database configured (NOTION_PROJECTS_DB_ID).")
+    return await bot.projects.find(text)
+
+
 def wants_overdue(when: str | None) -> bool:
     """Whether `when` names the backlog rather than a day.
 
@@ -671,6 +689,7 @@ def _register(bot: AlliegentBot) -> None:
         when="오늘 / 내일 / 모레 / today / tomorrow / 2026-08-15 / 08-15 (default: today)",
         at="Time of day, e.g. 14:00 or 2pm. Without one it goes to the end of the day",
         category="Which category. Left out, it is guessed from how you filed this before",
+        project="Which project this belongs to",
         cal="Also put it in the calendar. Defaults to on for items with a time",
     )
     async def add_cmd(
@@ -679,6 +698,7 @@ def _register(bot: AlliegentBot) -> None:
         when: str | None = None,
         at: str | None = None,
         category: str | None = None,
+        project: str | None = None,
         cal: bool | None = None,
     ) -> None:
         await interaction.response.defer()
@@ -689,6 +709,7 @@ def _register(bot: AlliegentBot) -> None:
             # there would quietly leave the day unordered.
             clock = parse_time(at) or time_in_title(task)
             filed_as = await resolve_category(bot, category) if category else None
+            belongs_to = await resolve_project(bot, project) if project else None
         except ValueError as exc:
             await interaction.followup.send(f"⚠️ {exc}")
             return
@@ -696,10 +717,17 @@ def _register(bot: AlliegentBot) -> None:
         # Guessing only fills a gap: a category typed out is a decision, and
         # history should not get a vote against it.
         item = await bot.agenda.add_item(
-            task, day, at=clock, category=filed_as, infer_category=filed_as is None
+            task,
+            day,
+            at=clock,
+            category=filed_as,
+            infer_category=filed_as is None,
+            project_id=belongs_to.id if belongs_to else None,
         )
 
         filed = f" · {item.category}" if item.category else ""
+        if belongs_to:
+            filed += f" · {belongs_to.title}"
         when_text = reports.fmt_date(day)
         if clock:
             when_text += f" {reports.fmt_time(clock)}"
@@ -712,8 +740,7 @@ def _register(bot: AlliegentBot) -> None:
             lines.append(await _add_to_calendar(bot, item.title, day, clock))
         await interaction.followup.send("\n".join(lines))
 
-    @add_cmd.autocomplete("category")
-    async def _add_category_options(
+    async def _category_options(
         interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
         try:
@@ -727,6 +754,25 @@ def _register(bot: AlliegentBot) -> None:
             for name in names
             if typed in name.casefold()
         ][:25]
+
+    async def _project_options(
+        interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """Open projects, so the name never has to be typed from memory."""
+        try:
+            projects = await bot.projects.open_projects() if bot.projects else []
+        except Exception:
+            log.exception("project autocomplete failed")
+            projects = []
+        typed = current.casefold()
+        return [
+            app_commands.Choice(name=p.title, value=p.title)
+            for p in projects
+            if typed in p.title.casefold()
+        ][:25]
+
+    add_cmd.autocomplete("category")(_category_options)
+    add_cmd.autocomplete("project")(_project_options)
 
     @tree.command(name="done", description="Mark items done by their listed number")
     @app_commands.describe(
@@ -784,12 +830,15 @@ def _register(bot: AlliegentBot) -> None:
             "recoverable in Notion)"
         )
 
-    @tree.command(name="change", description="Change an item's day, time, category or name")
+    @tree.command(
+        name="change", description="Change an item's day, time, category, project or name"
+    )
     @app_commands.describe(
         numbers="Which items, by their listed number (3 or 3,5)",
         day="New day, e.g. 내일 / tomorrow / 08-20",
         at="New time: 14:00, 2pm, or 'none' to clear it and send it to the end",
         category="New category",
+        project="Which project it belongs to, or 'none' to unlink it",
         name="New title. One item at a time, since it replaces the title outright",
         frm="Which list they're on now: a day, or `overdue` (defaults to today)",
     )
@@ -800,13 +849,14 @@ def _register(bot: AlliegentBot) -> None:
         day: str | None = None,
         at: str | None = None,
         category: str | None = None,
+        project: str | None = None,
         name: str | None = None,
         frm: str | None = None,
     ) -> None:
         await interaction.response.defer()
-        if not any((day, at, category, name)):
+        if not any((day, at, category, project, name)):
             await interaction.followup.send(
-                "⚠️ Say what to change: `day`, `at`, `category` or `name`."
+                "⚠️ Say what to change: `day`, `at`, `category`, `project` or `name`."
             )
             return
 
@@ -821,6 +871,11 @@ def _register(bot: AlliegentBot) -> None:
             # of the other edits have been written.
             clock = parse_time(at) if at else None
             filed_as = await resolve_category(bot, category) if category else None
+            # "none" unlinks; any other word has to name a project that exists.
+            unlink = bool(project) and means_clear(project)
+            belongs_to = (
+                await resolve_project(bot, project) if project and not unlink else None
+            )
         except ValueError as exc:
             await interaction.followup.send(f"⚠️ {exc}")
             return
@@ -842,6 +897,10 @@ def _register(bot: AlliegentBot) -> None:
                 await bot.agenda.set_time(item.id, on, clock if at else item.at)
             if filed_as:
                 await bot.agenda.set_category(item.id, filed_as)
+            if project:
+                await bot.agenda.set_project(
+                    item.id, belongs_to.id if belongs_to else None
+                )
             if name:
                 await bot.agenda.rename(item.id, name)
 
@@ -854,9 +913,16 @@ def _register(bot: AlliegentBot) -> None:
             changes.append(f"time → **{reports.fmt_time(clock) if clock else 'end of day'}**")
         if filed_as:
             changes.append(f"category → **{filed_as}**")
+        if project:
+            changes.append(
+                f"project → **{belongs_to.title}**" if belongs_to else "project cleared"
+            )
 
         titles = ", ".join(f"**{item.title}**" for item in items)
         await interaction.followup.send(f"✏️ {titles} — " + ", ".join(changes))
+
+    change_cmd.autocomplete("category")(_category_options)
+    change_cmd.autocomplete("project")(_project_options)
 
     @tree.command(name="overdue", description="Show overdue, unfinished items")
     @app_commands.describe(
@@ -1131,7 +1197,9 @@ def _register(bot: AlliegentBot) -> None:
                 "⚠️ No projects database configured (NOTION_PROJECTS_DB_ID)."
             )
             return
-        projects = reports.project_list(await bot.projects.active())
+        projects = reports.project_list(
+            await bot.projects.active(bot.today(), bot.agenda)
+        )
         await _deliver(bot, interaction, projects, "projects")
 
     @tree.command(name="brief", description="Run the daily brief now")

@@ -13,7 +13,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | Incomplete alert | 14:00 and 19:30 daily | The day so far — what is left, what is done — and anything past its date. Two runs: one while the day can still change, one to close it out |
 | Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
 | Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
-| Stale project nudge | Wed 10:00 | Projects with no linked agenda activity for N days. Off until a projects database exists |
+| Stale project nudge | Wed 10:00 | Projects with no linked agenda activity for N days. Silent unless `NOTION_PROJECTS_DB_ID` is set |
 | English quiz | 20:30 daily | Five questions on today's lesson, answered by replying. Silent on days without a lesson |
 | Bonus rollover | 1 Apr and 1 Oct, 09:00 | Moves the half-yearly bonus from Expected into Savings once it has been paid |
 | ESPP rollover | Day after each purchase date, 09:00 | Moves ESPP contributions into Vested once they have become shares |
@@ -31,12 +31,12 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/today` | Show today's agenda |
 | `/tomorrow` | Show tomorrow's agenda, numbered |
 | `/status [when]` | Completion for a day and the week containing it, plus what's left on it. `when` defaults to today |
-| `/add <task> [when] [at] [category] [cal]` | Add an item, optionally at a time. `category` is offered from the database's own options; left out, it is inferred from how the same activity was filed before. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow` / `tmr` (any capitalisation), `2026-08-15`, `08-15`, or `08/15`; defaults to today. An item with a time also lands in the calendar — `cal` forces that on or off |
+| `/add <task> [when] [at] [category] [project] [cal]` | Add an item, optionally at a time. `category` is offered from the database's own options; left out, it is inferred from how the same activity was filed before. `project` is offered from the open projects, and linking is what makes a project's next action and last activity readable at all. `when` accepts `오늘` / `내일` / `모레`, `today` / `tomorrow` / `tmr` (any capitalisation), `2026-08-15`, `08-15`, or `08/15`; defaults to today. An item with a time also lands in the calendar — `cal` forces that on or off |
 | `/done <numbers> [when]` | Complete items by their listed number — one or several (`3` or `3,5`). `when` picks the day, or `overdue` for the backlog; defaults to today |
 | `/delete <numbers> [when]` | Move items to Notion's trash by number — recoverable there. Takes `when` the same way, `overdue` included |
-| `/change <numbers> [day] [at] [category] [name] [from]` | Change what an item is or when it is — any combination of day, time, category and title in one edit. The time is what orders an item within its day. `at` takes `none` to clear the time; `name` takes one item at a time. `from` picks the list the numbers came off, `overdue` included |
+| `/change <numbers> [day] [at] [category] [project] [name] [from]` | Change what an item is or when it is — any combination of day, time, category, project and title in one edit. The time is what orders an item within its day. `at` and `project` both take `none` to clear the value; `name` takes one item at a time. `from` picks the list the numbers came off, `overdue` included |
 | `/overdue` | Overdue, unfinished items — numbered, so they can be cleared |
-| `/projects` | Active projects and their next actions |
+| `/projects` | Active projects and their next actions, both read off the agenda items linked to them |
 | `/brief` | Run the daily brief now |
 | `/assets show` · `/assets trend` | Latest snapshot with what changed, and the recent history |
 | `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `spent`, `sales`, `summary` |
@@ -112,7 +112,7 @@ Fill in `.env`, then dump your real Notion schema:
 uv run python scripts/inspect_notion.py
 ```
 
-It prints every property with its type, plus a ready-to-paste TOML block. Copy that into the `[agenda.props]` and `[projects.props]` tables in `alliegent.toml` — nothing works until those names match the properties your databases actually have. The agenda mappings shipped in the file match the schema documented below; the projects ones are untested, since no projects database exists yet.
+It prints every property with its type, plus a ready-to-paste TOML block. Copy that into the `[agenda.props]` and `[projects.props]` tables in `alliegent.toml` — nothing works until those names match the properties your databases actually have. `[projects.props]` needs only the title and the status: what a project is waiting on and when it last moved are derived from the agenda items linked to it, not read from columns of the Project database. What does have to match is `agenda.props.project`, the relation that carries those links.
 
 Preview any job in the terminal without posting to Discord:
 
@@ -132,6 +132,12 @@ uv run python -m alliegent.cli brief --send
 
 ```bash
 uv run python -m alliegent.cli scaffold --commit
+```
+
+`feeds` is a check rather than a job: it fetches each news feed and prints what came back, so a publication missing from the digest can be told apart from one that simply had a quiet day. It needs no Notion token, and exits non-zero if any feed returned nothing usable:
+
+```bash
+uv run python -m alliegent.cli feeds
 ```
 
 Start the bot:
@@ -288,6 +294,8 @@ A weekly snapshot, typed in by hand. Korean banks have no personal API worth bui
 **`Vested` is company stock actually owned** — vested RSUs and ESPP shares once bought. They sit in the same brokerage account as the same shares, so they share a column. ESPP contributions that have not been used to buy anything yet are `Expected`. When an offering period closes the purchase price is set, and the next day the contributions move into `Vested`. The dates are listed in `espp_purchase_dates` rather than recurring, because the plan sets each cycle's dates and they drift. What moves is the amount paid in; the shares are usually worth more, so `Vested` needs updating to their market value once they arrive.
 
 The bonus is paid at the end of September and March, and on the first of the following month it moves into `Savings` on its own. The move is written as that day's row with every other figure carried over, never as an edit to an earlier row: that row recorded what was held on its own date. It is announced in `#assets` with the amounts, since balances are also entered by hand — once the bonus is in `Savings`, adding it again from the bank balance would count it twice.
+
+**A rollover due before the next Monday is announced in Monday's prompt.** The move takes whatever the bucket holds when it runs, which between two Mondays is the figure typed into Monday's row — so an estimate left in `Bonus` on the 29th is the estimate that lands in `Savings` on the 1st. The warning names both buckets and the date, and says not to add the money to the target by hand, which is the way to count it twice. It appears only in the week the move falls in: a warning repeated for a month is one that is no longer read.
 
 Monday's prompt carries last week's figures rather than presenting a blank form: editing numbers is faster than recalling them, and a bucket you forgot shows up as one that did not change. Recording twice in the same week corrects that week's row instead of adding a second — otherwise the next comparison would measure a change of zero.
 

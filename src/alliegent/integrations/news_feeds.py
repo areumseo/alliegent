@@ -46,6 +46,10 @@ MAX_PER_FEED = 15
 # more than it adds.
 MAX_TOTAL = 45
 
+# Named rather than anonymous: a publication that starts refusing the digest
+# refuses this string, and the check and the job have to send the same one.
+USER_AGENT = "alliegent/1.0 (personal news digest)"
+
 _TAG = re.compile(r"<[^>]+>")
 _WS = re.compile(r"\s+")
 
@@ -152,7 +156,7 @@ async def entries_for(
     what makes "yesterday" mean the day the reader just had rather than a UTC
     window that clips the evening off it.
     """
-    headers = {"User-Agent": "alliegent/1.0 (personal news digest)"}
+    headers = {"User-Agent": USER_AGENT}
     async with httpx.AsyncClient(timeout=20, headers=headers) as client:
         gathered = await asyncio.gather(*(_fetch(client, url) for url in feeds))
 
@@ -188,6 +192,47 @@ def stale_feeds(entries: list[Entry], *, feeds: tuple[str, ...] = FEEDS) -> list
     """
     heard = {entry.source for entry in entries}
     return [url for url in feeds if _source_name(url) not in heard]
+
+
+@dataclass(frozen=True)
+class FeedHealth:
+    url: str
+    source: str
+    detail: str  # "ok", an HTTP status, or the exception that stopped it
+    entries: int
+    newest: datetime | None
+
+    @property
+    def ok(self) -> bool:
+        return self.detail == "ok"
+
+
+async def _health(client: httpx.AsyncClient, url: str) -> FeedHealth:
+    source = _source_name(url)
+    try:
+        response = await client.get(url, follow_redirects=True)
+    except Exception as exc:
+        return FeedHealth(url, source, type(exc).__name__, 0, None)
+    if response.status_code != 200:
+        return FeedHealth(url, source, f"HTTP {response.status_code}", 0, None)
+    entries = parse_feed(response.text, source=source)
+    if not entries:
+        return FeedHealth(url, source, "no entries", 0, None)
+    return FeedHealth(url, source, "ok", len(entries), max(e.published for e in entries))
+
+
+async def check(feeds: tuple[str, ...] = FEEDS) -> list[FeedHealth]:
+    """Fetch every feed once and report what actually came back.
+
+    `stale_feeds` can only say that a publication contributed nothing to one
+    morning's digest, and that reads identically whether the feed has moved,
+    is refusing this user agent, or simply had a quiet day. Deciding what to
+    do about a silent publication needs the difference, and needs it on
+    demand rather than at 09:00 tomorrow — so this is what `cli feeds` runs.
+    """
+    headers = {"User-Agent": USER_AGENT}
+    async with httpx.AsyncClient(timeout=20, headers=headers) as client:
+        return list(await asyncio.gather(*(_health(client, url) for url in feeds)))
 
 
 def recent_window(today: date) -> date:

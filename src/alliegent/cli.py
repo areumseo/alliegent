@@ -6,6 +6,7 @@ can be checked before letting the scheduler loose:
     uv run python -m alliegent.cli brief
     uv run python -m alliegent.cli scaffold          # preview only
     uv run python -m alliegent.cli scaffold --commit # actually create rows
+    uv run python -m alliegent.cli feeds             # what each news feed returns
 
 Add --send to post the result to the Discord channel the job would normally
 use. That verifies the token, the channel IDs, and the bot's permissions in
@@ -24,6 +25,10 @@ from .integrations.notion import NotionClient, NotionError
 from .jobs import Jobs
 
 JOBS = ("brief", "news", "incomplete", "planning", "scaffold", "stale", "review")
+
+# Diagnostics rather than jobs: they report on the setup instead of producing
+# a message, so they have nothing to post and no channel to post it to.
+CHECKS = ("feeds",)
 
 # Which channel each job posts to, mirroring jobs.py.
 JOB_CHANNEL = {
@@ -73,8 +78,45 @@ async def send_to_discord(secrets, kind: str, message: str) -> None:
         raise failure
 
 
+async def check_feeds(config) -> int:
+    """Report what each news feed is actually returning right now.
+
+    The morning log can only say a publication was silent, which reads the
+    same whether its feed moved, started refusing this user agent, or just had
+    a quiet day. This is the answer to "is VentureBeat dead or was yesterday
+    slow?", available at the moment the question comes up.
+    """
+    from .integrations.news_feeds import FEEDS, check
+
+    print(f"Checking {len(FEEDS)} feeds\n")
+    broken = []
+    for health in sorted(await check(), key=lambda h: h.source):
+        newest = (
+            health.newest.astimezone(config.tz).strftime("%Y-%m-%d %H:%M")
+            if health.newest
+            else "-"
+        )
+        mark = "ok " if health.ok else "!! "
+        print(f"{mark}{health.source:<26}{health.detail:<18}{health.entries:>3}  {newest}")
+        if not health.ok:
+            broken.append(health)
+
+    if broken:
+        print(
+            f"\n{len(broken)} feed(s) returned nothing usable. Find the current URL "
+            "or drop the publication, in integrations/news_feeds.py — a feed left "
+            "in the list stays silent instead of failing."
+        )
+    return 1 if broken else 0
+
+
 async def _run(name: str, commit: bool, send: bool) -> int:
     config = get_config()
+    # Before the secrets: a check needs the network, not a Notion token, and
+    # refusing to run one because .env is incomplete helps nobody.
+    if name == "feeds":
+        return await check_feeds(config)
+
     secrets = get_secrets()
     secrets.require("notion_token", "notion_agenda_db_id")
 
@@ -148,7 +190,7 @@ async def _run(name: str, commit: bool, send: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="alliegent.cli", description=__doc__)
-    parser.add_argument("job", choices=JOBS)
+    parser.add_argument("job", choices=(*JOBS, *CHECKS))
     parser.add_argument(
         "--commit",
         action="store_true",

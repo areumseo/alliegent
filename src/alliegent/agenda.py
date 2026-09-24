@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 
 from .config import Config
@@ -235,6 +235,30 @@ class AgendaService:
     async def items_on(self, day: date) -> list[AgendaItem]:
         return await self.items_between(day, day)
 
+    async def items_for_project(self, project_id: str) -> list[AgendaItem]:
+        """Every agenda item linked to a project, through the relation.
+
+        Asked of the relation rather than scanned out of a date window, which
+        is what the stale-project job used to do: a project's last activity
+        can be any distance in the past, and a window wide enough to find it
+        reliably is a window too wide to keep reading every morning.
+
+        Empty when no relation is configured — no link means no evidence, not
+        an empty project.
+        """
+        if not self.props.project:
+            return []
+        ds = await self.data_source_id()
+        await self.status_type()
+        query_filter = {
+            "property": self.props.project,
+            "relation": {"contains": project_id},
+        }
+        items = [self._to_item(page) async for page in self._client.query(
+            ds, filter=query_filter, sorts=self._sorts()
+        )]
+        return sorted(items, key=AgendaItem.sort_key)
+
     async def overdue(self, today: date) -> list[AgendaItem]:
         """Unfinished items dated before today — the ones that quietly pile up."""
         ds = await self.data_source_id()
@@ -337,6 +361,19 @@ class AgendaService:
     async def rename(self, page_id: str, title: str) -> None:
         await self._client.update_page(page_id, {self.props.title: n.title(title)})
 
+    async def set_project(self, page_id: str, project_id: str | None) -> None:
+        """Link an item to a project, or clear the link with None.
+
+        Everything a project knows about itself is derived from these links,
+        so this is the one write that makes the projects side work at all.
+        """
+        if not self.props.project:
+            raise ValueError("This agenda has no project relation configured.")
+        await self._client.update_page(
+            page_id,
+            {self.props.project: n.relation([project_id] if project_id else [])},
+        )
+
     async def set_category(self, page_id: str, category: str) -> None:
         if not self.props.category:
             raise ValueError("This agenda has no Category column.")
@@ -415,9 +452,46 @@ class ProjectService:
             last_activity=n.read_date(page, p.last_activity) if p.last_activity else None,
         )
 
-    async def active(self) -> list[Project]:
-        """Projects not marked done. Filtering happens client-side because the
-        status property may be a checkbox, select, or status."""
+    async def _with_activity(
+        self, project: Project, today: date, agenda: AgendaService
+    ) -> Project:
+        """Fill in what a project is waiting on, and when it last moved.
+
+        Both are read off the linked agenda rows rather than out of columns in
+        the Project database. A "Next Action" typed by hand is right until the
+        work moves on and says nothing when it does; a "Last Active" date is
+        only correct on the days someone remembers to touch it, which are
+        precisely the days the project was not being neglected. Deriving them
+        also means this app never has to write to the Project database.
+
+        A configured column is still read, and survives as the fallback for a
+        project with nothing linked to it yet.
+        """
+        items = await agenda.items_for_project(project.id)
+        if not items:
+            return project
+
+        # Sorted by `AgendaItem.sort_key`, so the first unfinished item is the
+        # soonest — an overdue one included, since the thing already late is
+        # the thing to do next.
+        waiting = next((item for item in items if not item.done), None)
+        # Only days that have happened: work scheduled for next week is not
+        # evidence that the project moved this week.
+        worked = [item.day for item in items if item.day is not None and item.day <= today]
+        return replace(
+            project,
+            next_action=waiting.title if waiting else project.next_action,
+            last_activity=max(worked) if worked else project.last_activity,
+        )
+
+    async def open_projects(self) -> list[Project]:
+        """Projects not marked done, as the Project database itself has them.
+
+        One query and no agenda reads, which is what makes it safe to call
+        from an autocomplete. `active` is this list with the activity filled
+        in. Filtering happens client-side because the status property may be a
+        checkbox, select, or status.
+        """
         ds = await self.data_source_id()
         done_value = self._cfg.projects.status_values["done"].casefold()
         projects = [self._to_project(page) async for page in self._client.query(ds)]
@@ -427,36 +501,65 @@ class ProjectService:
             if p.status is None or p.status.casefold() != done_value
         ]
 
+    async def active(self, today: date, agenda: AgendaService) -> list[Project]:
+        """Open projects, each with its next action and last activity derived.
+
+        Costs one agenda query per open project, so it is for the places that
+        actually show those two columns: the brief, /projects, and the stale
+        check.
+        """
+        projects = await self.open_projects()
+        if not agenda.props.project:
+            return projects
+        return [await self._with_activity(p, today, agenda) for p in projects]
+
+    async def find(self, name: str) -> Project:
+        """The open project a typed name refers to.
+
+        Matched the way the category argument is: exactly if possible, then on
+        a unique substring, so the autocomplete's spelling is not something to
+        reproduce by hand. An ambiguous name is refused rather than guessed —
+        linking an item to the wrong project is invisible afterwards.
+        """
+        projects = await self.open_projects()
+        typed = name.strip().casefold()
+        exact = [p for p in projects if p.title.casefold() == typed]
+        if exact:
+            return exact[0]
+        partial = [p for p in projects if typed and typed in p.title.casefold()]
+        if len(partial) == 1:
+            return partial[0]
+        known = ", ".join(p.title for p in projects) or "none"
+        if len(partial) > 1:
+            raise ValueError(
+                f"{name!r} matches more than one project: "
+                + ", ".join(p.title for p in partial)
+            )
+        raise ValueError(f"No open project called {name!r}. Open projects: {known}.")
+
     async def stale(
         self, today: date, agenda: AgendaService, *, days: int | None = None
     ) -> list[tuple[Project, date | None]]:
         """Active projects with no agenda activity in the last `days`.
 
         Activity means an agenda item linked to the project via the relation
-        property. If the agenda has no project relation configured, this falls
-        back to the project's own last-activity date, and returns nothing when
-        neither is available — rather than nagging about every project.
+        property, which `active` has already resolved. If the agenda has no
+        project relation configured, this falls back to the project's own
+        last-activity date, and returns nothing when neither is available —
+        rather than nagging about every project.
+
+        The date reported is the real one however far back it is: the window
+        decides whether a project is stale, not how far back this can see.
         """
         window = days if days is not None else self._cfg.projects.stale_after_days
         cutoff = today - timedelta(days=window)
-        projects = await self.active()
-
-        last_seen: dict[str, date] = {}
-        if agenda.props.project:
-            recent = await agenda.items_between(cutoff, today)
-            for item in recent:
-                if item.day is None:
-                    continue
-                for pid in item.project_ids:
-                    if pid not in last_seen or item.day > last_seen[pid]:
-                        last_seen[pid] = item.day
 
         result: list[tuple[Project, date | None]] = []
-        for project in projects:
-            latest = last_seen.get(project.id) or project.last_activity
+        for project in await self.active(today, agenda):
+            latest = project.last_activity
             if latest is None:
                 # No signal at all — only report when the relation is wired up,
-                # where "no linked item in the window" is genuine evidence.
+                # where "nothing linked to it, ever" is genuine evidence.
                 if agenda.props.project:
                     result.append((project, None))
                 continue

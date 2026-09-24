@@ -150,9 +150,11 @@ class AgendaProps(BaseModel):
 class ProjectProps(BaseModel):
     title: str = "Name"
     status: str = "Status"
+    # Both are derived from the linked agenda rows when left empty, which is
+    # the default and the better answer — see ProjectService._with_activity.
+    # Name a column here only if you keep one up to date by hand.
     next_action: str = ""
     last_activity: str = ""
-    related_schedule: str = ""
 
 class Schedule(BaseModel):
     daily_brief: str = "08:00"

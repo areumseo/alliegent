@@ -52,7 +52,7 @@ date = "Date"           # date property
 status = "Status"       # status OR select OR checkbox — auto-detected
 recurring = "" # checkbox marking items that repeat weekly
 category = "Category"   # select; copied onto scaffolded items
-project = "Project DB"            # relation to a projects DB; none exists yet
+project = "Project DB"  # relation to the projects DB; "" disables the link
 
 [agenda.status_values]
 # Used when `status` is a status/select property. Ignored for checkbox.
@@ -67,9 +67,13 @@ stale_after_days = 7
 [projects.props]
 title = "Name"
 status = "Status"
-next_action = ""   # optional; "" to disable
-last_activity = "Last Active"            # optional date prop; "" = derive from agenda rows
-related_schedule = "Related Schedule"
+# Both are read off the agenda rows linked to a project, which is what the
+# empty values mean. The Project DB has a "Next Action" relation and a "Last
+# Active" date, but neither is maintained by hand often enough to be true:
+# Last Active read 2026-08-13 on a project worked on that same week. Name a
+# column here only if you do keep one current.
+next_action = ""
+last_activity = ""
 
 [projects.status_values]
 active = "In progress"

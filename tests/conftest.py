@@ -119,11 +119,14 @@ class FakeNotionClient:
         # different date ranges and compares them, so a fake that ignored
         # filters would make those tests meaningless.
         bounds = _date_bounds(filter)
+        linked = _relation_bound(filter)
         matched = []
         for page in self.pages.get(data_source_id, []):
             if page.get("in_trash"):
                 continue
             if bounds and not _within(page, bounds):
+                continue
+            if linked and not _links_to(page, *linked):
                 continue
             matched.append(page)
 
@@ -160,6 +163,27 @@ def _date_bounds(filter: dict[str, Any] | None) -> dict[str, str] | None:
         for op, value in (clause.get("date") or {}).items():
             bounds[op] = value
     return bounds or None
+
+
+def _relation_bound(filter: dict[str, Any] | None) -> tuple[str, str] | None:
+    """The (property, page id) a `relation.contains` filter asks for.
+
+    Applied for real, like the date bounds: a project's activity is read
+    through this filter now, so a fake that ignored it would return every
+    agenda row for every project and prove nothing.
+    """
+    if not filter:
+        return None
+    for clause in filter.get("and") or [filter]:
+        contains = (clause.get("relation") or {}).get("contains")
+        if contains:
+            return clause["property"], contains
+    return None
+
+
+def _links_to(page: dict[str, Any], prop: str, page_id: str) -> bool:
+    value = (page.get("properties", {}).get(prop) or {}).get("relation") or []
+    return any(entry.get("id") == page_id for entry in value)
 
 
 def _within(page: dict[str, Any], bounds: dict[str, str]) -> bool:

@@ -12,7 +12,12 @@ import pytest
 
 from alliegent.agenda import AgendaService, ProjectService
 from alliegent.config import Config, Secrets
-from alliegent.integrations.discord_bot import AlliegentBot, parse_numbers
+from alliegent.integrations.discord_bot import (
+    AlliegentBot,
+    means_clear,
+    parse_numbers,
+    resolve_project,
+)
 
 from .conftest import FakeNotionClient
 
@@ -97,6 +102,7 @@ def test_add_command_options():
         "when",
         "at",
         "category",
+        "project",
         "cal",
     }
 
@@ -358,6 +364,31 @@ def test_the_core_routes_are_always_required():
     assert {"agenda", "review", "news"} <= set(enabled_routes(Secrets()))
 
 
+# -- projects --------------------------------------------------------------
+
+
+async def test_naming_a_project_without_a_projects_database_is_refused():
+    """The same refusal /projects gives, rather than an AttributeError in the
+    log and a silent failure in the channel."""
+    client = FakeNotionClient()
+    config = Config()
+    bot = AlliegentBot(
+        config=config,
+        agenda=AgendaService(client, config, "agenda-db"),
+        projects=None,
+        secrets=Secrets(discord_channel_id=123),
+    )
+    with pytest.raises(ValueError, match="NOTION_PROJECTS_DB_ID"):
+        await resolve_project(bot, "뭐든지")
+
+
+def test_the_words_that_clear_a_value_are_the_same_everywhere():
+    """`at` has taken 'none' to mean "take it off" since /time; `project`
+    reuses the vocabulary rather than inventing a second one."""
+    assert means_clear("none") and means_clear("없음") and means_clear("-")
+    assert not means_clear("블로그")
+
+
 # -- /change ---------------------------------------------------------------
 # The one command for editing an item: the day and the time it replaced
 # /move and /time with, plus the category and the title, which had no command
@@ -371,6 +402,7 @@ def test_change_covers_every_editable_field():
         "day",
         "at",
         "category",
+        "project",
         "name",
         "from",
     }

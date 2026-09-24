@@ -187,6 +187,60 @@ def test_the_first_prompt_explains_where_to_write():
     assert "Notion" in text
 
 
+# -- warning about a rollover that is about to take this week's number ------
+# The bonus moves on the first of April and October, and it moves whatever is
+# in Bonus at the time -- which, between two Mondays, is the figure typed into
+# Monday's row. That makes Monday the only moment the warning is useful.
+
+
+def test_a_rollover_inside_the_week_is_warned_about():
+    schedule = Config().schedule
+    pending = A.moves_before(date(2026, 9, 28), schedule)
+    assert [(m.source, m.target, m.day) for m in pending] == [
+        ("Bonus", "Savings", date(2026, 10, 1))
+    ]
+
+
+def test_a_rollover_further_off_is_not():
+    """A warning repeated for weeks is one that is no longer read."""
+    assert A.moves_before(date(2026, 9, 21), Config().schedule) == []
+
+
+def test_todays_rollover_is_left_to_announce_itself():
+    """It runs this morning and posts its own message; warning about a move
+    that has already happened is worse than saying nothing."""
+    assert A.moves_before(date(2026, 10, 1), Config().schedule) == []
+
+
+def test_an_espp_purchase_is_warned_about_the_day_after_the_period_closes():
+    schedule = Config().schedule
+    schedule.espp_purchase_dates = ["2026-09-18"]
+    pending = A.moves_before(MONDAY, schedule)
+    assert [(m.source, m.day) for m in pending] == [("ESPP", date(2026, 9, 19))]
+
+
+def test_a_disabled_rollover_is_never_warned_about():
+    schedule = Config().schedule
+    schedule.bonus_rollover_time = ""
+    assert A.moves_before(date(2026, 9, 28), schedule) == []
+
+
+def test_the_warning_names_both_buckets_and_the_date():
+    before = A.Snapshot("p0", date(2026, 9, 21), {"Savings": 1000, "Bonus": 500})
+    text = A.prompt_message(
+        before,
+        date(2026, 9, 28),
+        pending=A.moves_before(date(2026, 9, 28), Config().schedule),
+    )
+    assert "Bonus" in text and "Savings" in text and "2026-10-01" in text
+    assert "twice" in text  # the double-counting trap, said out loud
+
+
+def test_an_ordinary_week_carries_no_warning():
+    before = A.Snapshot("p0", date(2026, 9, 7), {"Savings": 1000})
+    assert "⚠️" not in A.prompt_message(before, MONDAY)
+
+
 def test_the_trend_needs_two_points_before_it_reports_a_change():
     one = [A.Snapshot("p1", MONDAY, {"Savings": 1000})]
     assert "Change" not in A.trend_message(one)
