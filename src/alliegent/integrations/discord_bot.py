@@ -690,7 +690,7 @@ def _register(bot: AlliegentBot) -> None:
         at="Time of day, e.g. 14:00 or 2pm. Without one it goes to the end of the day",
         category="Which category. Left out, it is guessed from how you filed this before",
         project="Which project this belongs to",
-        cal="Also put it in the calendar. Defaults to on for items with a time",
+        cal="Also put it in the calendar. Off unless you say so",
     )
     async def add_cmd(
         interaction: discord.Interaction,
@@ -699,7 +699,7 @@ def _register(bot: AlliegentBot) -> None:
         at: str | None = None,
         category: str | None = None,
         project: str | None = None,
-        cal: bool | None = None,
+        cal: bool = False,
     ) -> None:
         await interaction.response.defer()
         try:
@@ -733,10 +733,12 @@ def _register(bot: AlliegentBot) -> None:
             when_text += f" {reports.fmt_time(clock)}"
         lines = [f"✅ Added — **{item.title}** ({when_text}{filed})"]
 
-        # An item with a time is something that happens at an hour, which is
-        # what a calendar is for; a bare task is not. `cal` overrides both
-        # ways, since some timed items are still just tasks.
-        if cal if cal is not None else clock is not None:
+        # Only when asked. Inferring it from the time looked right -- an item
+        # at an hour is what a calendar is for -- but most timed rows turn out
+        # to be shifts and classes already in the calendar, or chores that
+        # merely happen at a time, and every one of them had to be deleted
+        # twice. Saying `cal: True` is less work than that.
+        if cal:
             lines.append(await _add_to_calendar(bot, item.title, day, clock))
         await interaction.followup.send("\n".join(lines))
 
