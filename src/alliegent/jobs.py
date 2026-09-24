@@ -88,7 +88,9 @@ class Jobs:
         today = self.today()
         todays = await self.agenda.items_on(today)
         overdue = await self.agenda.overdue(today)
-        active = await self.projects.active() if self.projects else []
+        active = (
+            await self.projects.active(today, self.agenda) if self.projects else []
+        )
         events, calendar_problem = await self.calendar_on(today)
         return reports.daily_brief(
             today, todays, overdue, active, events, calendar_problem=calendar_problem
