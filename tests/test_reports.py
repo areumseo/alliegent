@@ -719,3 +719,26 @@ def test_every_header_count_matches_the_rows_below_it():
         # Both sections carry the day's own numbers, which is what /done
         # resolves -- so each skips the other's rows rather than restarting.
         assert [n for n in range(1, 6) if row(text, n)] == [1, 2, 3, 4, 5], text
+
+
+# -- rules inside a table --------------------------------------------------
+# A None row draws the same rule as the one under the header. It is for rows
+# that must not read as adding up with the rows above them.
+
+
+def test_a_none_row_is_drawn_as_the_header_rule():
+    lines = reports._table(("A", "B"), [("x", "1"), None, ("total", "1")], flex=0)
+    header_rule = lines[2]
+    assert set(header_rule) == {"-"}
+    assert lines[4] == header_rule
+
+
+def test_a_rule_takes_no_part_in_the_widths():
+    with_rule = reports._table(("A", "B"), [("x", "1"), None], flex=0)
+    without = reports._table(("A", "B"), [("x", "1")], flex=0)
+    assert with_rule[:4] == without[:4]
+
+
+def test_a_table_of_nothing_but_rules_is_no_table():
+    """Empty means no rows to show, and a rule is not a row."""
+    assert reports._table(("A",), [None, None], flex=0) == []

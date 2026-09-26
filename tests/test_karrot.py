@@ -453,3 +453,84 @@ def test_a_purchase_is_a_kind_the_database_accepts():
     """`add` validates against KINDS, so leaving Purchase out of it would make
     /karrot bought refuse every row it was given."""
     assert K.PURCHASE in K.KINDS and K.PURCHASE not in K.SELLING_KINDS
+
+
+# -- /karrot summary -------------------------------------------------------
+# One table, laid out like /karrot sales. The status rows partition every item
+# and add up to All; This month and Unpaid are slices of Sold, below a rule.
+
+
+def summary_data(**overrides):
+    data = dict(
+        total=12, sold=6, sold_amount=90_000, sent=1, sent_amount=8_000,
+        reserved=2, reserved_amount=21_000, listed=2, listed_amount=30_000,
+        not_listed=1, not_listed_amount=5_000, month=3, month_amount=40_000,
+        unpaid=1, unpaid_amount=7_000,
+    )
+    data.update(overrides)
+    return data
+
+
+def table_rows(text: str) -> dict[str, tuple[str, str]]:
+    """Label -> (n, amount), read back off the rendered table."""
+    rows = {}
+    for line in text.splitlines():
+        parts = line.rsplit(maxsplit=2)
+        if len(parts) == 3 and parts[1].isdigit():
+            rows[parts[0]] = (parts[1], parts[2])
+    return rows
+
+
+def test_the_summary_is_one_aligned_table():
+    text = K.summary_message(summary_data(), date(2026, 9, 26))
+    assert text.count("```") == 2
+    assert "•" not in text
+
+
+def test_the_status_rows_add_up_to_all():
+    """The reason All can sit under them: they are every item, once each."""
+    rows = table_rows(K.summary_message(summary_data(), date(2026, 9, 26)))
+    statuses = ("Sold", "Sent", "Reserved", "Listed", "Candidates")
+    assert sum(int(rows[s][0]) for s in statuses) == int(rows["All"][0])
+
+
+def test_reserved_has_its_own_row_and_its_own_amount():
+    """It used to read "Listed 2 (reserved 2)" -- as if a part of Listed --
+    and its prices appeared nowhere in the message."""
+    rows = table_rows(K.summary_message(summary_data(), date(2026, 9, 26)))
+    assert rows["Reserved"] == ("2", "21,000")
+    assert rows["Listed"] == ("2", "30,000")
+
+
+def test_all_has_a_count_and_no_amount():
+    """Summed, it would add money received to asking prices."""
+    rows = table_rows(K.summary_message(summary_data(), date(2026, 9, 26)))
+    assert rows["All"] == ("12", "-")
+
+
+def test_this_month_and_unpaid_sit_below_their_own_rule():
+    """They are slices of Sold. Above a rule they would read as more items."""
+    lines = K.summary_message(summary_data(), date(2026, 9, 26)).splitlines()
+    rules = [i for i, line in enumerate(lines) if line and set(line) == {"-"}]
+    month = next(i for i, line in enumerate(lines) if line.startswith("This month"))
+    everything_else = next(i for i, line in enumerate(lines) if line.startswith("All"))
+    assert rules[-1] < month and rules[-1] > everything_else
+
+
+def test_an_empty_status_keeps_its_row():
+    """A table whose rows come and go shifts under the eye from one run to
+    the next; a zero is information."""
+    rows = table_rows(K.summary_message(summary_data(sent=0, sent_amount=0), date(2026, 9, 26)))
+    assert rows["Sent"] == ("0", "0")
+
+
+async def test_the_service_counts_reserved_prices():
+    _, svc = service(
+        [
+            page("p1", "예약된 것", status="Reserved", price=4_000),
+            page("p2", "올린 것", status="Listed", price=6_000),
+        ]
+    )
+    data = await svc.summary(TODAY)
+    assert data["reserved_amount"] == 4_000
+    assert data["listed_amount"] == 6_000
