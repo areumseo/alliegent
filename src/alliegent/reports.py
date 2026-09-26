@@ -124,7 +124,7 @@ def _rows(
 
 def _table(
     header: tuple[str, ...],
-    rows: list[tuple[str, ...]],
+    rows: list[tuple[str, ...] | None],
     *,
     flex: int,
     right: tuple[int, ...] = (),
@@ -134,10 +134,14 @@ def _table(
     `flex` names the one column allowed to give way when the table would pass
     TABLE_COLS -- the free-text one, which is the only column whose width is
     not a property of the data. `right` names the columns aligned right.
+
+    A None row is a rule, the same one drawn under the header. It is for rows
+    that must not be read as adding up with the ones above them: a total, or
+    a figure that is a slice of a row already shown.
     """
-    if not rows:
+    if not any(rows):
         return []
-    cells = [header, *rows]
+    cells = [header, *(row for row in rows if row is not None)]
     widths = [max(_width(row[col]) for row in cells) for col in range(len(header))]
 
     # Down to a floor: past that a truncated title stops being recognisable,
@@ -157,7 +161,9 @@ def _table(
     # right-stripped, so a short last cell -- an empty category, a header
     # narrower than its column -- would pull the rule in with it.
     span = sum(widths) + len(widths) - 1
-    return ["```", line(header), "-" * span, *(line(row) for row in rows), "```"]
+    rule = "-" * span
+    body = [rule if row is None else line(row) for row in rows]
+    return ["```", line(header), rule, *body, "```"]
 
 
 def _task_table(rows: list[tuple[str, ...]], when_header: str) -> list[str]:

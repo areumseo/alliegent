@@ -387,6 +387,9 @@ class KarrotService:
             "listed": len(listed),
             "listed_amount": total(listed),
             "reserved": len(reserved),
+            # Reserved is its own status, not a kind of Listed, so its prices
+            # are in neither listed_amount nor anywhere else without this.
+            "reserved_amount": total(reserved),
             "sent": len(sent),
             "sent_amount": total(sent),
             "not_listed": len(waiting),
@@ -518,7 +521,9 @@ def weekly_message(
     return "\n".join(out)
 
 
-def _money_table(header: tuple[str, ...], rows: list[tuple[str, ...]]) -> list[str]:
+def _money_table(
+    header: tuple[str, ...], rows: list[tuple[str, ...] | None]
+) -> list[str]:
     """The same fixed-width table the agenda and the assets use.
 
     Shared rather than reimplemented: ASCII inside the block, widths measured
@@ -612,18 +617,37 @@ def candidates_message(items: list[Item]) -> str | None:
 
 
 def summary_message(data: dict, today: date) -> str:
-    out = [
-        f"🥕 **Summary — {today.isoformat()}**",
-        "",
-        f"{data['total']} items",
-        f"• Sold {data['sold']} · ₩{data['sold_amount']:,}",
-        f"• Listed {data['listed']} · ₩{data['listed_amount']:,}"
-        + (f" (reserved {data['reserved']})" if data["reserved"] else ""),
+    """The whole database in one table, laid out like `/karrot sales`.
+
+    The status rows partition every item, so they add up to All -- which is
+    why Reserved has its own row: it is a status of its own, and folded into
+    Listed as "(reserved 2)" its prices were in no total at all. Furthest
+    along first, so Sold keeps the top line it always had.
+
+    All has no amount. Summed, it would add money received to asking prices,
+    and that figure answers no question. This month and Unpaid sit under a
+    second rule because they are slices of Sold, not more items: above the
+    rule they would read as adding to the count.
+    """
+
+    def row(label: str, count: int, amount: int | None) -> tuple[str, str, str]:
+        return (label, str(count), "-" if amount is None else f"{amount:,}")
+
+    rows: list[tuple[str, ...] | None] = [
+        row("Sold", data["sold"], data["sold_amount"]),
+        row("Sent", data["sent"], data["sent_amount"]),
+        row("Reserved", data["reserved"], data["reserved_amount"]),
+        row("Listed", data["listed"], data["listed_amount"]),
+        row("Candidates", data["not_listed"], data["not_listed_amount"]),
+        None,
+        row("All", data["total"], None),
+        None,
+        row("This month", data["month"], data["month_amount"]),
+        row("Unpaid", data["unpaid"], data["unpaid_amount"]),
     ]
-    if data["sent"]:
-        out.append(f"• Sent {data['sent']} · ₩{data['sent_amount']:,}")
-    if data["not_listed"]:
-        out.append(f"• Candidates {data['not_listed']} · ₩{data['not_listed_amount']:,}")
-    out.append(f"• This month {data['month']} · ₩{data['month_amount']:,}")
-    out.append(f"• Unpaid {data['unpaid']} · ₩{data['unpaid_amount']:,}")
-    return "\n".join(out)
+    return "\n".join(
+        [
+            f"🥕 **Summary — {today.isoformat()}**",
+            *_money_table(("KRW", "n", "Amount"), rows),
+        ]
+    )
