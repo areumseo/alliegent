@@ -394,6 +394,56 @@ def test_a_streak_short_of_the_limit_is_counted_out_loud():
     assert "Under Low this month (2 of 3 before revising)" in render(streak=2)
 
 
+# -- cash saved against the target -----------------------------------------
+# Spending that changes month to month is hard to average; what it leaves in
+# Savings is measured already.
+
+
+def cash_render(p):
+    before = snap("2026-10-05", Savings=500)
+    after = snap("2026-11-02", Savings=640)
+    return render(p=p, s=after, previous=before)
+
+
+def test_a_month_that_met_the_cash_target_says_so_plainly():
+    text = cash_render(plan(cash_target=120))
+    assert "Cash saved ₩140 of the ₩120 target (117%)" in text
+    assert "⚠️ Cash" not in text
+
+
+def test_a_short_month_is_flagged():
+    text = cash_render(plan(cash_target=150))
+    assert "⚠️ Cash saved ₩140 of the ₩150 target (93%)" in text
+    assert "spending ran ahead" in text
+
+
+def test_a_vesting_month_is_shown_but_not_judged():
+    """The tax on the RSU comes out of Savings, so a short month there says
+    nothing about spending."""
+    text = cash_render(plan(cash_target=150, rsu_net=10))
+    assert "⚠️ Cash" not in text
+    assert "moved by the RSU tax too" in text
+
+
+def test_a_bonus_month_is_shown_but_not_judged():
+    text = cash_render(plan(cash_target=150, bonus=50))
+    assert "⚠️ Cash" not in text
+    assert "moved by the bonus too" in text
+
+
+def test_no_target_no_line():
+    assert "Cash saved" not in cash_render(plan(cash_target=0))
+
+
+async def test_the_target_is_read_from_the_plan():
+    _, plans, _, _ = services([plan_page("p1", "2026-10")], [])
+    page = plan_page("p2", "2026-11")
+    page["properties"]["Cash Save Target"] = {"type": "number", "number": 150}
+    page["properties"]["Bonus"] = {"type": "number", "number": 40}
+    parsed = plans._to_plan(page)
+    assert parsed.cash_target == 150 and parsed.bonus == 40
+
+
 # -- SNOW rides along with a rollover --------------------------------------
 
 
