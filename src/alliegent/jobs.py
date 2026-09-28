@@ -110,11 +110,40 @@ class Jobs:
         overdue = await self.agenda.overdue(today)
         return reports.incomplete_alert(today, todays, overdue)
 
-    async def build_stale_projects(self) -> str | None:
+    async def build_project_week(self) -> str | None:
+        """Every open project's last seven days, for the Overview post."""
         if not self.projects:
             return None
-        stale = await self.projects.stale(self.today(), self.agenda)
-        return reports.stale_projects(stale)
+        from . import project_log
+        from .integrations.github import GitHub, GitHubError
+
+        today = self.today()
+        projects = await self.projects.active(today, self.agenda)
+        code_done: dict[str, int] = {}
+        coded = [p for p in projects if p.repos]
+        if coded:
+            github = GitHub(self._secrets.github_token if self._secrets else "")
+            first = today - timedelta(days=6)
+            try:
+                for project in coded:
+                    for repo in project.repos:
+                        try:
+                            span = await github.span(
+                                repo, first, today + timedelta(days=1), self.config.tz,
+                                open_items=False,
+                            )
+                        except (GitHubError, httpx.HTTPError) as exc:
+                            log.warning("GitHub: %s", exc)
+                            continue
+                        code_done[project.id] = code_done.get(project.id, 0) + len(span.done)
+            finally:
+                await github.aclose()
+        return project_log.week_message(
+            projects,
+            code_done,
+            today,
+            stale_after_days=self.config.projects.stale_after_days,
+        )
 
     async def build_ai_news(self) -> str | None:
         """Collect yesterday's AI articles and write the digest.
@@ -201,10 +230,11 @@ class Jobs:
     async def run_plan_check(self) -> None:
         await self._send(await self.build_plan_check(), "assets")
 
-    async def build_project_logs(self) -> list[tuple[Project, str]]:
-        """Each project with a repository, and its day -- when it had one."""
+    async def build_project_logs(self) -> tuple[list[tuple[Project, str]], dict[str, date]]:
+        """Each project with a repository and its day, when it had one -- and,
+        by project id, today for each whose code moved, for the sync."""
         if self.projects is None:
-            return []
+            return [], {}
         from . import project_log
         from .integrations.github import GitHub, GitHubError
         from .reports import finished
@@ -212,9 +242,10 @@ class Jobs:
         today = self.today()
         projects = [p for p in await self.projects.open_projects() if p.repos]
         if not projects:
-            return []
+            return [], {}
         github = GitHub(self._secrets.github_token if self._secrets else "")
         out: list[tuple[Project, str]] = []
+        code_days: dict[str, date] = {}
         try:
             for project in projects:
                 activities, errors = [], []
@@ -225,6 +256,8 @@ class Jobs:
                         # One repository down should not cost the project its day.
                         log.warning("GitHub: %s", exc)
                         errors.append(str(exc))
+                if any(a.done for a in activities):
+                    code_days[project.id] = today
                 linked = await self.agenda.items_for_project(project.id)
                 message = project_log.log_message(
                     project,
@@ -238,10 +271,11 @@ class Jobs:
                     out.append((project, message))
         finally:
             await github.aclose()
-        return out
+        return out, code_days
 
     async def run_project_log(self) -> None:
-        for project, message in await self.build_project_logs():
+        logs, code_days = await self.build_project_logs()
+        for project, message in logs:
             if self._post_project is None:
                 await self._send(f"**{project.title}**\n{message}", "projects")
                 continue
@@ -250,6 +284,10 @@ class Jobs:
             # -- is remembered, so tomorrow's day lands under today's.
             if thread and thread != project.thread_id and self.projects:
                 await self.projects.set_thread(project.id, thread)
+        # Every open project, not only those that posted: the seven-day count
+        # and the next item move on quiet days too.
+        if self.projects is not None:
+            await self.projects.sync(self.today(), self.agenda, code_days)
 
     async def run_english_quiz(self) -> None:
         """Quiz on today's lessons, if there were any not quizzed yet.
@@ -361,8 +399,8 @@ class Jobs:
     async def run_incomplete_alert(self) -> None:
         await self._send(await self.build_incomplete_alert(), "agenda")
 
-    async def run_stale_projects(self) -> None:
-        await self._send(await self.build_stale_projects(), "projects")
+    async def run_project_week(self) -> None:
+        await self._send(await self.build_project_week(), "projects")
 
     async def run_ai_news(self) -> None:
         message = await self.build_ai_news()

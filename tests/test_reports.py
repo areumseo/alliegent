@@ -343,21 +343,6 @@ def test_weekly_planning_surfaces_overdue_carryover():
     assert "Carrying over" in text and "밀린 것" in text
 
 
-def test_stale_projects_is_silent_when_none():
-    assert reports.stale_projects([]) is None
-
-
-def test_stale_projects_distinguishes_no_activity_from_old_activity():
-    text = reports.stale_projects(
-        [
-            (Project("a", "옛날 것", None, "", ""), date(2026, 7, 1)),
-            (Project("b", "기록 없음", None, "", ""), None),
-        ]
-    )
-    assert "Wed 7/1" in text
-    assert "never" in text
-
-
 # -- chunking --------------------------------------------------------------
 
 

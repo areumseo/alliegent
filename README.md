@@ -13,7 +13,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | Incomplete alert | 14:00 and 19:30 daily | The day so far — what is left, what is done — and anything past its date. Two runs: one while the day can still change, one to close it out |
 | Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
 | Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
-| Stale project nudge | Wed 10:00 | Projects with no linked agenda activity for N days. Silent unless `NOTION_PROJECTS_DB_ID` is set |
+| Project week | Sun 20:00 | Every open project's last seven days in the `#projects` Overview post — done, last active, next — with the stalled ones flagged under the table. Silent unless `NOTION_PROJECTS_DB_ID` is set |
 | English quiz | 20:30 daily | Five questions on today's lesson, answered by replying. Silent on days without a lesson |
 | Bonus rollover | 1 Apr and 1 Oct, 09:00 | Moves the half-yearly bonus from Expected into Savings once it has been paid |
 | ESPP rollover | Day after each purchase date, 09:00 | Moves ESPP contributions into Vested once they have become shares |
@@ -90,7 +90,7 @@ Each job posts to the channel matching its kind:
 | Variable | Receives |
 | --- | --- |
 | `DISCORD_AGENDA_CHANNEL_ID` | Daily brief, incomplete alert, weekly planning, week scaffolding |
-| `DISCORD_PROJECTS_CHANNEL_ID` | The `#projects` forum: a post per project for its daily log, and an Overview post for `/projects` and the stall check. An ordinary text channel still works, without the posts |
+| `DISCORD_PROJECTS_CHANNEL_ID` | The `#projects` forum: a post per project for its daily log, and an Overview post for `/projects` and the weekly summary. An ordinary text channel still works, without the posts |
 | `DISCORD_REVIEW_CHANNEL_ID` | Weekly review (falls back to the agenda channel) |
 | `DISCORD_NEWS_CHANNEL_ID` | Daily AI news digest |
 | `DISCORD_KARROT_CHANNEL_ID` | Karrot listings report |
@@ -343,7 +343,11 @@ At 22:00 each such project gets one message in its post:
 
 A day with nothing done posts nothing: review and to-do change slowly, and a post repeating the same open list every night stops being read. A repository that cannot be read is the exception — it says so even on a quiet day, because it will stay quiet until someone fixes it. Public repositories need no token; a private one answers 404 without `GITHUB_TOKEN`, and the post says that rather than reporting an empty day.
 
-The bot makes the post the first time a project has something to say and writes its id into `Discord Thread`, so a renamed project keeps its post; a post deleted by hand is made again. A forum takes posts, not messages, so what used to go into the channel itself — `/projects` and the Wednesday stall check — goes into a post called **Overview**, found by name and made once.
+The bot makes the post the first time a project has something to say and writes its id into `Discord Thread`, so a renamed project keeps its post; a post deleted by hand is made again. A forum takes posts, not messages, so what used to go into the channel itself — `/projects` and the weekly summary — goes into a post called **Overview**, found by name and made once.
+
+**The weekly summary** replaced a Wednesday check that named only the stalled projects: the ones moving were invisible, and a project's standing only means something beside the others'. On Sunday evening every open project gets a row — done in the last seven days, counting both finished linked agenda items and GitHub work, the last active day, and the next step — and a project that has not moved in `stale_after_days`, or has nothing linked, gets a ⚠️ line under the table.
+
+**The Projects database keeps itself current.** It was barely updated because every column had to be typed, and a hand-kept Last Active sat at 8/13 while the project moved daily. Each night, after the posts, the bot writes every open project's row from the same sources: `Last Active` (the later of its last linked agenda day and the last day GitHub saw work — read back as a floor, so a project busy only in code is not taken for stalled), `Next Action` (a relation to the soonest unfinished linked item), `Done (7d)`, `Open`, and `Progress` (finished over not canceled). Only what differs is written, so a quiet night writes nothing. These are written by the bot rather than built as Notion rollups: the API creates a rollup without its calculation — it shows the raw statuses — and a rollup over the status group would count Canceled as complete. Each column is named in `[projects.props]`; `""` leaves one alone, and the bot owns the ones named, so edits by hand are overwritten.
 
 Preview without posting or making anything:
 

@@ -335,3 +335,12 @@ async def test_agenda_work_on_the_project_counts_as_done(github_day):
     )
     await jobs.run_project_log()
     assert "• Wrote the spec" in posted[0][2]
+
+
+async def test_a_quiet_night_still_brings_the_projects_database_up_to_date(github_day):
+    """The seven-day count and the next item move on days nothing is posted."""
+    jobs, client, posted = build([project_page("p1", "App", repos="acme/app")])
+    jobs.config.projects.props.done_week = "Done (7d)"
+    await jobs.run_project_log()
+    assert posted == []
+    assert ("p1", {"Done (7d)": {"number": 0}}) in client.updated
