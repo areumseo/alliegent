@@ -77,6 +77,7 @@ class AlliegentBot(discord.Client):
             anthropic_api_key=secrets.anthropic_api_key,
             calendar_source=make_source(secrets),
             secrets=secrets,
+            post_project=self.post_project,
         )
         _register(self)
 
@@ -135,21 +136,15 @@ class AlliegentBot(discord.Client):
         Returns what was sent, so a job can refer back to its own message --
         the English quiz reads answers as replies to it.
         """
-        try:
-            channel_id = self.secrets.channel_for(kind)
-        except RuntimeError as exc:
-            log.error("%s", exc)
-            return []
-
-        channel = self.get_channel(channel_id)
+        channel = await self._channel(kind)
         if channel is None:
-            try:
-                channel = await self.fetch_channel(channel_id)
-            except discord.HTTPException as exc:
-                log.error("Cannot reach channel %s (%s): %s", channel_id, kind, exc)
-                return []
+            return []
+        if isinstance(channel, discord.ForumChannel):
+            # A forum takes posts, not messages. What would have been a message
+            # in the channel goes to its Overview post instead.
+            channel = await self._overview(channel)
         if not isinstance(channel, discord.abc.Messageable):
-            log.error("Channel %s is not messageable", channel_id)
+            log.error("Channel for %s is not messageable", kind)
             return []
         sent = []
         for part in reports.chunk(message):
@@ -157,6 +152,72 @@ class AlliegentBot(discord.Client):
             # articles means five cards, each taller than the entry itself.
             sent.append(await channel.send(part, suppress_embeds=True))
         return sent
+
+    async def _channel(self, kind: str):
+        try:
+            channel_id = self.secrets.channel_for(kind)
+        except RuntimeError as exc:
+            log.error("%s", exc)
+            return None
+        channel = self.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.fetch_channel(channel_id)
+            except discord.HTTPException as exc:
+                log.error("Cannot reach channel %s (%s): %s", channel_id, kind, exc)
+                return None
+        return channel
+
+    async def _overview(self, forum: discord.ForumChannel) -> discord.Thread:
+        """The forum post that stands in for the channel itself.
+
+        Found by name, so it survives a restart without being stored
+        anywhere, and made once if it is not there.
+        """
+        for thread in forum.threads:
+            if thread.name == OVERVIEW:
+                return thread
+        async for thread in forum.archived_threads(limit=None):
+            if thread.name == OVERVIEW:
+                return thread
+        made = await forum.create_thread(
+            name=OVERVIEW,
+            content="Where every project stands: /projects and the weekly stall "
+            "check land here. Each project keeps its own post alongside.",
+        )
+        return made.thread
+
+    async def post_project(self, thread_id: int | None, title: str, message: str) -> int | None:
+        """Add a project's day to its forum post, making the post if need be.
+
+        Returns the post's id, which the job keeps in Notion. A post that has
+        gone -- deleted by hand -- is replaced rather than failing every night.
+        """
+        parts = reports.chunk(message)
+        thread = None
+        if thread_id:
+            thread = self.get_channel(thread_id)
+            if thread is None:
+                try:
+                    thread = await self.fetch_channel(thread_id)
+                except (discord.NotFound, discord.Forbidden):
+                    thread = None
+        if thread is not None:
+            for part in parts:
+                await thread.send(part, suppress_embeds=True)
+            return thread.id
+
+        forum = await self._channel("projects")
+        if isinstance(forum, discord.ForumChannel):
+            made = await forum.create_thread(
+                name=title, content=parts[0], suppress_embeds=True
+            )
+            for part in parts[1:]:
+                await made.thread.send(part, suppress_embeds=True)
+            return made.thread.id
+        # An ordinary channel: the day goes in it, named, with no post to keep.
+        await self.notify(f"**{title}**\n{message}", "projects")
+        return None
 
     def today(self) -> date:
         return datetime.now(self.config.tz).date()
@@ -318,8 +379,13 @@ async def _deliver(
 
     await bot.notify(message, kind)
     channel = bot.get_channel(target)
-    name = f"#{channel.name}" if isinstance(channel, discord.TextChannel) else "its channel"
+    named = isinstance(channel, discord.TextChannel | discord.ForumChannel)
+    name = f"#{channel.name}" if named else "its channel"
     await interaction.followup.send(f"📨 Posted to {name}.")
+
+
+# The #projects forum's own post: what the channel said before it was a forum.
+OVERVIEW = "Overview"
 
 
 # Words that mean "take the value off" rather than "set it to this". Shared by

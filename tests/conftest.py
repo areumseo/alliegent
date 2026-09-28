@@ -207,6 +207,7 @@ def config() -> Config:
 
 SECRET_ENV_VARS = (
     "ANTHROPIC_API_KEY",
+    "GITHUB_TOKEN",
     "ICLOUD_USERNAME",
     "ICLOUD_APP_PASSWORD",
     "ICLOUD_CALENDARS",

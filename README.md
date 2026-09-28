@@ -19,6 +19,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | ESPP rollover | Day after each purchase date, 09:00 | Moves ESPP contributions into Vested once they have become shares |
 | Asset prompt | Mon 09:00 | Asks for this week's balances, carrying last week's figures to edit |
 | Plan check | 1st of the month, or the first day after it with a snapshot, 09:00 | The month just finished against its row in Plans: each half against its target, where Total sits between Low and High, the change split into savings, company inflows and market, and the warnings the plan sets |
+| Project log | 22:00 daily | Each project with a GitHub repository gets its day in its own `#projects` forum post: what reached the default branch, what is in review, what is next. Silent on a day with nothing done |
 | Karrot candidates | Mon 09:00 | What is decided on but not yet listed. Silent when there is nothing waiting |
 | Karrot sales | Sat 20:00 | The week's sales, with the month, the year and the running total. Silent when nothing sold and nothing is owed |
 | Weekly review | Sun 21:00 | Completion stats for the past week as a review draft |
@@ -89,7 +90,7 @@ Each job posts to the channel matching its kind:
 | Variable | Receives |
 | --- | --- |
 | `DISCORD_AGENDA_CHANNEL_ID` | Daily brief, incomplete alert, weekly planning, week scaffolding |
-| `DISCORD_PROJECTS_CHANNEL_ID` | Stale project nudges |
+| `DISCORD_PROJECTS_CHANNEL_ID` | The `#projects` forum: a post per project for its daily log, and an Overview post for `/projects` and the stall check. An ordinary text channel still works, without the posts |
 | `DISCORD_REVIEW_CHANNEL_ID` | Weekly review (falls back to the agenda channel) |
 | `DISCORD_NEWS_CHANNEL_ID` | Daily AI news digest |
 | `DISCORD_KARROT_CHANNEL_ID` | Karrot listings report |
@@ -121,7 +122,7 @@ Preview any job in the terminal without posting to Discord:
 uv run python -m alliegent.cli brief
 ```
 
-Jobs: `brief`, `news`, `incomplete`, `planning`, `scaffold`, `stale`, `review`, `plan`.
+Jobs: `brief`, `news`, `incomplete`, `planning`, `scaffold`, `stale`, `review`, `plan`, `projectlog`.
 
 Add `--send` to actually post the result to the Discord channel that job uses. This checks the bot token, the channel IDs, and the bot's channel permissions in one go, rather than waiting until 08:00 to discover one of them is wrong:
 
@@ -329,6 +330,26 @@ uv run python -m alliegent.cli plan
 On a day with nothing to report it says how many months of plan it read, which is enough to prove the database id, the integration's access and the column names before the first real run.
 
 **Between checks, from Discord.** `/assets plan` holds the latest snapshot against the month it is heading for — the first row not yet behind it — and writes nothing, so a look taken mid-month cannot change what the 1st finds. A snapshot part-way through a month reads short until that month's pay and inflows land, and the reply says so. `/assets gain <amount> [month]` adds a realised gain to the month's `Realized Gain` (a loss as a negative number; added, not replaced, since a month can hold more than one sale) and answers with the year's total against the allowance. A month with no row of its own — a sale before the plan began — goes on the first row of the same year, because the allowance counts the year, not the month.
+
+## Projects forum
+
+`#projects` is a Discord **forum**, and each project with a repository has a post in it that collects its days. A project is in the forum when its row in the Projects database has `GitHub` filled in — `owner/repo`, several separated by commas, or the URLs as copied from the browser (`/pulls` and all). A project without one stays out, which is how the forum is limited to the projects there is code to report on.
+
+At 22:00 each such project gets one message in its post:
+
+- **Work done** — what reached each repository's default branch that day, one line per pull request however many commits it had, a line for anything pushed straight to the branch, and any agenda item linked to the project that was finished that day — the work that is not code. Merge commits with no pull request say nothing and are left out. Pull requests are found through their commits rather than by listing merged pull requests, because a merge-commit merge keeps its commits' original dates and a pull request merged today would otherwise land on the day it was written, when it was not on the branch yet.
+- **In review** — open pull requests.
+- **To-do** — agenda items linked to the project and not finished, then open issues, five at most.
+
+A day with nothing done posts nothing: review and to-do change slowly, and a post repeating the same open list every night stops being read. A repository that cannot be read is the exception — it says so even on a quiet day, because it will stay quiet until someone fixes it. Public repositories need no token; a private one answers 404 without `GITHUB_TOKEN`, and the post says that rather than reporting an empty day.
+
+The bot makes the post the first time a project has something to say and writes its id into `Discord Thread`, so a renamed project keeps its post; a post deleted by hand is made again. A forum takes posts, not messages, so what used to go into the channel itself — `/projects` and the Wednesday stall check — goes into a post called **Overview**, found by name and made once.
+
+Preview without posting or making anything:
+
+```bash
+uv run python -m alliegent.cli projectlog
+```
 
 ## Karrot listings
 

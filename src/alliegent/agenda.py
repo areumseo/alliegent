@@ -79,6 +79,29 @@ class Project:
     next_action: str
     url: str
     last_activity: date | None = None
+    repos: tuple[str, ...] = ()
+    thread_id: int | None = None
+
+
+_REPO = re.compile(r"(?:github\.com/)?([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)")
+
+
+def parse_repos(text: str) -> tuple[str, ...]:
+    """owner/repo for each repository named, however it was pasted.
+
+    A URL copied from the browser carries a tab after the name -- /pulls,
+    /issues -- and that is how these get pasted, so only the two segments
+    after github.com are kept. Order is kept, duplicates are not.
+    """
+    found: list[str] = []
+    for piece in re.split(r"[,\s]+", text.strip()):
+        match = _REPO.search(piece.removesuffix(".git"))
+        if match:
+            owner, repo = match.group(1).split("/")[:2]
+            name = f"{owner}/{repo.removesuffix('.git')}"
+            if name not in found:
+                found.append(name)
+    return tuple(found)
 
 
 class AgendaService:
@@ -456,6 +479,14 @@ class ProjectService:
             next_action=n.read_text(page, p.next_action) if p.next_action else "",
             url=n.page_url(page),
             last_activity=n.read_date(page, p.last_activity) if p.last_activity else None,
+            repos=parse_repos(n.read_text(page, p.repos)) if p.repos else (),
+            thread_id=_thread_id(n.read_text(page, p.thread)) if p.thread else None,
+        )
+
+    async def set_thread(self, project_id: str, thread_id: int) -> None:
+        """Remember the forum post made for a project."""
+        await self._client.update_page(
+            project_id, {self.props.thread: n.rich_text(str(thread_id))}
         )
 
     async def _with_activity(
@@ -572,3 +603,8 @@ class ProjectService:
             if latest < cutoff:
                 result.append((project, latest))
         return result
+
+
+def _thread_id(text: str) -> int | None:
+    text = text.strip()
+    return int(text) if text.isdigit() else None

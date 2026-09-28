@@ -8,6 +8,7 @@ can be checked before letting the scheduler loose:
     uv run python -m alliegent.cli scaffold --commit # actually create rows
     uv run python -m alliegent.cli feeds             # what each news feed returns
     uv run python -m alliegent.cli plan              # last month against its plan
+    uv run python -m alliegent.cli projectlog        # each project's day, as posted at 22:00
 
 Add --send to post the result to the Discord channel the job would normally
 use. That verifies the token, the channel IDs, and the bot's permissions in
@@ -25,7 +26,17 @@ from .config import get_config, get_secrets
 from .integrations.notion import NotionClient, NotionError
 from .jobs import Jobs
 
-JOBS = ("brief", "news", "incomplete", "planning", "scaffold", "stale", "review", "plan")
+JOBS = (
+    "brief",
+    "news",
+    "incomplete",
+    "planning",
+    "scaffold",
+    "stale",
+    "review",
+    "plan",
+    "projectlog",
+)
 
 # Diagnostics rather than jobs: they report on the setup instead of producing
 # a message, so they have nothing to post and no channel to post it to.
@@ -41,6 +52,7 @@ JOB_CHANNEL = {
     "stale": "projects",
     "review": "review",
     "plan": "assets",
+    "projectlog": "projects",
 }
 
 
@@ -177,6 +189,7 @@ async def _run(name: str, commit: bool, send: bool) -> int:
         plans=plans,
         anthropic_api_key=secrets.anthropic_api_key,
         calendar_source=make_source(secrets),
+        secrets=secrets,
     )
 
     try:
@@ -192,6 +205,11 @@ async def _run(name: str, commit: bool, send: bool) -> int:
             message = await jobs.build_stale_projects()
         elif name == "review":
             message = await jobs.build_weekly_review()
+        elif name == "projectlog":
+            # One message per project, each headed with its name as the forum
+            # post's title would be. Nothing is posted and no thread is made.
+            logs = await jobs.build_project_logs()
+            message = "\n\n".join(f"**{p.title}**\n{m}" for p, m in logs) or None
         elif name == "plan":
             # Never writes: no link, no Revised. A preview that changed the
             # database would make the real run on the 1st report nothing.

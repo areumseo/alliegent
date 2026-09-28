@@ -14,8 +14,10 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
 
+import httpx
+
 from . import reports
-from .agenda import AgendaService, ProjectService
+from .agenda import AgendaService, Project, ProjectService
 from .config import Config, Secrets
 
 log = logging.getLogger(__name__)
@@ -41,6 +43,7 @@ class Jobs:
         anthropic_api_key: str = "",
         calendar_source: Callable | None = None,
         secrets: Secrets | None = None,
+        post_project: Callable[[int | None, str, str], Awaitable[int | None]] | None = None,
     ) -> None:
         self.calendar_source = calendar_source
         self.agenda = agenda
@@ -54,6 +57,9 @@ class Jobs:
         self.notify = notify
         self._anthropic_api_key = anthropic_api_key
         self._secrets = secrets
+        # Posts to a project's forum thread, making it if need be, and returns
+        # its id. Injected, like notify, so the job runs without Discord.
+        self._post_project = post_project
         # Injectable so tests can pin a date instead of drifting with the
         # calendar; production leaves it as the configured timezone's today.
         self._clock = clock
@@ -194,6 +200,56 @@ class Jobs:
 
     async def run_plan_check(self) -> None:
         await self._send(await self.build_plan_check(), "assets")
+
+    async def build_project_logs(self) -> list[tuple[Project, str]]:
+        """Each project with a repository, and its day -- when it had one."""
+        if self.projects is None:
+            return []
+        from . import project_log
+        from .integrations.github import GitHub, GitHubError
+        from .reports import finished
+
+        today = self.today()
+        projects = [p for p in await self.projects.open_projects() if p.repos]
+        if not projects:
+            return []
+        github = GitHub(self._secrets.github_token if self._secrets else "")
+        out: list[tuple[Project, str]] = []
+        try:
+            for project in projects:
+                activities, errors = [], []
+                for repo in project.repos:
+                    try:
+                        activities.append(await github.day(repo, today, self.config.tz))
+                    except (GitHubError, httpx.HTTPError) as exc:
+                        # One repository down should not cost the project its day.
+                        log.warning("GitHub: %s", exc)
+                        errors.append(str(exc))
+                linked = await self.agenda.items_for_project(project.id)
+                message = project_log.log_message(
+                    project,
+                    today,
+                    activities,
+                    errors,
+                    done_items=[i for i in linked if i.day == today and finished(i)],
+                    todo_items=[i for i in linked if not i.done],
+                )
+                if message:
+                    out.append((project, message))
+        finally:
+            await github.aclose()
+        return out
+
+    async def run_project_log(self) -> None:
+        for project, message in await self.build_project_logs():
+            if self._post_project is None:
+                await self._send(f"**{project.title}**\n{message}", "projects")
+                continue
+            thread = await self._post_project(project.thread_id, project.title, message)
+            # A new post -- the first, or one made because the old was deleted
+            # -- is remembered, so tomorrow's day lands under today's.
+            if thread and thread != project.thread_id and self.projects:
+                await self.projects.set_thread(project.id, thread)
 
     async def run_english_quiz(self) -> None:
         """Quiz on today's lessons, if there were any not quizzed yet.
