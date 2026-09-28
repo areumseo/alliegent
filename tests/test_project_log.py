@@ -344,3 +344,70 @@ async def test_a_quiet_night_still_brings_the_projects_database_up_to_date(githu
     await jobs.run_project_log()
     assert posted == []
     assert ("p1", {"Done (7d)": {"number": 0}}) in client.updated
+
+
+# -- the morning: what is open ---------------------------------------------
+
+
+def test_the_morning_lists_what_is_open_in_each_project():
+    text = project_log.open_message(
+        DAY,
+        [
+            (project("acme/app"), [activity(review=["Open PR (#7)"], issues=["Bug (#3)"])],
+             [item("Ship it", day=date(2026, 9, 30))], []),
+        ],
+    )
+    assert text.startswith("☀️ **Open — Mon 9/28**")
+    assert "In review" in text and "Open PR (#7)" in text
+    assert "To-do" in text and text.index("Ship it") < text.index("Bug (#3)")
+
+
+def test_a_project_with_nothing_open_is_left_out_of_the_morning():
+    quiet = Project(id="q", title="Quiet", status=None, next_action="", url="")
+    text = project_log.open_message(
+        DAY,
+        [(quiet, [], [], []),
+         (project("acme/app"), [activity(review=["Open PR (#7)"])], [], [])],
+    )
+    assert "Quiet" not in text and "App" in text
+
+
+def test_a_morning_with_nothing_open_anywhere_posts_nothing():
+    assert project_log.open_message(DAY, [(project("acme/app"), [activity()], [], [])]) is None
+
+
+def test_a_repository_that_cannot_be_read_is_said_in_the_morning_too():
+    text = project_log.open_message(
+        DAY, [(project("acme/app"), [], [], ["acme/app not found"])]
+    )
+    assert "⚠️ Couldn't read acme/app not found" in text
+
+
+async def test_the_morning_job_covers_projects_without_a_repository(monkeypatch):
+    """To-do comes from the agenda too, so a project with no code still has
+    a morning."""
+    async def open_items(self, repo):
+        return Activity(repo)
+
+    async def aclose(self):
+        pass
+
+    monkeypatch.setattr(gh.GitHub, "open_items", open_items)
+    monkeypatch.setattr(gh.GitHub, "aclose", aclose)
+    jobs, _, _ = build(
+        [project_page("p1", "App", repos="acme/app"), project_page("p2", "Paper")],
+        [make_page("a1", "Draft the brief", day="2026-09-30", projects=["p2"])],
+    )
+    text = await jobs.build_project_open()
+    assert "**Paper**" in text and "Draft the brief" in text
+    assert "**App**" not in text
+
+
+async def test_a_log_can_be_asked_for_one_project(github_day):
+    github_day["acme/app"] = activity(done=["x"])
+    github_day["acme/web"] = activity("acme/web", done=["y"])
+    jobs, _, _ = build(
+        [project_page("p1", "App", repos="acme/app"), project_page("p2", "Web", repos="acme/web")]
+    )
+    logs, _ = await jobs.build_project_logs(only="p2")
+    assert [p.title for p, _ in logs] == ["Web"]

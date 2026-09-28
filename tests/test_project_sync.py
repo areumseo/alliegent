@@ -237,3 +237,51 @@ def test_a_project_with_nothing_linked_says_so():
 
 def test_no_open_projects_no_message():
     assert project_log.week_message([], {}, TODAY, stale_after_days=7) is None
+
+
+# -- status from Discord -----------------------------------------------------
+
+
+def status_schema_projects(kind="status"):
+    return {
+        "Name": {"type": "title"},
+        "Status": {
+            "type": kind,
+            kind: {"options": [{"name": "In progress"}, {"name": "On hold"}, {"name": "Done"}]},
+        },
+    }
+
+
+async def test_a_status_is_matched_whatever_its_case_and_written_as_spelled():
+    client, _, projects = services([project_page("p1", "App")])
+    client.schema = status_schema_projects()
+    assert await projects.set_status("p1", "on hold") == "On hold"
+    assert client.updated == [("p1", {"Status": {"status": {"name": "On hold"}}})]
+
+
+async def test_a_select_status_is_written_as_a_select():
+    client, _, projects = services([project_page("p1", "App")])
+    client.schema = status_schema_projects("select")
+    await projects.set_status("p1", "Done")
+    assert client.updated == [("p1", {"Status": {"select": {"name": "Done"}}})]
+
+
+async def test_an_unknown_status_is_refused_not_created():
+    client, _, projects = services([project_page("p1", "App")])
+    client.schema = status_schema_projects()
+    import pytest
+
+    with pytest.raises(ValueError, match="Try: In progress, On hold, Done"):
+        await projects.set_status("p1", "Paused")
+    assert client.updated == []
+
+
+async def test_a_done_project_can_be_found_to_reopen_it():
+    done = project_page("p1", "Old")
+    done["properties"]["Status"] = {"type": "status", "status": {"name": "Done"}}
+    _, _, projects = services([done])
+    assert (await projects.find("Old", include_done=True)).id == "p1"
+    import pytest
+
+    with pytest.raises(ValueError):
+        await projects.find("Old")

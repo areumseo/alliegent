@@ -625,7 +625,38 @@ class ProjectService:
             return projects
         return [await self._with_activity(p, today, agenda) for p in projects]
 
-    async def find(self, name: str) -> Project:
+    async def all_projects(self) -> list[Project]:
+        """Every project, done ones included -- for reopening one by name."""
+        ds = await self.data_source_id()
+        return [self._to_project(page) async for page in self._client.query(ds)]
+
+    async def status_names(self) -> list[str]:
+        """The statuses the Projects database offers, in its own order."""
+        schema = await self._client.get_schema(await self.data_source_id())
+        definition = schema.get(self.props.status) or {}
+        kind = definition.get("type")
+        options = (definition.get(kind) or {}).get("options", []) if kind else []
+        return [option["name"] for option in options if option.get("name")]
+
+    async def set_status(self, project_id: str, status: str) -> str:
+        """Set a project's status, by any capitalisation of an offered name.
+
+        Returns the name as the database spells it. An unknown one is refused
+        rather than created: a typo would otherwise become a status of its
+        own, and every filter on the column would quietly miss the project.
+        """
+        names = await self.status_names()
+        match = next((n_ for n_ in names if n_.casefold() == status.strip().casefold()), None)
+        if match is None:
+            raise ValueError(f"No status called {status!r}. Try: " + ", ".join(names))
+        schema = await self._client.get_schema(await self.data_source_id())
+        kind = (schema.get(self.props.status) or {}).get("type", "status")
+        await self._client.update_page(
+            project_id, {self.props.status: {kind: {"name": match}}}
+        )
+        return match
+
+    async def find(self, name: str, *, include_done: bool = False) -> Project:
         """The open project a typed name refers to.
 
         Matched the way the category argument is: exactly if possible, then on
@@ -633,7 +664,7 @@ class ProjectService:
         reproduce by hand. An ambiguous name is refused rather than guessed —
         linking an item to the wrong project is invisible afterwards.
         """
-        projects = await self.open_projects()
+        projects = await (self.all_projects() if include_done else self.open_projects())
         typed = name.strip().casefold()
         exact = [p for p in projects if p.title.casefold() == typed]
         if exact:

@@ -36,6 +36,7 @@ JOBS = (
     "review",
     "plan",
     "projectlog",
+    "projectopen",
 )
 
 # Diagnostics rather than jobs: they report on the setup instead of producing
@@ -53,6 +54,7 @@ JOB_CHANNEL = {
     "review": "review",
     "plan": "assets",
     "projectlog": "projects",
+    "projectopen": "projects",
 }
 
 
@@ -210,6 +212,8 @@ async def _run(name: str, commit: bool, send: bool) -> int:
             # post's title would be. Nothing is posted and no thread is made.
             logs, _ = await jobs.build_project_logs()
             message = "\n\n".join(f"**{p.title}**\n{m}" for p, m in logs) or None
+        elif name == "projectopen":
+            message = await jobs.build_project_open()
         elif name == "plan":
             # Never writes: no link, no Revised. A preview that changed the
             # database would make the real run on the 1st report nothing.

@@ -8,7 +8,7 @@ import unicodedata
 from collections.abc import Callable
 from datetime import date, time, timedelta
 
-from .agenda import AgendaItem, Project
+from .agenda import AgendaItem
 
 TITLE_HAS_TIME = re.compile(r"\b\d{1,2}(:\d{2})?\s*[ap]m\b|\b\d{1,2}:\d{2}\b", re.IGNORECASE)
 
@@ -175,12 +175,6 @@ def _task_table(rows: list[tuple[str, ...]], when_header: str) -> list[str]:
     return _table(("#", "", when_header, "Task", "Category"), rows, flex=3, right=(0,))
 
 
-def _project_table(projects: list[Project]) -> list[str]:
-    """Projects and what each is waiting on, which is the actionable half."""
-    rows = [(p.title, p.next_action or "") for p in projects]
-    return _table(("Project", "Next"), rows, flex=1)
-
-
 def _bullets(items: list[AgendaItem], *, numbered: bool = False) -> list[str]:
     lines = []
     for idx, item in enumerate(items, start=1):
@@ -339,7 +333,6 @@ def daily_brief(
     today: date,
     todays: list[AgendaItem],
     overdue: list[AgendaItem],
-    active_projects: list[Project],
     events: list | None = None,
     *,
     calendar_problem: str | None = None,
@@ -376,10 +369,8 @@ def daily_brief(
         out.append(overdue_hint())
         out.append("")
 
-    if active_projects:
-        out.append(f"**Active projects ({len(active_projects)})**")
-        out += _project_table(active_projects[:5])
-
+    # Projects are not here: they have #projects to themselves, with a
+    # morning post of what is open in each.
     return "\n".join(out).strip()
 
 
@@ -636,12 +627,6 @@ def overdue_list(
         else f"**Overdue ({len(items)})**"
     )
     return "\n".join([header, *lines, overdue_hint()])
-
-
-def project_list(projects: list[Project]) -> str:
-    if not projects:
-        return "No active projects."
-    return "\n".join([f"**Active projects ({len(projects)})**", *_project_table(projects)])
 
 
 FENCE = "```"

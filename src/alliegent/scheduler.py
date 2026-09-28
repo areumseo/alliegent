@@ -38,6 +38,7 @@ JOB_CHANNELS = {
     "espp_rollover": "assets",
     "plan_check": "assets",
     "project_log": "projects",
+    "project_open": "projects",
 }
 
 
@@ -165,6 +166,7 @@ def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
             log.info("scheduled espp_rollover on %s at %s", day, sched.espp_rollover_time)
     add("plan_check", jobs.run_plan_check, time=sched.plan_report_time)
     add("project_log", jobs.run_project_log, time=sched.project_log_time)
+    add("project_open", jobs.run_project_open, time=sched.project_open_time)
     add(
         "asset_prompt",
         jobs.run_asset_prompt,
