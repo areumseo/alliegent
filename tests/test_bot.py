@@ -369,6 +369,11 @@ def test_buying_on_karrot_has_its_own_subcommand():
     assert "karrot bought" in names and "karrot spent" in names
 
 
+def test_the_plan_has_its_own_subcommands():
+    names = {c.qualified_name for c in leaf_commands(make_bot())}
+    assert {"assets plan", "assets gain"} <= names
+
+
 # -- projects --------------------------------------------------------------
 
 

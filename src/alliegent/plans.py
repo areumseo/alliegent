@@ -157,6 +157,9 @@ class PlanService:
     async def mark_revised(self, plan_id: str) -> None:
         await self._client.update_page(plan_id, {"Status": n.select(REVISED)})
 
+    async def set_gain(self, plan_id: str, value: int) -> None:
+        await self._client.update_page(plan_id, {"Realized Gain": n.number(value)})
+
 
 # -- arithmetic ------------------------------------------------------------
 
@@ -268,6 +271,44 @@ def _cash_line(saved: int, plan: Plan) -> str | None:
     return line
 
 
+def _against_targets(plan: Plan, snapshot: Snapshot) -> list[str]:
+    """Each half and the total against the month's targets, and the range.
+
+    Shared by the monthly check and /assets plan, so the two never disagree
+    about what the same snapshot means against the same row.
+    """
+    from . import reports
+
+    out = reports._table(
+        ("KRW", "Actual", "Target", "%"),
+        [
+            ("Liquid", f"{snapshot.liquid:,}", f"{plan.target_liquid:,}",
+             _pct(snapshot.liquid, plan.target_liquid)),
+            ("Locked", f"{snapshot.locked:,}", f"{plan.target_locked:,}",
+             _pct(snapshot.locked, plan.target_locked)),
+            None,
+            ("Total", f"{snapshot.total:,}", f"{plan.target_total:,}",
+             _pct(snapshot.total, plan.target_total)),
+        ],
+        flex=0,
+        right=(1, 2, 3),
+    )
+    position = _range_line(snapshot.total, plan.low, plan.high)
+    return out + [position] if position else out
+
+
+def _snow_line(snapshot: Snapshot, config: Config) -> str | None:
+    share = snow_share(snapshot)
+    if share is None:
+        return None
+    cap = config.plans.snow_cap
+    over = share > cap
+    return (
+        f"{'⚠️ ' if over else ''}SNOW is {share:.0%} of Liquid · cap {cap:.0%}"
+        + (" — sell down at the next vest." if over else "")
+    )
+
+
 def report_message(
     plan: Plan,
     snapshot: Snapshot,
@@ -284,24 +325,8 @@ def report_message(
     taken = snapshot.day.isoformat() if snapshot.day else "?"
     out = [
         f"🧭 **Plan check — {plan.month}** · snapshot {taken}",
-        *reports._table(
-            ("KRW", "Actual", "Target", "%"),
-            [
-                ("Liquid", f"{snapshot.liquid:,}", f"{plan.target_liquid:,}",
-                 _pct(snapshot.liquid, plan.target_liquid)),
-                ("Locked", f"{snapshot.locked:,}", f"{plan.target_locked:,}",
-                 _pct(snapshot.locked, plan.target_locked)),
-                None,
-                ("Total", f"{snapshot.total:,}", f"{plan.target_total:,}",
-                 _pct(snapshot.total, plan.target_total)),
-            ],
-            flex=0,
-            right=(1, 2, 3),
-        ),
+        *_against_targets(plan, snapshot),
     ]
-    position = _range_line(snapshot.total, plan.low, plan.high)
-    if position:
-        out.append(position)
 
     out.append("")
     if previous is None:
@@ -328,13 +353,9 @@ def report_message(
         )
 
     out.append("")
-    share = snow_share(snapshot)
-    if share is not None:
-        over = share > cfg.snow_cap
-        out.append(
-            f"{'⚠️ ' if over else ''}SNOW is {share:.0%} of Liquid · cap {cfg.snow_cap:.0%}"
-            + (" — sell down at the next vest." if over else "")
-        )
+    snow = _snow_line(snapshot, config)
+    if snow:
+        out.append(snow)
 
     if streak >= cfg.low_streak:
         out.append(
@@ -425,3 +446,88 @@ async def monthly_check(
         config=config,
         revised=revise or plan.status == REVISED,
     )
+
+
+# -- on demand -------------------------------------------------------------
+# The monthly check waits for a month to close. These answer now.
+
+
+def standing_message(plan: Plan, snapshot: Snapshot, config: Config) -> str:
+    taken = snapshot.day.isoformat() if snapshot.day else "?"
+    out = [
+        f"🧭 **Heading for {plan.month}** · snapshot {taken}",
+        *_against_targets(plan, snapshot),
+    ]
+    snow = _snow_line(snapshot, config)
+    if snow:
+        out.append(snow)
+    out.append(
+        f"_The targets are for the end of {plan.month}, so a snapshot part-way "
+        "through reads short until the month's pay and inflows have landed._"
+    )
+    return "\n".join(out)
+
+
+async def current_standing(plans: PlanService, assets, config: Config) -> str:
+    """The latest snapshot against the month it is heading for.
+
+    That month is the first row not yet behind the snapshot: a snapshot in
+    September, before the plan starts, is held against October's target,
+    and one in the middle of a month against that month's end.
+    """
+    latest = await assets.latest()
+    if latest is None or latest.day is None:
+        return "No snapshots recorded yet."
+    rows = await plans.all_plans()
+    if not rows:
+        return "The Plans database has no rows with a YYYY-MM title."
+    month = month_of(latest.day)
+    row = next((p for p in rows if p.month >= month), None)
+    if row is None:
+        return f"The plan ends at {rows[-1].month}; there is no target for {month}."
+    return standing_message(row, latest, config)
+
+
+async def record_gain(plans: PlanService, month: str, amount: int, config: Config) -> str:
+    """Add a realised gain -- or, negative, a loss -- to the month's row.
+
+    Added to what the row holds rather than replacing it, since a month can
+    have more than one sale. A month with no row of its own goes on the first
+    row of the same year: the allowance counts the year, and a sale made
+    before the plan began still uses it up.
+    """
+    if not _MONTH.match(month):
+        raise ValueError("Give the month as YYYY-MM, e.g. 2026-10.")
+    if amount == 0:
+        raise ValueError("A gain of 0 changes nothing. Give a loss as a negative number.")
+    year = month[:4]
+    rows = await plans.all_plans()
+    row = next((p for p in rows if p.month == month), None) or next(
+        (p for p in rows if p.month[:4] == year), None
+    )
+    if row is None:
+        raise ValueError(f"There is no plan row in {year} to record it on.")
+
+    value = row.realized_gain + amount
+    await plans.set_gain(row.id, value)
+    year_total = value + sum(
+        p.realized_gain for p in rows if p.month[:4] == year and p.id != row.id
+    )
+
+    kind = "gain" if amount > 0 else "loss"
+    lines = [f"📌 ₩{abs(amount):,} {kind} recorded on {row.month}."]
+    if row.month != month:
+        lines.append(
+            f"_{month} has no plan row, so it went on {row.month}: "
+            "the allowance counts the year, not the month._"
+        )
+    allowance = config.plans.gain_allowance
+    left = allowance - year_total
+    if left >= 0:
+        lines.append(f"Realised in {year}: ₩{year_total:,} of ₩{allowance:,} · ₩{left:,} left.")
+    else:
+        lines.append(
+            f"⚠️ Realised in {year}: ₩{year_total:,}, ₩{-left:,} over the "
+            f"₩{allowance:,} allowance — 22% applies to that."
+        )
+    return "\n".join(lines)

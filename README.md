@@ -39,7 +39,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/overdue` | Overdue, unfinished items — numbered, so they can be cleared |
 | `/projects` | Active projects and their next actions, both read off the agenda items linked to them |
 | `/brief` | Run the daily brief now |
-| `/assets show` · `/assets trend` | Latest snapshot with what changed, and the recent history |
+| `/assets show` · `/assets trend` · `/assets plan` · `/assets gain <amount> [month]` | Latest snapshot with what changed, the recent history, the latest snapshot against the month it is heading for, and a realised gain on foreign shares recorded against the year's allowance |
 | `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `spent`, `bought`, `sales`, `summary` |
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
 
@@ -327,6 +327,8 @@ uv run python -m alliegent.cli plan
 ```
 
 On a day with nothing to report it says how many months of plan it read, which is enough to prove the database id, the integration's access and the column names before the first real run.
+
+**Between checks, from Discord.** `/assets plan` holds the latest snapshot against the month it is heading for — the first row not yet behind it — and writes nothing, so a look taken mid-month cannot change what the 1st finds. A snapshot part-way through a month reads short until that month's pay and inflows land, and the reply says so. `/assets gain <amount> [month]` adds a realised gain to the month's `Realized Gain` (a loss as a negative number; added, not replaced, since a month can hold more than one sale) and answers with the year's total against the allowance. A month with no row of its own — a sale before the plan began — goes on the first row of the same year, because the allowance counts the year, not the month.
 
 ## Karrot listings
 
