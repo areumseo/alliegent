@@ -270,6 +270,7 @@ def test_scheduler_registers_the_enabled_jobs():
         "asset_prompt",
         "english_quiz",
         "bonus_rollover",
+        "plan_check",
         "weekly_planning",
         "stale_projects",
         "weekly_review",

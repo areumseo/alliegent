@@ -34,6 +34,7 @@ class AlliegentBot(discord.Client):
         karrot=None,
         expenses=None,
         assets=None,
+        plans=None,
         english=None,
         guild_id: int = 0,
         enable_chat: bool = True,
@@ -52,6 +53,7 @@ class AlliegentBot(discord.Client):
         self.karrot = karrot
         self.expenses = expenses
         self.assets = assets
+        self.plans = plans
         self.english = english
         self.secrets = secrets
         self.guild_id = guild_id
@@ -70,6 +72,7 @@ class AlliegentBot(discord.Client):
             karrot=karrot,
             expenses=expenses,
             assets=assets,
+            plans=plans,
             english=english,
             anthropic_api_key=secrets.anthropic_api_key,
             calendar_source=make_source(secrets),

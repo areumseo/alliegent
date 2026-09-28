@@ -36,6 +36,7 @@ class Jobs:
         karrot=None,
         expenses=None,
         assets=None,
+        plans=None,
         english=None,
         anthropic_api_key: str = "",
         calendar_source: Callable | None = None,
@@ -47,6 +48,7 @@ class Jobs:
         self.karrot = karrot
         self.expenses = expenses
         self.assets = assets
+        self.plans = plans
         self.english = english
         self.config = config
         self.notify = notify
@@ -179,6 +181,19 @@ class Jobs:
             today,
             pending=assets_module.moves_before(today, self.config.schedule),
         )
+
+    async def build_plan_check(self, *, commit: bool = True) -> str | None:
+        """The month just finished against its plan, once its snapshot exists."""
+        if self.plans is None or self.assets is None:
+            return None
+        from .plans import monthly_check
+
+        return await monthly_check(
+            self.plans, self.assets, self.today(), self.config, commit=commit
+        )
+
+    async def run_plan_check(self) -> None:
+        await self._send(await self.build_plan_check(), "assets")
 
     async def run_english_quiz(self) -> None:
         """Quiz on today's lessons, if there were any not quizzed yet.

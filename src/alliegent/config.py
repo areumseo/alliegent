@@ -28,6 +28,9 @@ class Secrets(BaseSettings):
     # Optional: selling costs, netted off revenue. Without it revenue is gross.
     notion_karrot_expenses_db_id: str = ""
     notion_assets_db_id: str = ""
+    # Monthly targets to hold the asset snapshots against. Needs the assets
+    # database too: a plan with nothing to compare it to reports nothing.
+    notion_plans_db_id: str = ""
     # English lesson review: four linked databases. Lessons alone switches the
     # feature on; the other three are required with it.
     notion_english_lessons_db_id: str = ""
@@ -197,6 +200,10 @@ class Schedule(BaseModel):
     espp_rollover_time: str = "09:00"
     bonus_rollover_day: int = 1
     bonus_rollover_time: str = "09:00"
+    # Checked daily, not only on the 1st: the month-end snapshot is whichever
+    # is recorded first on or after the 1st, which is usually a Monday later.
+    # The report goes out once, on the day that snapshot exists.
+    plan_report_time: str = "09:00"
 
     @field_validator("incomplete_alert", mode="before")
     @classmethod
@@ -235,6 +242,16 @@ class KarrotConfig(BaseModel):
     """Nothing to configure yet; the report is scheduled from [schedule]."""
 
 
+class PlansConfig(BaseModel):
+    # Vested plus SNOW over Liquid, above which the report warns.
+    snow_cap: float = 0.30
+    # Months in a row under Low before the row is marked Revised.
+    low_streak: int = 3
+    # The yearly allowance on foreign-stock gains before the 22% applies.
+    # Tax law, not a personal figure, which is why it may live here.
+    gain_allowance: int = 2_500_000
+
+
 class NewsConfig(BaseModel):
     # Five items of three sentences in two languages is most of the output
     # tokens this job spends, and the digest is read on a phone.
@@ -248,6 +265,7 @@ class Config(BaseModel):
     projects: ProjectsConfig = Field(default_factory=ProjectsConfig)
     news: NewsConfig = Field(default_factory=NewsConfig)
     karrot: KarrotConfig = Field(default_factory=KarrotConfig)
+    plans: PlansConfig = Field(default_factory=PlansConfig)
 
     @property
     def tz(self) -> ZoneInfo:

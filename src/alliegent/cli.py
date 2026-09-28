@@ -7,6 +7,7 @@ can be checked before letting the scheduler loose:
     uv run python -m alliegent.cli scaffold          # preview only
     uv run python -m alliegent.cli scaffold --commit # actually create rows
     uv run python -m alliegent.cli feeds             # what each news feed returns
+    uv run python -m alliegent.cli plan              # last month against its plan
 
 Add --send to post the result to the Discord channel the job would normally
 use. That verifies the token, the channel IDs, and the bot's permissions in
@@ -24,7 +25,7 @@ from .config import get_config, get_secrets
 from .integrations.notion import NotionClient, NotionError
 from .jobs import Jobs
 
-JOBS = ("brief", "news", "incomplete", "planning", "scaffold", "stale", "review")
+JOBS = ("brief", "news", "incomplete", "planning", "scaffold", "stale", "review", "plan")
 
 # Diagnostics rather than jobs: they report on the setup instead of producing
 # a message, so they have nothing to post and no channel to post it to.
@@ -39,6 +40,7 @@ JOB_CHANNEL = {
     "scaffold": "agenda",
     "stale": "projects",
     "review": "review",
+    "plan": "assets",
 }
 
 
@@ -110,6 +112,28 @@ async def check_feeds(config) -> int:
     return 1 if broken else 0
 
 
+async def plan_status(plans, today) -> str:
+    """Why `plan` had nothing to show, which is most days.
+
+    Reading the rows at all proves the database id, the integration's access
+    and the column names -- the three things that would otherwise first fail
+    on the 1st, at nine, in the channel.
+    """
+    if plans is None:
+        return "Plans are off: NOTION_ASSETS_DB_ID and NOTION_PLANS_DB_ID are both needed."
+    from .plans import month_of, previous_month
+
+    rows = await plans.all_plans()
+    if not rows:
+        return "The Plans database has no rows with a YYYY-MM title."
+    month = month_of(previous_month(today.replace(day=1)))
+    return (
+        f"Read {len(rows)} months of plan ({rows[0].month} to {rows[-1].month}). "
+        f"Nothing to show for {month}: no row for it yet, or no snapshot "
+        f"dated after it ended."
+    )
+
+
 async def _run(name: str, commit: bool, send: bool) -> int:
     config = get_config()
     # Before the secrets: a check needs the network, not a Notion token, and
@@ -130,13 +154,27 @@ async def _run(name: str, commit: bool, send: bool) -> int:
         if secrets.notion_projects_db_id
         else None
     )
+    from .assets import AssetService
     from .integrations.calendar import make_source
+    from .plans import PlanService
 
+    assets = (
+        AssetService(client, config, secrets.notion_assets_db_id)
+        if secrets.notion_assets_db_id
+        else None
+    )
+    plans = (
+        PlanService(client, config, secrets.notion_plans_db_id)
+        if assets and secrets.notion_plans_db_id
+        else None
+    )
     jobs = Jobs(
         agenda,
         projects,
         config,
         printer,
+        assets=assets,
+        plans=plans,
         anthropic_api_key=secrets.anthropic_api_key,
         calendar_source=make_source(secrets),
     )
@@ -154,6 +192,12 @@ async def _run(name: str, commit: bool, send: bool) -> int:
             message = await jobs.build_stale_projects()
         elif name == "review":
             message = await jobs.build_weekly_review()
+        elif name == "plan":
+            # Never writes: no link, no Revised. A preview that changed the
+            # database would make the real run on the 1st report nothing.
+            message = await jobs.build_plan_check(commit=False)
+            if message is None:
+                print(await plan_status(plans, jobs.today()))
         elif name == "scaffold":
             message = await jobs.week_scaffold(commit=commit)
             if not commit:

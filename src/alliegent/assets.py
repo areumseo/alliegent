@@ -45,6 +45,14 @@ EXPECTED = ("ESPP", "Bonus")
 HELD = LIQUID + LOCKED
 BUCKETS = HELD + EXPECTED
 
+# A detail of Stock/Funds, not a bucket of its own: the part of it that is
+# company stock, sold out of Vested but still the same shares. The plan caps
+# Vested plus this at a share of Liquid, which Vested alone understates. It is
+# read and carried with every row and never added to a total -- it is already
+# inside Stock/Funds.
+SNOW = "SNOW"
+COLUMNS = (*BUCKETS, SNOW)
+
 LABELS = {
     "Savings": "Savings",
     "Stock/Funds": "Stock/Funds",
@@ -106,7 +114,7 @@ class AssetService:
             id=page["id"],
             day=n.read_date(page, "Date"),
             amounts={
-                name: int(n.read_number(page, name) or 0) for name in BUCKETS
+                name: int(n.read_number(page, name) or 0) for name in COLUMNS
             },
             note=n.read_text(page, "Note"),
         )
@@ -132,7 +140,7 @@ class AssetService:
             "Name": n.title(day.isoformat()),
             "Date": n.date_prop(day),
         }
-        for name in BUCKETS:
+        for name in COLUMNS:
             if name in amounts:
                 props[name] = n.number(int(amounts[name]))
 
@@ -169,6 +177,12 @@ class AssetService:
         amounts = {name: base.amounts.get(name, 0) for name in BUCKETS}
         amounts[target] = before + amount
         amounts[source] = 0
+        # Carried too, or a rollover row on the 1st -- which is what the plan
+        # report reads as the month's end -- would show no company stock.
+        # Only when there is some, so a database without the column still
+        # takes the write.
+        if base.amounts.get(SNOW):
+            amounts[SNOW] = base.amounts[SNOW]
         await self.record(today, amounts)
         return amount, before, before + amount
 
