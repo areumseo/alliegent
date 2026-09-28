@@ -18,6 +18,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | Bonus rollover | 1 Apr and 1 Oct, 09:00 | Moves the half-yearly bonus from Expected into Savings once it has been paid |
 | ESPP rollover | Day after each purchase date, 09:00 | Moves ESPP contributions into Vested once they have become shares |
 | Asset prompt | Mon 09:00 | Asks for this week's balances, carrying last week's figures to edit |
+| Plan check | 1st of the month, or the first day after it with a snapshot, 09:00 | The month just finished against its row in Plans: each half against its target, where Total sits between Low and High, the change split into savings, company inflows and market, and the warnings the plan sets |
 | Karrot candidates | Mon 09:00 | What is decided on but not yet listed. Silent when there is nothing waiting |
 | Karrot sales | Sat 20:00 | The week's sales, with the month, the year and the running total. Silent when nothing sold and nothing is owed |
 | Weekly review | Sun 21:00 | Completion stats for the past week as a review draft |
@@ -120,7 +121,7 @@ Preview any job in the terminal without posting to Discord:
 uv run python -m alliegent.cli brief
 ```
 
-Jobs: `brief`, `news`, `incomplete`, `planning`, `scaffold`, `stale`, `review`.
+Jobs: `brief`, `news`, `incomplete`, `planning`, `scaffold`, `stale`, `review`, `plan`.
 
 Add `--send` to actually post the result to the Discord channel that job uses. This checks the bot token, the channel IDs, and the bot's channel permissions in one go, rather than waiting until 08:00 to discover one of them is wrong:
 
@@ -302,6 +303,29 @@ The bonus is paid at the end of September and March, and on the first of the fol
 Monday's prompt carries last week's figures rather than presenting a blank form: editing numbers is faster than recalling them, and a bucket you forgot shows up as one that did not change. Recording twice in the same week corrects that week's row instead of adding a second — otherwise the next comparison would measure a change of zero.
 
 Every amount lives in Notion. Nothing in this repository contains one, and the examples and fixtures are invented.
+
+## Monthly plan check
+
+A 💰 Plans database holds one row per month (`Month` titled `YYYY-MM`) with the targets for that month's end — `Target Total`, `Target Liquid`, `Target Locked`, and a `Low`–`High` range — and what the plan expects to arrive from the employer: `RSU Vest (net)`, `ESPP Buy`, `DC`. `Realized Gain` is filled in by hand in a month when shares are sold. `NOTION_PLANS_DB_ID` switches it on, and it needs the Assets database as well.
+
+**A month closes on the first snapshot dated on or after the following 1st.** The 1st usually has nothing on it, so the next snapshot stands in: the check runs daily and reports once, on the day that snapshot exists, then links the month's row to it through `Actual Snapshot`. The link is the record that the report went out — the next day's run finds the row linked and says nothing. On the 1st itself, with no snapshot yet, it asks for one.
+
+**The month's change is split three ways, and the parts add up.** Savings is the change in Savings. Company inflows are the plan's RSU, ESPP and DC for the month — DC included because a pension that grew only by its contribution earned nothing. Market is what Stock/Funds, Vested and Pension did beyond those inflows. Deposit and Mom are neither and get a line of their own when they move, so the parts always sum to the change in Total. The inflows are the *planned* figures; when what arrived differs, the difference lands in Market, and the report says so.
+
+**What it warns about**, with the thresholds in `[plans]` in `alliegent.toml`:
+
+- **SNOW over 30% of Liquid.** SNOW here is Vested plus the `SNOW` column in Assets — company stock sold out of Vested and kept in Stock/Funds is still the same company, and Vested alone would understate it. `SNOW` is a detail of Stock/Funds, never a bucket of its own, and is never added to a total.
+- **Three months in a row closing under Low.** The month's row is marked `Revised` and the report says to recompute the remaining targets. A month nobody linked breaks the run rather than counting either way.
+- **A vesting month** — any row with `RSU Vest (net)` — reminds you to check 35–40% was sold to cover the tax.
+- **A month with a sale** shows the year's realised foreign-stock gains against the ₩2,500,000 allowance, and warns once they pass it.
+
+Preview it without writing anything — no link, no `Revised`:
+
+```bash
+uv run python -m alliegent.cli plan
+```
+
+On a day with nothing to report it says how many months of plan it read, which is enough to prove the database id, the integration's access and the column names before the first real run.
 
 ## Karrot listings
 

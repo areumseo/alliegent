@@ -18,6 +18,9 @@ karrot_report_weekday = "sat"       # Karrot: what the week sold
 karrot_report_time = "20:00"
 asset_prompt_weekday = "mon"        # Assets: record this week's balances
 asset_prompt_time = "09:00"
+# Month end against the plan. Checked daily, reported once: on the first day
+# a snapshot dated on or after the 1st exists.
+plan_report_time = "09:00"
 english_quiz = "20:30"              # English: quiz on today's lesson, if any
 # Nudge about today's unfinished items. One in the afternoon while the day
 # can still change, one at night to close it out. Silent when nothing is left.
@@ -36,6 +39,12 @@ stale_project_weekday = "wed"
 stale_project_time = "10:00"
 weekly_review_weekday = "sun"
 weekly_review_time = "21:00"
+
+[plans]
+# Vested + SNOW as a share of Liquid, above which the check warns.
+snow_cap = 0.30
+# Months in a row closing under Low before the row is marked Revised.
+low_streak = 3
 
 [news]
 # How many stories the digest aims for. The model returns fewer when fewer

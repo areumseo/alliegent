@@ -14,6 +14,7 @@ from .english import EnglishService
 from .integrations.discord_bot import AlliegentBot
 from .integrations.notion import NotionClient
 from .karrot import ExpenseService, KarrotService
+from .plans import PlanService
 from .scheduler import build_scheduler
 
 log = logging.getLogger(__name__)
@@ -85,6 +86,16 @@ async def main() -> None:
     if assets is None:
         log.warning("NOTION_ASSETS_DB_ID not set — asset tracking is disabled")
 
+    # Needs the assets too: a plan with no snapshots to hold against it has
+    # nothing to report, and would only ever say so.
+    plans = (
+        PlanService(client, config, secrets.notion_plans_db_id)
+        if assets and secrets.notion_plans_db_id
+        else None
+    )
+    if assets and plans is None:
+        log.warning("NOTION_PLANS_DB_ID not set — the monthly plan check is disabled")
+
     english = (
         EnglishService(
             client,
@@ -130,6 +141,7 @@ async def main() -> None:
             karrot=karrot,
             expenses=expenses,
             assets=assets,
+            plans=plans,
             english=english,
             secrets=secrets,
             guild_id=secrets.discord_guild_id,
