@@ -401,6 +401,24 @@ def group_statuses(schema_property: dict[str, Any], member: str) -> set[str]:
     return {member}
 
 
+def is_canceled(
+    page: dict[str, Any], prop: str, done_value: str, closed: set[str] | None = None
+) -> bool:
+    """Closed, but not by being done: the rest of the Complete group.
+
+    Canceled stays out of what is left and what is overdue -- it needs no
+    more attention -- but it is not work finished, and reading it as done
+    fills the Done list with things that never happened and flatters every
+    completion rate. A checkbox has no third state, so it is never canceled.
+    """
+    value = page.get("properties", {}).get(prop) or {}
+    if value.get("type") == "checkbox":
+        return False
+    if not is_done(page, prop, done_value, closed):
+        return False
+    return (read_status(page, prop) or "").casefold() != done_value.casefold()
+
+
 def closed_statuses(schema_property: dict[str, Any], done_value: str) -> set[str]:
     """Every status name that counts as finished."""
     return group_statuses(schema_property, done_value)

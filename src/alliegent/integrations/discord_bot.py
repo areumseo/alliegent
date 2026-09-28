@@ -793,10 +793,12 @@ def _register(bot: AlliegentBot) -> None:
             return
         chosen, day = resolved
 
-        already = [i.title for i in chosen if i.done]
+        # Canceled counts as closed, not as done: /done on it means it happened
+        # after all, so it is marked rather than reported as already done.
+        already = [i.title for i in chosen if i.done and not i.canceled]
         marked = []
         for item in chosen:
-            if item.done:
+            if item.done and not item.canceled:
                 continue
             await bot.agenda.set_done(item.id)
             marked.append(item.title)
