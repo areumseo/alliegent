@@ -233,7 +233,9 @@ def test_the_warning_names_both_buckets_and_the_date():
         pending=A.moves_before(date(2026, 9, 28), Config().schedule),
     )
     assert "Bonus" in text and "Savings" in text and "2026-10-01" in text
-    assert "twice" in text  # the double-counting trap, said out loud
+    # Both ways the money can stand, because pay can land before the move.
+    assert "Already arrived? Count it in Savings and set Bonus to 0" in text
+    assert "Not yet? Put the real amount in Bonus and leave it out of Savings" in text
 
 
 def test_an_ordinary_week_carries_no_warning():
