@@ -15,6 +15,7 @@ from .integrations.discord_bot import AlliegentBot
 from .integrations.notion import NotionClient
 from .karrot import ExpenseService, KarrotService
 from .plans import PlanService
+from .retirement import RetirementService
 from .scheduler import build_scheduler
 
 log = logging.getLogger(__name__)
@@ -96,6 +97,12 @@ async def main() -> None:
     if assets and plans is None:
         log.warning("NOTION_PLANS_DB_ID not set — the monthly plan check is disabled")
 
+    retirement = (
+        RetirementService(client, config, secrets.notion_retirement_db_id)
+        if assets and secrets.notion_retirement_db_id
+        else None
+    )
+
     english = (
         EnglishService(
             client,
@@ -142,6 +149,7 @@ async def main() -> None:
             expenses=expenses,
             assets=assets,
             plans=plans,
+            retirement=retirement,
             english=english,
             secrets=secrets,
             guild_id=secrets.discord_guild_id,

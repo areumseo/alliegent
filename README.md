@@ -41,7 +41,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/overdue` | Overdue, unfinished items — numbered, so they can be cleared |
 | `/projects summary` · `open` · `log <project>` · `status <project> <status>` | The last seven days of every open project; what is open in each; one project's day so far, as tonight's post will say it; set a project's status in Notion (a Done one can be reopened). Typed inside a project's forum post, they answer in that post |
 | `/brief` | Run the daily brief now |
-| `/assets show` · `/assets trend` · `/assets plan` · `/assets gain <amount> [month]` | Latest snapshot with what changed, the recent history, the latest snapshot against the month it is heading for, and a realised gain on foreign shares recorded against the year's allowance |
+| `/assets show` · `/assets trend` · `/assets plan` · `/assets gain <amount> [month]` · `/assets retirement` | Latest snapshot with what changed, the recent history, the latest snapshot against the month it is heading for, a realised gain on foreign shares recorded against the year's allowance, and income after retirement in won a month |
 | `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `spent`, `bought`, `sales`, `summary` |
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
 
@@ -331,6 +331,12 @@ uv run python -m alliegent.cli plan
 On a day with nothing to report it says how many months of plan it read, which is enough to prove the database id, the integration's access and the column names before the first real run.
 
 **Between checks, from Discord.** `/assets plan` holds the latest snapshot against the month it is heading for — the first row not yet behind it — and writes nothing, so a look taken mid-month cannot change what the 1st finds. A snapshot part-way through a month reads short until that month's pay and inflows land, and the reply says so. `/assets gain <amount> [month]` adds a realised gain to the month's `Realized Gain` (a loss as a negative number; added, not replaced, since a month can hold more than one sale) and answers with the year's total against the allowance. A month with no row of its own — a sale before the plan began — goes on the first row of the same year, because the allowance counts the year, not the month.
+
+## Retirement income
+
+A 🌅 Retirement Income database holds one row per source of income after work stops — a public pension at home or abroad, a company pension, what the investments will be drawn down as — with `Monthly` in the currency it will be paid in, `Currency`, `Start Age`, `Status` (`Confirmed`, `Estimate`, `Unknown`) and a `Note`. `NOTION_RETIREMENT_DB_ID` switches it on, alongside the Assets database.
+
+It is kept out of both the snapshots and the plan on purpose: those measure what is held now, and income that starts decades away would read there as money on hand. `/assets retirement` lists every source in its own currency and in won a month, converted at the day's European Central Bank reference rate ([Frankfurter](https://frankfurter.dev), no key) and never stored, since a rate written down would be wrong the next day. A source with no amount yet stays in the table as `?` and is named under it, so a total over what is known so far is not mistaken for the whole.
 
 ## Projects forum
 
