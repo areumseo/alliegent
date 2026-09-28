@@ -40,6 +40,10 @@ class Secrets(BaseSettings):
 
     anthropic_api_key: str = ""
 
+    # Optional. Public repositories are read without one; a private one needs
+    # a token that can read contents, pull requests and issues.
+    github_token: str = ""
+
     # Preferred calendar source: authenticated, nothing published. The
     # password is an app-specific one from appleid.apple.com, revocable on its
     # own without touching the account password.
@@ -158,6 +162,13 @@ class ProjectProps(BaseModel):
     # Name a column here only if you keep one up to date by hand.
     next_action: str = ""
     last_activity: str = ""
+    # GitHub repositories, as owner/repo or their URLs, comma-separated. A
+    # project with none stays out of the #projects forum -- which is how the
+    # forum is limited to the projects that have code to report on.
+    repos: str = "GitHub"
+    # Where the bot records the forum post it made for the project. Written by
+    # the bot; kept in Notion so a renamed project keeps its post.
+    thread: str = "Discord Thread"
 
 class Schedule(BaseModel):
     daily_brief: str = "08:00"
@@ -204,6 +215,9 @@ class Schedule(BaseModel):
     # is recorded first on or after the 1st, which is usually a Monday later.
     # The report goes out once, on the day that snapshot exists.
     plan_report_time: str = "09:00"
+    # Each project's day in its #projects post: what was done, what is in
+    # review, what is next. Late enough to catch the evening's work.
+    project_log_time: str = "22:00"
 
     @field_validator("incomplete_alert", mode="before")
     @classmethod
