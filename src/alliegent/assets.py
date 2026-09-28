@@ -365,11 +365,20 @@ def moves_before(today: date, schedule, *, days: int = 7) -> list[PendingMove]:
 
 
 def _pending_line(move: PendingMove) -> str:
+    """Both ways the money can stand this week, and the entry for each.
+
+    The earlier wording assumed the money had not arrived yet: real amount in
+    the source, target as the bank shows it. Pay can land before the move --
+    a bonus with the month's salary -- and then the bank already holds it, so
+    that advice put it in twice: once in the target from the bank balance,
+    once more when the move carried the source across.
+    """
+    src, dst = move.source, move.target
     return (
-        f"⚠️ **{move.source} moves into {move.target} on {move.day.isoformat()}.** "
-        f"Whatever {move.source} holds then is what moves, so put the real amount "
-        f"in it this week — and leave {move.target} as your bank shows it: adding "
-        "it there yourself as well would count it twice."
+        f"⚠️ **{src} moves into {dst} on {move.day.isoformat()}**, carrying whatever "
+        f"{src} holds then. Already arrived? Count it in {dst} and set {src} to 0 — "
+        f"the move then has nothing to carry. Not yet? Put the real amount in {src} "
+        f"and leave it out of {dst}. Either way it is counted once."
     )
 
 
