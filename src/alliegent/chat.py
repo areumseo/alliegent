@@ -187,7 +187,7 @@ class ChatAgent:
                 if not items:
                     return f"No items on {day.isoformat()}."
                 return "\n".join(
-                    f"- {i.title} [{'done' if i.done else 'not done'}]" for i in items
+                    f"- {i.title} [{_state(i)}]" for i in items
                 )
 
             if name == "list_overdue":
@@ -254,7 +254,9 @@ class ChatAgent:
                 if name == "delete_item":
                     await self._agenda.trash(match.id)
                     return f"Moved '{match.title}' to the trash in Notion."
-                if match.done:
+                # Canceled is closed but not done: marking it done is a real
+                # change -- it happened after all -- not a no-op.
+                if match.done and not match.canceled:
                     return f"'{match.title}' was already done."
                 await self._agenda.set_done(match.id)
                 return f"Marked '{match.title}' done."
@@ -333,3 +335,11 @@ def strip_mentions(text: str, bot_id: int) -> str:
     for form in (f"<@{bot_id}>", f"<@!{bot_id}>"):
         text = text.replace(form, " ")
     return " ".join(text.split())
+
+
+def _state(item) -> str:
+    """How the model is told an item stands. Canceled is its own answer: told
+    "done", it would report called-off plans as things that happened."""
+    if item.canceled:
+        return "canceled"
+    return "done" if item.done else "not done"

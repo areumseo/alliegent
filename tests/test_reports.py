@@ -742,3 +742,58 @@ def test_a_rule_takes_no_part_in_the_widths():
 def test_a_table_of_nothing_but_rules_is_no_table():
     """Empty means no rows to show, and a rule is not a row."""
     assert reports._table(("A",), [None, None], flex=0) == []
+
+
+# -- canceled, apart from done ---------------------------------------------
+# Called off is closed -- not left, not overdue -- but it did not happen, so it
+# is neither listed as Done nor counted towards a completion rate.
+
+
+def closed(title, *, canceled=False, day=TODAY):
+    return AgendaItem(
+        id=title, title=title, day=day, status=None, done=True, url="", canceled=canceled
+    )
+
+
+def test_the_day_lists_canceled_apart_from_done():
+    items = [closed("did it"), closed("called off", canceled=True), item("still open")]
+    text = reports.incomplete_alert(TODAY, items, [])
+    done_part = text.split("**Done (1)**")[1].split("**Canceled")[0]
+    assert "did it" in done_part and "called off" not in done_part
+    assert "**Canceled (1)**" in text
+    assert "called off" in text.split("**Canceled (1)**")[1]
+
+
+def test_canceled_keeps_its_number_for_the_day():
+    """/done and /delete resolve numbers against the whole day."""
+    items = [closed("did it"), closed("called off", canceled=True)]
+    text = reports.incomplete_alert(TODAY, items + [item("open")], [])
+    assert row(text.split("**Canceled (1)**")[1], 2).startswith("2 ")
+
+
+def test_a_day_with_nothing_canceled_has_no_canceled_section():
+    text = reports.incomplete_alert(TODAY, [closed("did it"), item("open")], [])
+    assert "Canceled" not in text
+
+
+def test_canceled_is_marked_x_where_all_items_share_a_table():
+    lines = reports.day_table([closed("called off", canceled=True), closed("did it")])
+    assert row("\n".join(lines), 1).split()[1] == "x"
+    assert row("\n".join(lines), 2).split()[1] == "v"
+
+
+def test_the_weekly_rate_leaves_canceled_out_of_both_sides():
+    items = [closed("a"), closed("b", canceled=True), item("c")]
+    text = reports.weekly_review(TODAY, TODAY, items)
+    assert "Done 1 of 2 (50%), 1 canceled" in text
+
+
+def test_status_leaves_canceled_out_of_the_rate():
+    items = [closed("a"), closed("b", canceled=True), item("c")]
+    text = reports.status(TODAY, items, [], items, today=TODAY)
+    assert "1 of 2 done (50%), 1 canceled" in text
+
+
+def test_a_day_that_was_all_called_off_says_so():
+    items = [closed("a", canceled=True), closed("b", canceled=True)]
+    assert "all 2 canceled" in reports.status(TODAY, items, [], items, today=TODAY)

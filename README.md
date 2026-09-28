@@ -49,7 +49,7 @@ Everything the bot writes in Discord is English, so nothing needs an input-metho
 
 The weekly review is one table for the whole week rather than a block per day, with the date printed on each day's first row: the date column groups it just as well, and a dozen two-row blocks is harder to read down than a single column of dates. The weekly plan gives every day of the coming week a row, empty ones included — the shape of the week is the thing being planned, and a day with nothing on it is the row that most needs to be seen.
 
-Every message that shows the day shows all of it, in two sections: **Left today**, then **Done**. What you have already finished is context for how the day is going, but it is not what you are reading the list to decide, so it sits below rather than ticked in among the open items. The Done table drops the state column — every row in it is done — and both sections keep the day's own numbers, which is what `/done` and `/delete` resolve against. That is why the numbers skip within each section rather than restarting at 1.
+Every message that shows the day shows all of it: **Left today**, then **Done**, then **Canceled** when anything was called off. What you have already finished is context for how the day is going, but it is not what you are reading the list to decide, so it sits below rather than ticked in among the open items. The Done table drops the state column — every row in it is done — and every section keeps the day's own numbers, which is what `/done` and `/delete` resolve against. That is why the numbers skip within each section rather than restarting at 1. Canceled is listed apart from Done because called off is not finished: it is closed — never left, never overdue — but a day that dropped half its plans should not read like one that did them all. For the same reason it leaves completion rates on both sides: `/status` and the weekly review count done out of what was not canceled, and say how many were.
 
 `overdue` is a list in its own right: `/done 2 overdue`, `/delete 1,3 overdue`. Type it straight through — Discord only moves to the next option when you press Tab, so the day usually lands in the numbers field, and the commands read it back out from there rather than answering "Not a number". Delayed items span days, so no day argument reaches them, and a backlog that can only be looked at is a backlog that stays.
 
@@ -393,7 +393,7 @@ Any job can be switched off the same way: blank its time in `alliegent.toml`.
 
 | Group | Shown as | Why |
 | --- | --- | --- |
-| Complete (`Done`, `Canceled`) | `✅`, or `v` in a table |  Needs no more attention. Cancelling is a decision, not an omission — until this was read properly, cancelled items kept appearing in the brief and the overdue list |
+| Complete (`Done`, `Canceled`) | `✅` / `❌`, or `v` / `x` in a table |  Needs no more attention. Cancelling is a decision, not an omission — until this was read properly, cancelled items kept appearing in the brief and the overdue list |
 | In progress (`In progress`, `On hold`) | `🔸`, or `>` in a table |  Already begun, so it needs finishing rather than starting. "2 of 7 done" reads the same whether two things are half-finished or nothing has been touched |
 | To-do (`Not started`, `Ready`) | *nothing* | An unchecked box on every line of a mostly-unstarted list is noise |
 

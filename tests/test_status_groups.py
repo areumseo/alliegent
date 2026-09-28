@@ -157,3 +157,30 @@ def test_the_in_progress_group_is_read_from_the_schema():
         "In progress",
         "On hold",
     }
+
+
+# -- canceled is closed, but not done --------------------------------------
+# It stays out of what is left and what is overdue, and out of what was done.
+
+
+async def test_a_cancelled_item_is_closed_and_canceled():
+    _, svc = service([make_page("p1", "called off", day=DAY.isoformat(), status="Cancelled")])
+    item = (await svc.items_on(DAY))[0]
+    assert item.done is True and item.canceled is True
+
+
+async def test_a_done_item_is_not_canceled():
+    _, svc = service([make_page("p1", "did it", day=DAY.isoformat(), status="Done")])
+    assert (await svc.items_on(DAY))[0].canceled is False
+
+
+async def test_an_open_item_is_not_canceled():
+    _, svc = service([make_page("p1", "open", day=DAY.isoformat(), status="Not started")])
+    assert (await svc.items_on(DAY))[0].canceled is False
+
+
+async def test_a_checkbox_is_never_canceled():
+    """A checkbox has no third state."""
+    schema = {"Status": {"type": "checkbox"}}
+    _, svc = service([make_page("p1", "x", day=DAY.isoformat(), checkbox=True)], schema=schema)
+    assert (await svc.items_on(DAY))[0].canceled is False

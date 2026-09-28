@@ -45,6 +45,8 @@ def _mark(item: AgendaItem) -> str:
     reader -- finishing rather than beginning -- and that was invisible when
     the list only distinguished done from not done.
     """
+    if item.canceled:
+        return "❌ "
     if item.done:
         return "✅ "
     if item.started:
@@ -65,7 +67,7 @@ TABLE_COLS = 40
 MIN_TASK_COLS = 12
 # Ticks and diamonds are emoji, which a code block renders at an unpredictable
 # width; inside the table the state is ASCII.
-MARKS = {"done": "v", "started": ">", "": ""}
+MARKS = {"done": "v", "canceled": "x", "started": ">", "": ""}
 
 
 def _width(text: str) -> int:
@@ -90,6 +92,8 @@ def _pad(text: str, cells: int) -> str:
 
 
 def _table_mark(item: AgendaItem) -> str:
+    if item.canceled:
+        return MARKS["canceled"]
     if item.done:
         return MARKS["done"]
     if item.started:
@@ -213,18 +217,40 @@ def done_table(todays: list[AgendaItem]) -> list[str]:
     still the day's own, so they stay the ones /done and /delete resolve --
     which is why they skip here.
     """
+    return _closed_table(todays, canceled=False)
+
+
+def canceled_table(todays: list[AgendaItem]) -> list[str]:
+    """What was called off, in the same shape as the Done table."""
+    return _closed_table(todays, canceled=True)
+
+
+def _closed_table(todays: list[AgendaItem], *, canceled: bool) -> list[str]:
     rows, _ = _rows(todays, when=_clock)
-    finished = [row for row, item in zip(rows, todays, strict=True) if item.done]
+    picked = [
+        row
+        for row, item in zip(rows, todays, strict=True)
+        if item.done and item.canceled == canceled
+    ]
     return _table(
         ("#", "Time", "Task", "Category"),
-        [(number, when, title, category) for number, _, when, title, category in finished],
+        [(number, when, title, category) for number, _, when, title, category in picked],
         flex=2,
         right=(0,),
     )
 
 
+def finished(item: AgendaItem) -> bool:
+    """Done, and done by doing it -- not closed by being called off."""
+    return item.done and not item.canceled
+
+
 def done_count(todays: list[AgendaItem]) -> int:
-    return len([i for i in todays if i.done])
+    return len([i for i in todays if finished(i)])
+
+
+def canceled_count(todays: list[AgendaItem]) -> int:
+    return len([i for i in todays if i.canceled])
 
 
 def _done_block(todays: list[AgendaItem]) -> list[str]:
@@ -235,9 +261,14 @@ def _done_block(todays: list[AgendaItem]) -> list[str]:
     is ahead of you makes the list you actually act on something to pick out
     of a longer one. Empty when nothing is done yet.
     """
-    if not done_count(todays):
-        return []
-    return ["", f"**Done ({done_count(todays)})**", *done_table(todays)]
+    out: list[str] = []
+    if done_count(todays):
+        out += ["", f"**Done ({done_count(todays)})**", *done_table(todays)]
+    # Its own section rather than rows in Done: a day that called off half
+    # its plans and a day that did them all should not read the same.
+    if canceled_count(todays):
+        out += ["", f"**Canceled ({canceled_count(todays)})**", *canceled_table(todays)]
+    return out
 
 
 def open_count(todays: list[AgendaItem]) -> int:
@@ -448,14 +479,20 @@ def weekly_review(start: date, end: date, items: list[AgendaItem]) -> str:
     a review that hides a third of the week defeats itself, and long messages
     are chunked before sending.
     """
-    done = [i for i in items if i.done]
-    total = len(items)
+    # Canceled items leave the count on both sides: called off is neither
+    # done nor missed, and counting it either way skews the rate.
+    done = [i for i in items if finished(i)]
+    called_off = canceled_count(items)
+    total = len(items) - called_off
     rate = round(len(done) / total * 100) if total else 0
+    summary = f"Done {len(done)} of {total} ({rate}%)"
+    if called_off:
+        summary += f", {called_off} canceled"
 
     out = [
         f"📋 **Weekly review — {fmt_date(start)} to {fmt_date(end)}**",
         "",
-        f"Done {len(done)} of {total} ({rate}%)",
+        summary,
         "",
     ]
 
@@ -475,10 +512,11 @@ def weekly_review(start: date, end: date, items: list[AgendaItem]) -> str:
     rows: list[tuple[str, ...]] = []
     for day in sorted(by_day):
         entries = by_day[day]
-        finished = sum(1 for i in entries if i.done)
+        did = sum(1 for i in entries if finished(i))
+        planned = len(entries) - canceled_count(entries)
         label = fmt_date(day)
-        if finished < len(entries):
-            label += f" {finished}/{len(entries)}"
+        if did < planned:
+            label += f" {did}/{planned}"
         for offset, entry in enumerate(entries):
             rows.append(
                 (label if offset == 0 else "", _table_mark(entry), entry.title,
@@ -536,10 +574,16 @@ def status(
     is_today = today is None or day == today
 
     def ratio(items: list[AgendaItem]) -> str:
-        done = sum(1 for i in items if i.done)
         if not items:
             return "nothing scheduled"
-        text = f"{done} of {len(items)} done ({round(done / len(items) * 100)}%)"
+        done = sum(1 for i in items if finished(i))
+        called_off = canceled_count(items)
+        planned = len(items) - called_off
+        if not planned:
+            return f"all {called_off} canceled"
+        text = f"{done} of {planned} done ({round(done / planned * 100)}%)"
+        if called_off:
+            text += f", {called_off} canceled"
         # Counted separately rather than folded into the percentage: a day
         # with three things underway is in a different state from one where
         # nothing has been touched, and both read as "2 of 7" otherwise.

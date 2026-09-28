@@ -46,6 +46,9 @@ class AgendaItem:
     at: time | None = None
     created: datetime | None = None
     started: bool = False
+    # Closed without being done. `done` stays true for it -- it is finished
+    # with -- so this is what tells the two apart wherever that matters.
+    canceled: bool = False
 
     def sort_key(self) -> tuple:
         """Where this item sits in its day.
@@ -197,6 +200,9 @@ class AgendaService:
             started=bool(
                 self._started
                 and (n.read_status(page, p.status) or "") in self._started
+            ),
+            canceled=n.is_canceled(
+                page, p.status, self._cfg.agenda.status_values["done"], self._closed
             ),
         )
 
