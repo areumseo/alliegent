@@ -374,6 +374,38 @@ def test_the_plan_has_its_own_subcommands():
     assert {"assets plan", "assets gain"} <= names
 
 
+def test_projects_is_a_group_of_its_own_commands():
+    names = {c.qualified_name for c in leaf_commands(make_bot())}
+    assert {"projects summary", "projects open", "projects log", "projects status"} <= names
+
+
+async def test_a_command_in_a_project_post_answers_in_that_post():
+    """A forum post's parent is the forum; typed there, the answer stays there
+    rather than going to Overview."""
+    from types import SimpleNamespace
+
+    from alliegent.integrations.discord_bot import _deliver
+
+    sent = []
+
+    class Followup:
+        async def send(self, text, **_):
+            sent.append(text)
+
+    bot = make_bot()
+    bot.secrets = Secrets(discord_channel_id=123, discord_projects_channel_id=500)
+
+    async def notify(message, kind):  # would mean it went to Overview
+        raise AssertionError("posted to Overview")
+
+    bot.notify = notify
+    interaction = SimpleNamespace(
+        channel_id=777, channel=SimpleNamespace(parent_id=500), followup=Followup()
+    )
+    await _deliver(bot, interaction, "hello", "projects")
+    assert sent == ["hello"]
+
+
 # -- projects --------------------------------------------------------------
 
 

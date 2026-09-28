@@ -111,8 +111,14 @@ class GitHub:
             subject = commit["commit"]["message"].splitlines()[0]
             activity.done.append(Line(subject, commit["html_url"]))
 
-        if not open_items:
-            return activity
+        if open_items:
+            opened = await self.open_items(repo)
+            activity.in_review, activity.issues = opened.in_review, opened.issues
+        return activity
+
+    async def open_items(self, repo: str) -> Activity:
+        """Open pull requests and issues, with nothing about what landed."""
+        activity = Activity(repo)
         for pr in await self._get(repo, "/pulls", state="open", per_page=50):
             activity.in_review.append(Line(f"{pr['title']} (#{pr['number']})", pr["html_url"]))
         for issue in await self._get(repo, "/issues", state="open", per_page=50):

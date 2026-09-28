@@ -232,6 +232,9 @@ class Schedule(BaseModel):
     # Each project's day in its #projects post: what was done, what is in
     # review, what is next. Late enough to catch the evening's work.
     project_log_time: str = "22:00"
+    # What is open in every project, in the #projects Overview post: the
+    # morning half of the log, read when the day is being planned.
+    project_open_time: str = "08:00"
 
     @field_validator("incomplete_alert", mode="before")
     @classmethod

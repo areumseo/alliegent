@@ -123,3 +123,44 @@ def week_message(
                 "still in progress, or time to put it on hold?"
             )
     return "\n".join(out)
+
+
+def open_message(
+    today: date,
+    entries: list[tuple[Project, list[Activity], list[AgendaItem], list[str]]],
+) -> str | None:
+    """What is open in every project, for the Overview post each morning.
+
+    The morning half of the log: the nightly post records what was done,
+    this is what is left to do -- in review, then to-do -- read when the day
+    is being planned. A project with nothing open is left out, and a morning
+    with nothing open anywhere posts nothing.
+    """
+    blocks: list[str] = []
+    for project, activities, todo_items, errors in entries:
+        # The repository is named only when there is more than one to tell apart.
+        several = len(project.repos) > 1
+        review = [
+            _bullet(line, a.repo if several else None)
+            for a in activities
+            for line in a.in_review
+        ]
+        todo = [
+            f"• {item.title}" + (f" ({reports.fmt_date(item.day)})" if item.day else "")
+            for item in todo_items[:TODO_LIMIT]
+        ]
+        todo += [
+            _bullet(line, a.repo if several else None) for a in activities for line in a.issues
+        ][: max(0, TODO_LIMIT - len(todo))]
+        problems = [f"⚠️ Couldn't read {reason}" for reason in errors]
+        if not (review or todo or problems):
+            continue
+        block = [f"**{project.title}**"]
+        if review:
+            block += ["In review", *review]
+        if todo:
+            block += ["To-do", *todo]
+        blocks.append("\n".join(block + problems))
+    if not blocks:
+        return None
+    return "\n\n".join([f"☀️ **Open — {reports.fmt_date(today)}**", *blocks])

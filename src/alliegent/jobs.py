@@ -96,12 +96,9 @@ class Jobs:
         today = self.today()
         todays = await self.agenda.items_on(today)
         overdue = await self.agenda.overdue(today)
-        active = (
-            await self.projects.active(today, self.agenda) if self.projects else []
-        )
         events, calendar_problem = await self.calendar_on(today)
         return reports.daily_brief(
-            today, todays, overdue, active, events, calendar_problem=calendar_problem
+            today, todays, overdue, events, calendar_problem=calendar_problem
         )
 
     async def build_incomplete_alert(self) -> str | None:
@@ -230,9 +227,14 @@ class Jobs:
     async def run_plan_check(self) -> None:
         await self._send(await self.build_plan_check(), "assets")
 
-    async def build_project_logs(self) -> tuple[list[tuple[Project, str]], dict[str, date]]:
+    async def build_project_logs(
+        self, *, only: str | None = None
+    ) -> tuple[list[tuple[Project, str]], dict[str, date]]:
         """Each project with a repository and its day, when it had one -- and,
-        by project id, today for each whose code moved, for the sync."""
+        by project id, today for each whose code moved, for the sync.
+
+        `only` narrows it to one project id, for /projects log.
+        """
         if self.projects is None:
             return [], {}
         from . import project_log
@@ -240,7 +242,11 @@ class Jobs:
         from .reports import finished
 
         today = self.today()
-        projects = [p for p in await self.projects.open_projects() if p.repos]
+        projects = [
+            p
+            for p in await self.projects.open_projects()
+            if p.repos and (only is None or p.id == only)
+        ]
         if not projects:
             return [], {}
         github = GitHub(self._secrets.github_token if self._secrets else "")
@@ -272,6 +278,37 @@ class Jobs:
         finally:
             await github.aclose()
         return out, code_days
+
+    async def build_project_open(self) -> str | None:
+        """What is open in every project -- in review and to-do -- for the
+        Overview post each morning."""
+        if self.projects is None:
+            return None
+        from . import project_log
+        from .integrations.github import GitHub, GitHubError
+
+        projects = await self.projects.open_projects()
+        if not projects:
+            return None
+        github = GitHub(self._secrets.github_token if self._secrets else "")
+        entries = []
+        try:
+            for project in projects:
+                activities, errors = [], []
+                for repo in project.repos:
+                    try:
+                        activities.append(await github.open_items(repo))
+                    except (GitHubError, httpx.HTTPError) as exc:
+                        log.warning("GitHub: %s", exc)
+                        errors.append(str(exc))
+                linked = await self.agenda.items_for_project(project.id)
+                entries.append((project, activities, [i for i in linked if not i.done], errors))
+        finally:
+            await github.aclose()
+        return project_log.open_message(self.today(), entries)
+
+    async def run_project_open(self) -> None:
+        await self._send(await self.build_project_open(), "projects")
 
     async def run_project_log(self) -> None:
         logs, code_days = await self.build_project_logs()

@@ -5,7 +5,7 @@ from datetime import date, time, timedelta
 import pytest
 
 from alliegent import reports
-from alliegent.agenda import AgendaItem, Project
+from alliegent.agenda import AgendaItem
 from alliegent.integrations.discord_bot import parse_day
 
 TODAY = date(2026, 8, 8)  # Saturday
@@ -40,12 +40,12 @@ def test_daily_brief_lists_pending_and_overdue():
         TODAY,
         [item("오늘 할 일"), item("이미 한 것", done=True)],
         [item("밀린 것", day=date(2026, 8, 1))],
-        [Project("p", "프로젝트", "In progress", "다음 단계", "")],
     )
     assert "오늘 할 일" in text
     assert "이미 한 것" in text  # the day is shown whole, finished work included
     assert "밀린 것" in text
-    assert "다음 단계" in text
+    # Projects have #projects to themselves now.
+    assert "Active projects" not in text
 
 
 def test_no_empty_checkbox_anywhere():
@@ -673,7 +673,7 @@ def test_a_split_inside_a_table_closes_and_reopens_the_block():
 def test_the_rule_spans_the_columns_not_the_longest_line():
     """Every line is right-stripped, so a header narrower than its column
     would otherwise pull the rule in and leave the rows overhanging it."""
-    text = reports.project_list([Project("p", "Sole", "In progress", "Draft the copy", "")])
+    text = "\n".join(reports._table(("Project", "Next"), [("Sole", "Draft the copy")], flex=1))
     rule = next(line for line in text.splitlines() if set(line) == {"-"})
     body = [line for line in text.splitlines() if "Draft" in line]
     assert reports._width(rule) >= max(reports._width(line) for line in body)

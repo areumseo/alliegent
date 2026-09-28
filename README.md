@@ -8,7 +8,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 
 | Job | Default time (Asia/Seoul) | Description |
 | --- | --- | --- |
-| Daily brief | 08:00 daily | The whole day, anything overdue, and active projects, in one message |
+| Daily brief | 08:00 daily | The whole day and anything overdue, in one message. Projects are not in it: they have `#projects` to themselves |
 | AI news digest | 09:00 daily | Five of yesterday's AI stories, read from publication feeds — a topics line, then linked headlines with a short summary in English and Korean |
 | Incomplete alert | 14:00 and 19:30 daily | The day so far — what is left, what is done — and anything past its date. Two runs: one while the day can still change, one to close it out |
 | Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
@@ -19,6 +19,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | ESPP rollover | Day after each purchase date, 09:00 | Moves ESPP contributions into Vested once they have become shares |
 | Asset prompt | Mon 09:00 | Asks for this week's balances, carrying last week's figures to edit |
 | Plan check | 1st of the month, or the first day after it with a snapshot, 09:00 | The month just finished against its row in Plans: each half against its target, where Total sits between Low and High, the change split into savings, company inflows and market, and the warnings the plan sets |
+| Project open | 08:00 daily | What is open in every project — in review, then to-do — in the `#projects` Overview post. Silent when nothing is open anywhere |
 | Project log | 22:00 daily | Each project with a GitHub repository gets its day in its own `#projects` forum post: what reached the default branch, what is in review, what is next. Silent on a day with nothing done |
 | Karrot candidates | Mon 09:00 | What is decided on but not yet listed. Silent when there is nothing waiting |
 | Karrot sales | Sat 20:00 | The week's sales, with the month, the year and the running total. Silent when nothing sold and nothing is owed |
@@ -38,7 +39,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/delete <numbers> [when]` | Move items to Notion's trash by number — recoverable there. Takes `when` the same way, `overdue` included |
 | `/change <numbers> [day] [at] [category] [project] [name] [from]` | Change what an item is or when it is — any combination of day, time, category, project and title in one edit. The time is what orders an item within its day. `at` and `project` both take `none` to clear the value; `name` takes one item at a time. `from` picks the list the numbers came off, `overdue` included |
 | `/overdue` | Overdue, unfinished items — numbered, so they can be cleared |
-| `/projects` | Active projects and their next actions, both read off the agenda items linked to them |
+| `/projects summary` · `open` · `log <project>` · `status <project> <status>` | The last seven days of every open project; what is open in each; one project's day so far, as tonight's post will say it; set a project's status in Notion (a Done one can be reopened). Typed inside a project's forum post, they answer in that post |
 | `/brief` | Run the daily brief now |
 | `/assets show` · `/assets trend` · `/assets plan` · `/assets gain <amount> [month]` | Latest snapshot with what changed, the recent history, the latest snapshot against the month it is heading for, and a realised gain on foreign shares recorded against the year's allowance |
 | `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `spent`, `bought`, `sales`, `summary` |
@@ -122,7 +123,7 @@ Preview any job in the terminal without posting to Discord:
 uv run python -m alliegent.cli brief
 ```
 
-Jobs: `brief`, `news`, `incomplete`, `planning`, `scaffold`, `stale`, `review`, `plan`, `projectlog`.
+Jobs: `brief`, `news`, `incomplete`, `planning`, `scaffold`, `projectweek`, `review`, `plan`, `projectlog`, `projectopen`.
 
 Add `--send` to actually post the result to the Discord channel that job uses. This checks the bot token, the channel IDs, and the bot's channel permissions in one go, rather than waiting until 08:00 to discover one of them is wrong:
 
@@ -349,10 +350,15 @@ The bot makes the post the first time a project has something to say and writes 
 
 **The Projects database keeps itself current.** It was barely updated because every column had to be typed, and a hand-kept Last Active sat at 8/13 while the project moved daily. Each night, after the posts, the bot writes every open project's row from the same sources: `Last Active` (the later of its last linked agenda day and the last day GitHub saw work — read back as a floor, so a project busy only in code is not taken for stalled), `Next Action` (a relation to the soonest unfinished linked item), `Done (7d)`, `Open`, and `Progress` (finished over not canceled). Only what differs is written, so a quiet night writes nothing. These are written by the bot rather than built as Notion rollups: the API creates a rollup without its calculation — it shows the raw statuses — and a rollup over the status group would count Canceled as complete. Each column is named in `[projects.props]`; `""` leaves one alone, and the bot owns the ones named, so edits by hand are overwritten.
 
+**Mornings are the other half.** The nightly post records what was done; at 08:00 the Overview post gets what is left — each project's open pull requests, then its to-do, linked agenda items first and open issues after — read when the day is being planned. Every open project is in it, with or without a repository, since to-do comes from the agenda too. A project with nothing open is left out, and a morning with nothing open anywhere posts nothing. It is one message in Overview rather than one per project post, so the posts stay a record of work done rather than a daily repeat of the same open list.
+
+**Everything about projects is answered in `#projects`.** The daily brief no longer carries a project table. `/projects` is a group: `summary` for the weekly table now, `open` for the morning's list now, `log <project>` for a project's day so far, and `status <project> <status>` to set its status in Notion — any capitalisation of an offered status, an unknown one refused rather than created, and a Done project reachable so it can be reopened. A command typed inside a project's post answers in that post rather than in Overview.
+
 Preview without posting or making anything:
 
 ```bash
 uv run python -m alliegent.cli projectlog
+uv run python -m alliegent.cli projectopen
 ```
 
 ## Karrot listings

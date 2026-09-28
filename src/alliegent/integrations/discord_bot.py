@@ -376,6 +376,11 @@ async def _deliver(
     if interaction.channel_id == target:
         await _reply(interaction, message)
         return
+    # Inside a post of the target forum counts as being there: a command
+    # typed in a project's post answers in that post, not in Overview.
+    if getattr(interaction.channel, "parent_id", None) == target:
+        await _reply(interaction, message)
+        return
 
     await bot.notify(message, kind)
     channel = bot.get_channel(target)
@@ -1344,18 +1349,97 @@ def _register(bot: AlliegentBot) -> None:
         # to another channel would make every entry two messages.
         await interaction.followup.send(text)
 
-    @tree.command(name="projects", description="Show active projects")
-    async def projects_cmd(interaction: discord.Interaction) -> None:
-        await interaction.response.defer()
+    projects_group = app_commands.Group(
+        name="projects", description="Projects: the week, what is open, a day, a status"
+    )
+    tree.add_command(projects_group)
+
+    async def _no_projects(interaction: discord.Interaction) -> bool:
         if bot.projects is None:
             await interaction.followup.send(
                 "⚠️ No projects database configured (NOTION_PROJECTS_DB_ID)."
             )
+            return True
+        return False
+
+    @projects_group.command(
+        name="summary", description="Every open project's last seven days"
+    )
+    async def projects_summary(interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        if await _no_projects(interaction):
             return
-        projects = reports.project_list(
-            await bot.projects.active(bot.today(), bot.agenda)
-        )
-        await _deliver(bot, interaction, projects, "projects")
+        message = await bot.jobs.build_project_week()
+        await _deliver(bot, interaction, message or "No open projects.", "projects")
+
+    @projects_group.command(
+        name="open", description="What is in review and to do, in every project"
+    )
+    async def projects_open(interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        if await _no_projects(interaction):
+            return
+        message = await bot.jobs.build_project_open()
+        await _deliver(bot, interaction, message or "Nothing open in any project.", "projects")
+
+    @projects_group.command(
+        name="log", description="What a project got done today, as tonight's post will say"
+    )
+    @app_commands.describe(project="Which project")
+    async def projects_log(interaction: discord.Interaction, project: str) -> None:
+        await interaction.response.defer()
+        if await _no_projects(interaction):
+            return
+        try:
+            found = await bot.projects.find(project)
+        except ValueError as exc:
+            await interaction.followup.send(f"⚠️ {exc}")
+            return
+        if not found.repos:
+            await interaction.followup.send(
+                f"⚠️ {found.title} has no GitHub repository in the Projects database."
+            )
+            return
+        logs, _ = await bot.jobs.build_project_logs(only=found.id)
+        message = logs[0][1] if logs else f"Nothing done on {found.title} today, yet."
+        await _deliver(bot, interaction, f"**{found.title}**\n{message}", "projects")
+
+    @projects_group.command(name="status", description="Set a project's status in Notion")
+    @app_commands.describe(project="Which project", status="The new status")
+    async def projects_status(
+        interaction: discord.Interaction, project: str, status: str
+    ) -> None:
+        await interaction.response.defer()
+        if await _no_projects(interaction):
+            return
+        try:
+            # Done ones included, so a finished project can be reopened.
+            found = await bot.projects.find(project, include_done=True)
+            name = await bot.projects.set_status(found.id, status)
+        except ValueError as exc:
+            await interaction.followup.send(f"⚠️ {exc}")
+            return
+        # A write confirmation, answered in place like /add.
+        await interaction.followup.send(f"📂 **{found.title}** → {name}")
+
+    projects_log.autocomplete("project")(_project_options)
+    projects_status.autocomplete("project")(_project_options)
+
+    @projects_status.autocomplete("status")
+    async def _project_status_options(
+        interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        try:
+            names = await bot.projects.status_names() if bot.projects else []
+        except Exception:
+            log.exception("project status autocomplete failed")
+            names = []
+        typed = current.casefold()
+        return [
+            app_commands.Choice(name=name, value=name)
+            for name in names
+            if typed in name.casefold()
+        ][:25]
 
     @tree.command(name="brief", description="Run the daily brief now")
     async def brief_cmd(interaction: discord.Interaction) -> None:

@@ -277,6 +277,7 @@ def test_scheduler_registers_the_enabled_jobs():
         "bonus_rollover",
         "plan_check",
         "project_log",
+        "project_open",
         "weekly_planning",
         "project_week",
         "weekly_review",
