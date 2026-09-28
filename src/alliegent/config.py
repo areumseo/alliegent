@@ -31,6 +31,9 @@ class Secrets(BaseSettings):
     # Monthly targets to hold the asset snapshots against. Needs the assets
     # database too: a plan with nothing to compare it to reports nothing.
     notion_plans_db_id: str = ""
+    # 🌅 Retirement Income: pensions and other sources after work stops, each
+    # in its own currency. Needs the assets database too.
+    notion_retirement_db_id: str = ""
     # English lesson review: four linked databases. Lessons alone switches the
     # feature on; the other three are required with it.
     notion_english_lessons_db_id: str = ""

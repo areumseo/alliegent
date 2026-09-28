@@ -35,6 +35,7 @@ class AlliegentBot(discord.Client):
         expenses=None,
         assets=None,
         plans=None,
+        retirement=None,
         english=None,
         guild_id: int = 0,
         enable_chat: bool = True,
@@ -54,6 +55,7 @@ class AlliegentBot(discord.Client):
         self.expenses = expenses
         self.assets = assets
         self.plans = plans
+        self.retirement = retirement
         self.english = english
         self.secrets = secrets
         self.guild_id = guild_id
@@ -1348,6 +1350,28 @@ def _register(bot: AlliegentBot) -> None:
         # A write confirmation, answered in place like /add: routing one line
         # to another channel would make every entry two messages.
         await interaction.followup.send(text)
+
+    @assets_group.command(
+        name="retirement", description="Pensions and other income after work, in won a month"
+    )
+    async def assets_retirement(interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        if bot.retirement is None:
+            await interaction.followup.send(
+                "⚠️ Needs NOTION_ASSETS_DB_ID and NOTION_RETIREMENT_DB_ID."
+            )
+            return
+        from ..retirement import retirement_message
+        from .fx import FxError, Rates
+
+        sources = await bot.retirement.sources()
+        rates, day, problem = None, None, None
+        try:
+            rates, day = await Rates().to_won({s.currency for s in sources if s.known})
+        except FxError as exc:
+            problem = str(exc)
+        message = retirement_message(sources, rates, day, rate_problem=problem)
+        await _deliver(bot, interaction, message, "assets")
 
     projects_group = app_commands.Group(
         name="projects", description="Projects: the week, what is open, a day, a status"
