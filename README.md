@@ -316,6 +316,7 @@ A 💰 Plans database holds one row per month (`Month` titled `YYYY-MM`) with th
 
 - **SNOW over 30% of Liquid.** SNOW here is Vested plus the `SNOW` column in Assets — company stock sold out of Vested and kept in Stock/Funds is still the same company, and Vested alone would understate it. `SNOW` is a detail of Stock/Funds, never a bucket of its own, and is never added to a total.
 - **Three months in a row closing under Low.** The month's row is marked `Revised` and the report says to recompute the remaining targets. A month nobody linked breaks the run rather than counting either way.
+- **Cash saved against `Cash Save Target`.** The change in Savings is what the month's spending left behind, so it measures spending without anyone keeping a list — and spending that changes month to month is hard to average and easy to guess wrong. A short month is flagged; a vesting or bonus month shows the number without judging it, since the RSU tax and the bonus rollover move Savings too.
 - **A vesting month** — any row with `RSU Vest (net)` — reminds you to check 35–40% was sold to cover the tax.
 - **A month with a sale** shows the year's realised foreign-stock gains against the ₩2,500,000 allowance, and warns once they pass it.
 

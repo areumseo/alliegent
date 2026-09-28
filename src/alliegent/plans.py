@@ -64,6 +64,11 @@ class Plan:
     realized_gain: int
     status: str | None
     snapshot_ids: tuple[str, ...]
+    # What the month's pay should leave in Savings. Read against the change in
+    # Savings, it is the measure of spending that nobody has to keep a list
+    # for: a dear month shows as a short one.
+    cash_target: int = 0
+    bonus: int = 0
 
     @property
     def first_day(self) -> date:
@@ -134,6 +139,8 @@ class PlanService:
             realized_gain=number("Realized Gain"),
             status=n.read_select(page, "Status"),
             snapshot_ids=tuple(n.read_relation_ids(page, "Actual Snapshot")),
+            cash_target=number("Cash Save Target"),
+            bonus=number("Bonus"),
         )
 
     async def all_plans(self) -> list[Plan]:
@@ -240,6 +247,27 @@ def _range_line(total: int, low: int, high: int) -> str | None:
     return f"Range: {(total - low) / (high - low):.0%} of the way from Low to High"
 
 
+def _cash_line(saved: int, plan: Plan) -> str | None:
+    """Savings against what the month's pay should have left in it.
+
+    Spending that changes month to month is hard to average and easy to
+    guess wrong; what it leaves behind is measured already. A short month
+    is flagged only when nothing else moved Savings: in a vesting month the
+    tax on the RSU comes out of it, and around a bonus the rollover puts
+    money in, so there the number is shown and not judged.
+    """
+    if not plan.cash_target:
+        return None
+    share = f"{saved / plan.cash_target:.0%}"
+    line = f"Cash saved ₩{saved:,} of the ₩{plan.cash_target:,} target ({share})"
+    distorted = plan.rsu_net or plan.bonus
+    if saved < plan.cash_target and not distorted:
+        return f"⚠️ {line} — spending ran ahead of plan this month."
+    if distorted:
+        return f"{line} · moved by the {'RSU tax' if plan.rsu_net else 'bonus'} too"
+    return line
+
+
 def report_message(
     plan: Plan,
     snapshot: Snapshot,
@@ -291,6 +319,9 @@ def report_message(
         rows += [None, ("Total", f"{parts.total:+,}")]
         out.append(f"**Since {parts.since.isoformat()}**")
         out += reports._table(("KRW", "Change"), rows, flex=0, right=(1,))
+        cash = _cash_line(parts.savings, plan)
+        if cash:
+            out.append(cash)
         out.append(
             "_Auto invest and company inflows are the plan's figures for the "
             "month; whatever actually arrived differently shows up in Market._"
