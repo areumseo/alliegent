@@ -73,11 +73,21 @@ class GitHub:
 
     async def day(self, repo: str, day: date, tz: ZoneInfo) -> Activity:
         """Everything worth a line for one repository on one local day."""
+        return await self.span(repo, day, day + timedelta(days=1), tz)
+
+    async def span(
+        self, repo: str, first: date, stop: date, tz: ZoneInfo, *, open_items: bool = True
+    ) -> Activity:
+        """What landed from `first` up to, not including, `stop`, local days.
+
+        `open_items=False` skips the open pull requests and issues, which a
+        count of work done over a week has no use for.
+        """
         activity = Activity(repo)
         branch = (await self._get(repo, ""))["default_branch"]
 
-        start = datetime.combine(day, time.min, tzinfo=tz)
-        end = start + timedelta(days=1)
+        start = datetime.combine(first, time.min, tzinfo=tz)
+        end = datetime.combine(stop, time.min, tzinfo=tz)
         commits = await self._get(
             repo,
             "/commits",
@@ -101,6 +111,8 @@ class GitHub:
             subject = commit["commit"]["message"].splitlines()[0]
             activity.done.append(Line(subject, commit["html_url"]))
 
+        if not open_items:
+            return activity
         for pr in await self._get(repo, "/pulls", state="open", per_page=50):
             activity.in_review.append(Line(f"{pr['title']} (#{pr['number']})", pr["html_url"]))
         for issue in await self._get(repo, "/issues", state="open", per_page=50):

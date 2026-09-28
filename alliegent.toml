@@ -35,8 +35,9 @@ weekly_planning_time = "10:00"
 # Recurring on a few rows and set a time here to switch it on.
 week_scaffold_weekday = "mon"
 week_scaffold_time = ""
-stale_project_weekday = "wed"
-stale_project_time = "10:00"
+# Every open project's week in the #projects Overview post; stalled ones flagged.
+project_week_weekday = "sun"
+project_week_time = "20:00"
 weekly_review_weekday = "sun"
 weekly_review_time = "21:00"
 
@@ -76,13 +77,17 @@ stale_after_days = 7
 [projects.props]
 title = "Name"
 status = "Status"
-# Both are read off the agenda rows linked to a project, which is what the
-# empty values mean. The Project DB has a "Next Action" relation and a "Last
-# Active" date, but neither is maintained by hand often enough to be true:
-# Last Active read 2026-08-13 on a project worked on that same week. Name a
-# column here only if you do keep one current.
+# A text column of next steps typed by hand. None: the next step is derived
+# from the linked agenda rows, and written to the Next Action relation below.
 next_action = ""
-last_activity = ""
+# Read as a floor under the derived date, and written back each night along
+# with the columns below -- the bot keeps these current, so edits by hand are
+# overwritten. "" leaves a column alone.
+last_activity = "Last Active"
+next_item = "Next Action"
+done_week = "Done (7d)"
+open_count = "Open"
+progress = "Progress"
 
 [projects.status_values]
 active = "In progress"

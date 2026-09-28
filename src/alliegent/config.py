@@ -162,6 +162,17 @@ class ProjectProps(BaseModel):
     # Name a column here only if you keep one up to date by hand.
     next_action: str = ""
     last_activity: str = ""
+    # Written by the bot each night from the linked agenda rows: a relation to
+    # the soonest unfinished item, and how many were finished in seven days.
+    # "" leaves the column alone.
+    next_item: str = ""
+    done_week: str = ""
+    # Also written nightly: linked items still open, and the share finished of
+    # those not canceled. Calculated here rather than as Notion rollups, which
+    # the API creates without their calculation and which would count
+    # Canceled as complete.
+    open_count: str = ""
+    progress: str = ""
     # GitHub repositories, as owner/repo or their URLs, comma-separated. A
     # project with none stays out of the #projects forum -- which is how the
     # forum is limited to the projects that have code to report on.
@@ -183,8 +194,11 @@ class Schedule(BaseModel):
     # Empty disables the job. Off by default: nothing in the agenda repeats
     # weekly yet, so there is no template to copy from.
     week_scaffold_time: str = ""
-    stale_project_weekday: str = "wed"
-    stale_project_time: str = "10:00"
+    # Every open project's week, in the #projects Overview post. It took over
+    # from a Wednesday check that named only the stalled ones; the end of the
+    # week is when "this week" means a whole one.
+    project_week_weekday: str = "sun"
+    project_week_time: str = "20:00"
     weekly_review_weekday: str = "sun"
     weekly_review_time: str = "21:00"
     # Two Karrot reports, at the two ends of a week. Monday asks what is

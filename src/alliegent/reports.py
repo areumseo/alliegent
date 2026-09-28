@@ -458,18 +458,6 @@ def weekly_planning(
     return "\n".join(out).strip()
 
 
-def stale_projects(items: list[tuple[Project, date | None]]) -> str | None:
-    if not items:
-        return None
-    rows = [
-        (project.title, fmt_date(last) if last else "never", project.next_action or "")
-        for project, last in items
-    ]
-    out = [f"🐢 **Stalled projects ({len(items)})**", ""]
-    out += _table(("Project", "Last", "Next"), rows, flex=2)
-    return "\n".join(out)
-
-
 def weekly_review(start: date, end: date, items: list[AgendaItem]) -> str:
     """A day-by-day account of the week.
 

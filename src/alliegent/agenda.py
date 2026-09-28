@@ -81,6 +81,18 @@ class Project:
     last_activity: date | None = None
     repos: tuple[str, ...] = ()
     thread_id: int | None = None
+    # What the Projects row holds now, as read, so a sync writes only what
+    # has changed instead of every row every night.
+    recorded_activity: date | None = None
+    recorded_next: tuple[str, ...] = ()
+    recorded_done_week: int | None = None
+    recorded_open: int | None = None
+    recorded_progress: float | None = None
+    # Derived from the linked agenda rows.
+    next_item_id: str | None = None
+    done_week: int = 0
+    open_count: int = 0
+    progress: float | None = None  # finished over not canceled; None with none
 
 
 _REPO = re.compile(r"(?:github\.com/)?([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)")
@@ -481,7 +493,53 @@ class ProjectService:
             last_activity=n.read_date(page, p.last_activity) if p.last_activity else None,
             repos=parse_repos(n.read_text(page, p.repos)) if p.repos else (),
             thread_id=_thread_id(n.read_text(page, p.thread)) if p.thread else None,
+            recorded_activity=(
+                n.read_date(page, p.last_activity) if p.last_activity else None
+            ),
+            recorded_next=tuple(n.read_relation_ids(page, p.next_item)) if p.next_item else (),
+            recorded_done_week=(
+                _whole(n.read_number(page, p.done_week)) if p.done_week else None
+            ),
+            recorded_open=_whole(n.read_number(page, p.open_count)) if p.open_count else None,
+            recorded_progress=n.read_number(page, p.progress) if p.progress else None,
         )
+
+    async def sync(
+        self, today: date, agenda: AgendaService, code_days: dict[str, date] | None = None
+    ) -> int:
+        """Write each open project's derived columns back to its row.
+
+        Last Active is the later of the linked agenda's last day and the day
+        GitHub last saw work (`code_days`, by project id); Next Action points
+        at the soonest unfinished linked item; the seven-day count is the
+        linked items finished in the last week. Only what differs from the
+        row is written, so a quiet night writes nothing. Returns how many rows
+        changed.
+        """
+        p = self.props
+        changed = 0
+        for project in await self.active(today, agenda):
+            days = [
+                d for d in (project.last_activity, (code_days or {}).get(project.id)) if d
+            ]
+            active = max(days) if days else None
+            wanted_next = (project.next_item_id,) if project.next_item_id else ()
+
+            updates: dict = {}
+            if p.last_activity and active and active != project.recorded_activity:
+                updates[p.last_activity] = n.date_prop(active)
+            if p.next_item and wanted_next != project.recorded_next:
+                updates[p.next_item] = n.relation(list(wanted_next))
+            if p.done_week and project.done_week != project.recorded_done_week:
+                updates[p.done_week] = n.number(project.done_week)
+            if p.open_count and project.open_count != project.recorded_open:
+                updates[p.open_count] = n.number(project.open_count)
+            if p.progress and project.progress != project.recorded_progress:
+                updates[p.progress] = n.number(project.progress)
+            if updates:
+                await self._client.update_page(project.id, updates)
+                changed += 1
+        return changed
 
     async def set_thread(self, project_id: str, thread_id: int) -> None:
         """Remember the forum post made for a project."""
@@ -492,17 +550,20 @@ class ProjectService:
     async def _with_activity(
         self, project: Project, today: date, agenda: AgendaService
     ) -> Project:
-        """Fill in what a project is waiting on, and when it last moved.
+        """Fill in what a project is waiting on, when it last moved, and how
+        much it finished in the last seven days.
 
-        Both are read off the linked agenda rows rather than out of columns in
-        the Project database. A "Next Action" typed by hand is right until the
-        work moves on and says nothing when it does; a "Last Active" date is
-        only correct on the days someone remembers to touch it, which are
-        precisely the days the project was not being neglected. Deriving them
-        also means this app never has to write to the Project database.
+        All three are read off the linked agenda rows rather than typed into
+        the Projects database. A "Next Action" typed by hand is right until
+        the work moves on and says nothing when it does; a "Last Active" date
+        is only correct on the days someone remembers to touch it, which are
+        precisely the days the project was not being neglected. `sync` then
+        writes them back, so the database is current without anyone keeping
+        it so.
 
-        A configured column is still read, and survives as the fallback for a
-        project with nothing linked to it yet.
+        The recorded Last Active is kept as a floor rather than replaced: the
+        sync writes the days GitHub saw work too, which the agenda rows do not
+        know about, and a project busy only in code is not a stalled one.
         """
         items = await agenda.items_for_project(project.id)
         if not items:
@@ -515,10 +576,24 @@ class ProjectService:
         # Only days that have happened: work scheduled for next week is not
         # evidence that the project moved this week.
         worked = [item.day for item in items if item.day is not None and item.day <= today]
+        known = [d for d in (*worked, project.last_activity) if d is not None]
+        week = today - timedelta(days=6)
+        done_week = sum(
+            1
+            for item in items
+            if item.done and not item.canceled and item.day and week <= item.day <= today
+        )
+        # Canceled leaves both sides, as it does in every rate the bot shows.
+        live = [item for item in items if not item.canceled]
+        finished = sum(1 for item in live if item.done)
         return replace(
             project,
             next_action=waiting.title if waiting else project.next_action,
-            last_activity=max(worked) if worked else project.last_activity,
+            next_item_id=waiting.id if waiting else None,
+            last_activity=max(known) if known else None,
+            done_week=done_week,
+            open_count=sum(1 for item in items if not item.done),
+            progress=round(finished / len(live), 2) if live else None,
         )
 
     async def open_projects(self) -> list[Project]:
@@ -608,3 +683,7 @@ class ProjectService:
 def _thread_id(text: str) -> int | None:
     text = text.strip()
     return int(text) if text.isdigit() else None
+
+
+def _whole(value: float | None) -> int | None:
+    return None if value is None else int(value)

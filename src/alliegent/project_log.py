@@ -19,7 +19,7 @@ quiet until someone fixes it.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from . import reports
 from .agenda import AgendaItem, Project
@@ -72,4 +72,54 @@ def log_message(
         out += ["**To-do**", *todo]
 
     out += [f"⚠️ Couldn't read {reason}" for reason in errors]
+    return "\n".join(out)
+
+
+def _short(day: date | None) -> str:
+    return f"{day.month}/{day.day}" if day else "-"
+
+
+def week_message(
+    projects: list[Project],
+    code_done: dict[str, int],
+    today: date,
+    *,
+    stale_after_days: int,
+) -> str | None:
+    """Every open project's week, in one table, for the Overview post.
+
+    This replaced a check that spoke only about the projects that had
+    stopped: the ones moving were invisible, and a project's standing only
+    means something beside the others'. The stalled still get their line,
+    under the table where they cannot be missed.
+
+    Done counts linked agenda items finished in the last seven days and the
+    GitHub work that reached a default branch in them -- the same two sources
+    the nightly post reads.
+    """
+    if not projects:
+        return None
+    first = today - timedelta(days=6)
+    rows = [
+        (
+            project.title,
+            str(project.done_week + code_done.get(project.id, 0)),
+            _short(project.last_activity),
+            project.next_action,
+        )
+        for project in projects
+    ]
+    out = [
+        f"🗂️ **Projects — {_short(first)}–{_short(today)}**",
+        *reports._table(("Project", "Done", "Last", "Next"), rows, flex=3, right=(1,)),
+    ]
+    cutoff = today - timedelta(days=stale_after_days)
+    for project in projects:
+        if project.last_activity is None:
+            out.append(f"⚠️ {project.title}: nothing linked to it yet")
+        elif project.last_activity < cutoff:
+            out.append(
+                f"⚠️ {project.title}: nothing since {_short(project.last_activity)} — "
+                "still in progress, or time to put it on hold?"
+            )
     return "\n".join(out)

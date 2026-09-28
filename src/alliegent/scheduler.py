@@ -28,7 +28,7 @@ JOB_CHANNELS = {
     "weekly_planning": "agenda",
     "week_scaffold": "agenda",
     "weekly_review": "review",
-    "stale_projects": "projects",
+    "project_week": "projects",
     "ai_news": "news",
     "karrot_report": "karrot",
     "karrot_candidates": "karrot",
@@ -184,10 +184,10 @@ def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
         day_of_week=sched.week_scaffold_weekday,
     )
     add(
-        "stale_projects",
-        jobs.run_stale_projects,
-        time=sched.stale_project_time,
-        day_of_week=sched.stale_project_weekday,
+        "project_week",
+        jobs.run_project_week,
+        time=sched.project_week_time,
+        day_of_week=sched.project_week_weekday,
     )
     add(
         "weekly_review",

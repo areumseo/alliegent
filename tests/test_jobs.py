@@ -229,12 +229,17 @@ async def test_weekly_review_covers_the_trailing_seven_days():
     assert "한 일" in sent[0][0]
 
 
-async def test_stale_project_job_reports_neglected_projects():
+async def test_the_project_week_names_every_project_and_flags_the_stalled():
+    """It took over from a check that spoke only of the stalled ones."""
     jobs, sent, _ = build(
-        agenda_pages=[], project_pages=[make_project("b", "방치된 프로젝트")]
+        agenda_pages=[make_page("a1", "작업", day="2026-08-07", status="Done", projects=["a"])],
+        project_pages=[make_project("a", "활발한 것"), make_project("b", "방치된 것")],
     )
-    await jobs.run_stale_projects()
-    assert sent and "방치된 프로젝트" in sent[0][0]
+    await jobs.run_project_week()
+    text = sent[0][0]
+    assert "활발한 것" in text and "방치된 것" in text
+    assert "⚠️ 방치된 것: nothing linked to it yet" in text
+    assert "⚠️ 활발한 것" not in text
 
 
 async def test_jobs_route_to_their_own_channel_kinds():
@@ -248,7 +253,7 @@ async def test_jobs_route_to_their_own_channel_kinds():
     )
     await jobs.run_daily_brief()
     await jobs.run_week_scaffold()
-    await jobs.run_stale_projects()
+    await jobs.run_project_week()
     await jobs.run_weekly_review()
     assert [kind for _, kind in sent] == ["agenda", "agenda", "projects", "review"]
 
@@ -273,7 +278,7 @@ def test_scheduler_registers_the_enabled_jobs():
         "plan_check",
         "project_log",
         "weekly_planning",
-        "stale_projects",
+        "project_week",
         "weekly_review",
     } | {f"incomplete_alert@{when}" for when in config.schedule.incomplete_alert} | {
         # One-off, and only while the date is still ahead.

@@ -32,7 +32,7 @@ JOBS = (
     "incomplete",
     "planning",
     "scaffold",
-    "stale",
+    "projectweek",
     "review",
     "plan",
     "projectlog",
@@ -49,7 +49,7 @@ JOB_CHANNEL = {
     "incomplete": "agenda",
     "planning": "agenda",
     "scaffold": "agenda",
-    "stale": "projects",
+    "projectweek": "projects",
     "review": "review",
     "plan": "assets",
     "projectlog": "projects",
@@ -201,14 +201,14 @@ async def _run(name: str, commit: bool, send: bool) -> int:
             message = await jobs.build_ai_news()
         elif name == "planning":
             message = await jobs.build_weekly_planning()
-        elif name == "stale":
-            message = await jobs.build_stale_projects()
+        elif name == "projectweek":
+            message = await jobs.build_project_week()
         elif name == "review":
             message = await jobs.build_weekly_review()
         elif name == "projectlog":
             # One message per project, each headed with its name as the forum
             # post's title would be. Nothing is posted and no thread is made.
-            logs = await jobs.build_project_logs()
+            logs, _ = await jobs.build_project_logs()
             message = "\n\n".join(f"**{p.title}**\n{m}" for p, m in logs) or None
         elif name == "plan":
             # Never writes: no link, no Revised. A preview that changed the
