@@ -1232,6 +1232,50 @@ def _register(bot: AlliegentBot) -> None:
             bot, interaction, assets_module.trend_message(history, weeks), "assets"
         )
 
+    @assets_group.command(
+        name="plan", description="The latest snapshot against the month it is heading for"
+    )
+    async def assets_plan(interaction: discord.Interaction) -> None:
+        # Read-only: no link, no Revised. The monthly check owns those, and a
+        # look taken mid-month must not change what it finds on the 1st.
+        await interaction.response.defer()
+        if bot.plans is None or bot.assets is None:
+            await interaction.followup.send(
+                "⚠️ Needs NOTION_ASSETS_DB_ID and NOTION_PLANS_DB_ID."
+            )
+            return
+        from ..plans import current_standing
+
+        message = await current_standing(bot.plans, bot.assets, bot.config)
+        await _deliver(bot, interaction, message, "assets")
+
+    @assets_group.command(
+        name="gain", description="Record a realised gain on foreign shares, e.g. an ESPP sale"
+    )
+    @app_commands.describe(
+        amount="Gain in won. A loss as a negative number",
+        month="YYYY-MM the sale was in (defaults to this month)",
+    )
+    async def assets_gain(
+        interaction: discord.Interaction, amount: int, month: str | None = None
+    ) -> None:
+        await interaction.response.defer()
+        if bot.plans is None:
+            await interaction.followup.send("⚠️ NOTION_PLANS_DB_ID is not set.")
+            return
+        from ..plans import month_of, record_gain
+
+        try:
+            text = await record_gain(
+                bot.plans, (month or month_of(bot.today())).strip(), amount, bot.config
+            )
+        except ValueError as exc:
+            await interaction.followup.send(f"⚠️ {exc}")
+            return
+        # A write confirmation, answered in place like /add: routing one line
+        # to another channel would make every entry two messages.
+        await interaction.followup.send(text)
+
     @tree.command(name="projects", description="Show active projects")
     async def projects_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.defer()

@@ -465,3 +465,114 @@ async def test_a_rollover_without_snow_does_not_write_the_column():
     await service.roll_bonus_into_savings(date(2026, 10, 1))
     _, props = client.created[0]
     assert "SNOW" not in props
+
+
+# -- /assets plan ----------------------------------------------------------
+
+
+async def test_a_snapshot_before_the_plan_is_held_against_its_first_month():
+    _, plans, assets, config = services(
+        [plan_page("p10", "2026-10"), plan_page("p11", "2026-11")],
+        [asset_page("a1", "2026-09-28", savings=950)],
+    )
+    text = await P.current_standing(plans, assets, config)
+    assert "Heading for 2026-10" in text and "snapshot 2026-09-28" in text
+
+
+async def test_a_mid_month_snapshot_is_held_against_that_months_end():
+    _, plans, assets, config = services(
+        [plan_page("p10", "2026-10"), plan_page("p11", "2026-11")],
+        [asset_page("a1", "2026-11-16", savings=950)],
+    )
+    text = await P.current_standing(plans, assets, config)
+    assert "Heading for 2026-11" in text
+    assert "reads short until" in text  # a mid-month figure, said to be one
+
+
+async def test_standing_writes_nothing():
+    """A look taken mid-month must not change what the 1st finds."""
+    client, plans, assets, config = services(
+        [plan_page("p10", "2026-10")], [asset_page("a1", "2026-10-12", savings=950)]
+    )
+    await P.current_standing(plans, assets, config)
+    assert client.updated == []
+
+
+async def test_standing_past_the_end_of_the_plan_says_so():
+    _, plans, assets, config = services(
+        [plan_page("p10", "2026-10")], [asset_page("a1", "2026-12-07", savings=950)]
+    )
+    assert "The plan ends at 2026-10" in await P.current_standing(plans, assets, config)
+
+
+async def test_standing_with_no_snapshots_says_so():
+    _, plans, assets, config = services([plan_page("p10", "2026-10")], [])
+    assert "No snapshots" in await P.current_standing(plans, assets, config)
+
+
+# -- /assets gain ----------------------------------------------------------
+
+
+async def test_a_gain_is_added_to_what_the_month_already_holds():
+    """A month can have more than one sale."""
+    client, plans, _, config = services([plan_page("p10", "2026-10", gain=300_000)], [])
+    text = await P.record_gain(plans, "2026-10", 200_000, config)
+    assert ("p10", {"Realized Gain": {"number": 500_000}}) in client.updated
+    assert "₩200,000 gain recorded on 2026-10" in text
+    assert "₩500,000 of ₩2,500,000 · ₩2,000,000 left" in text
+
+
+async def test_the_year_total_counts_the_other_months():
+    _, plans, _, config = services(
+        [
+            plan_page("p03", "2027-03", gain=1_000_000),
+            plan_page("p09", "2027-09"),
+            plan_page("p12", "2026-12", gain=900_000),  # last year: not counted
+        ],
+        [],
+    )
+    text = await P.record_gain(plans, "2027-09", 800_000, config)
+    assert "Realised in 2027: ₩1,800,000" in text
+
+
+async def test_a_loss_takes_the_year_total_down():
+    client, plans, _, config = services([plan_page("p10", "2026-10", gain=500_000)], [])
+    text = await P.record_gain(plans, "2026-10", -200_000, config)
+    assert ("p10", {"Realized Gain": {"number": 300_000}}) in client.updated
+    assert "₩200,000 loss recorded" in text
+
+
+async def test_passing_the_allowance_is_a_warning():
+    _, plans, _, config = services([plan_page("p10", "2026-10", gain=2_400_000)], [])
+    text = await P.record_gain(plans, "2026-10", 300_000, config)
+    assert "⚠️" in text and "₩200,000 over the ₩2,500,000 allowance" in text
+
+
+async def test_a_month_before_the_plan_goes_on_the_first_row_of_its_year():
+    """A sale in September 2026 still uses up 2026's allowance, though the
+    plan starts in October."""
+    client, plans, _, config = services(
+        [plan_page("p10", "2026-10"), plan_page("p11", "2026-11")], []
+    )
+    text = await P.record_gain(plans, "2026-09", 100_000, config)
+    assert ("p10", {"Realized Gain": {"number": 100_000}}) in client.updated
+    assert "2026-09 has no plan row, so it went on 2026-10" in text
+
+
+async def test_a_year_with_no_rows_is_refused():
+    _, plans, _, config = services([plan_page("p10", "2026-10")], [])
+    with pytest.raises(ValueError, match="no plan row in 2025"):
+        await P.record_gain(plans, "2025-06", 100_000, config)
+
+
+@pytest.mark.parametrize("month", ["2026/10", "Oct", "2026-1", ""])
+async def test_a_month_that_is_not_yyyy_mm_is_refused(month):
+    _, plans, _, config = services([plan_page("p10", "2026-10")], [])
+    with pytest.raises(ValueError, match="YYYY-MM"):
+        await P.record_gain(plans, month, 100_000, config)
+
+
+async def test_a_zero_gain_is_refused():
+    _, plans, _, config = services([plan_page("p10", "2026-10")], [])
+    with pytest.raises(ValueError, match="changes nothing"):
+        await P.record_gain(plans, "2026-10", 0, config)
