@@ -32,6 +32,7 @@ def plan_page(
     rsu=0,
     espp=0,
     dc=0,
+    auto=0,
     gain=0,
     status="Tentative",
     snapshot=None,
@@ -45,6 +46,7 @@ def plan_page(
         "RSU Vest (net)": rsu,
         "ESPP Buy": espp,
         "DC": dc,
+        "Auto Invest": auto,
         "Realized Gain": gain,
     }
     props = {
@@ -93,7 +95,7 @@ def plan(month="2026-10", **overrides):
     fields = dict(
         id=f"p-{month}", month=month, target_total=1_000, target_liquid=600,
         target_locked=400, low=900, high=1_100, rsu_net=0, espp_buy=0, dc=0,
-        realized_gain=0, status="Tentative", snapshot_ids=(),
+        auto_invest=0, realized_gain=0, status="Tentative", snapshot_ids=(),
     )
     fields.update(overrides)
     return P.Plan(**fields)
@@ -133,7 +135,7 @@ def test_the_parts_add_up_to_the_change_in_total():
                   Pension=80, Deposit=300, Mom=40)
     after = snap("2026-11-02", Savings=130, **{"Stock/Funds": 230}, Vested=70,
                  Pension=90, Deposit=300, Mom=30)
-    parts = P.breakdown(after, before, plan(rsu_net=15, espp_buy=5, dc=7))
+    parts = P.breakdown(after, before, plan(rsu_net=15, espp_buy=5, dc=7, auto_invest=9))
     assert parts.total == after.total - before.total
     assert parts.other == -10
 
@@ -152,6 +154,24 @@ def test_dc_is_an_inflow_not_market():
     before = snap("2026-10-05", Pension=80)
     after = snap("2026-11-02", Pension=87)
     assert P.breakdown(after, before, plan(dc=7)).market == 0
+
+
+def test_auto_invest_is_saving_not_market():
+    """IRP and fund standing orders land in Pension and Stock/Funds. Left in
+    Market, a month of doing nothing but saving would read as a good month
+    for the markets."""
+    before = snap("2026-10-05", **{"Stock/Funds": 200}, Pension=80)
+    after = snap("2026-11-02", **{"Stock/Funds": 207}, Pension=89)
+    parts = P.breakdown(after, before, plan(auto_invest=16))
+    assert parts.invested == 16
+    assert parts.market == 0
+
+
+def test_the_report_shows_auto_invest_on_its_own_line():
+    before = snap("2026-10-05", Savings=500, Pension=450)
+    after = snap("2026-11-02", Savings=520, Pension=470)
+    text = render(p=plan(auto_invest=20), s=after, previous=before)
+    assert "Auto invest" in text and "+20" in text
 
 
 # -- SNOW, the Low streak, and gains --------------------------------------

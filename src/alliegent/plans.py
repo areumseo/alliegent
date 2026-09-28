@@ -14,13 +14,16 @@ runs daily and reports once, on the day that snapshot exists. Linking the row
 to its snapshot is what marks it done; running again finds it linked and says
 nothing.
 
-**A month's change is split three ways, and the three add up.** Savings is
-the change in Savings. Company inflows are the plan's RSU, ESPP and DC for the
-month. Market is whatever else moved in the valued holdings -- Stock/Funds,
-Vested, Pension -- after those inflows. Deposit and Mom are neither, and get a
-line of their own when they move, so the parts always sum to the change in
-Total. The inflows are the *planned* figures: when what arrived differs, the
-difference lands in Market, which the report says.
+**A month's change is split by where the money came from, and the parts add
+up.** Savings is the change in Savings. Auto invest is what the plan says goes
+out of pay into IRP and funds by standing order -- money saved, but landing in
+Pension and Stock/Funds, where it would otherwise pass for returns. Company
+inflows are the plan's RSU, ESPP and DC for the month. Market is whatever else
+moved in the valued holdings -- Stock/Funds, Vested, Pension -- after those.
+Deposit and Mom are none of these, and get a line of their own when they move,
+so the parts always sum to the change in Total. Auto invest and the inflows are
+the *planned* figures: when what arrived differs, the difference lands in
+Market, which the report says.
 
 Every amount lives in Notion. Nothing here holds one, and the tests invent
 theirs.
@@ -57,6 +60,7 @@ class Plan:
     rsu_net: int
     espp_buy: int
     dc: int
+    auto_invest: int
     realized_gain: int
     status: str | None
     snapshot_ids: tuple[str, ...]
@@ -126,6 +130,7 @@ class PlanService:
             rsu_net=number("RSU Vest (net)"),
             espp_buy=number("ESPP Buy"),
             dc=number("DC"),
+            auto_invest=number("Auto Invest"),
             realized_gain=number("Realized Gain"),
             status=n.read_select(page, "Status"),
             snapshot_ids=tuple(n.read_relation_ids(page, "Actual Snapshot")),
@@ -152,14 +157,15 @@ class PlanService:
 @dataclass(frozen=True)
 class Breakdown:
     since: date
-    savings: int
-    inflows: int
+    savings: int  # cash: the change in Savings
+    invested: int  # saved by standing order into IRP and funds
+    inflows: int  # from the employer: RSU, ESPP, DC
     market: int
     other: int  # Deposit and Mom: neither saving nor market
 
     @property
     def total(self) -> int:
-        return self.savings + self.inflows + self.market + self.other
+        return self.savings + self.invested + self.inflows + self.market + self.other
 
 
 def breakdown(snapshot: Snapshot, previous: Snapshot, plan: Plan) -> Breakdown:
@@ -171,8 +177,9 @@ def breakdown(snapshot: Snapshot, previous: Snapshot, plan: Plan) -> Breakdown:
     return Breakdown(
         since=previous.day,
         savings=change("Savings"),
+        invested=plan.auto_invest,
         inflows=plan.inflows,
-        market=valued - plan.inflows,
+        market=valued - plan.inflows - plan.auto_invest,
         other=change("Deposit") + change("Mom"),
     )
 
@@ -275,6 +282,7 @@ def report_message(
         parts = breakdown(snapshot, previous, plan)
         rows: list[tuple[str, ...] | None] = [
             ("Savings", f"{parts.savings:+,}"),
+            ("Auto invest", f"{parts.invested:+,}"),
             ("Company inflows", f"{parts.inflows:+,}"),
             ("Market", f"{parts.market:+,}"),
         ]
@@ -284,8 +292,8 @@ def report_message(
         out.append(f"**Since {parts.since.isoformat()}**")
         out += reports._table(("KRW", "Change"), rows, flex=0, right=(1,))
         out.append(
-            "_Company inflows are the plan's RSU, ESPP and DC for the month; "
-            "whatever actually arrived differently shows up in Market._"
+            "_Auto invest and company inflows are the plan's figures for the "
+            "month; whatever actually arrived differently shows up in Market._"
         )
 
     out.append("")
