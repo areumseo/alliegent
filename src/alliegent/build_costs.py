@@ -360,7 +360,7 @@ def _soon(tools: list[Tool], today: date) -> list[str]:
 def _rate_lines(
     tools: list[Tool], rates: dict[str, float], rate_day: date | None, api: Api | None
 ) -> str | None:
-    foreign = {t.currency for t in tools if t.counts and t.cost is not None} - {HOME}
+    foreign = {t.currency for t in tools if t.counts and t.monthly() is not None} - {HOME}
     if api is not None:
         foreign.add("USD")
     quoted = []
@@ -432,11 +432,19 @@ def costs_message(
             flex=0, right=(1,),
         )
 
+    usd = rates.get("USD")
+
+    def dollars(won: int) -> str:
+        """An approximate dollar figure beside a won one; nothing without a rate."""
+        return f" (≈ ${won / usd:,.2f})" if usd else ""
+
     if actual is not None and counted:
         detail = f"plan ₩{actual.fixed:,}, usage ₩{actual.recorded:,} recorded"
         if actual.estimated:
             detail += f" + ₩{actual.estimated:,} estimated"
-        lines.append(f"Actual {actual_label}: ₩{actual.total:,} ({detail})")
+        lines.append(
+            f"Actual {actual_label}: ₩{actual.total:,}{dollars(actual.total)} — {detail}"
+        )
         diff = actual.total - total
         lines.append(
             f"The estimate was ₩{total:,}: "
@@ -447,7 +455,6 @@ def costs_message(
                 f"No record for {actual_label}: " + ", ".join(actual.missing)
             )
 
-    usd = rates.get("USD")
     if api is not None and usd:
         this_label, last_label = api_labels
         parts = [f"${api.this:,.2f} {this_label} (₩{round(float(api.this) * usd):,})"]
@@ -459,9 +466,16 @@ def costs_message(
         full = api.this if api.closed else api.last
         if full is not None and counted:
             with_api = total + round(float(full) * usd)
-            lines.append(f"Fixed plus the last full month of API: ₩{with_api:,} a month")
+            lines.append(
+                "Fixed plus the last full month of API: "
+                f"₩{with_api:,}{dollars(with_api)} a month"
+            )
     if counted:
         lines.append(f"Fixed over a year: ₩{total * 12:,}")
+        if usd:
+            lines.append(
+                f"In dollars: ≈ ${total / usd:,.2f} a month · ≈ ${total * 12 / usd:,.2f} a year"
+            )
     shown = _rate_lines(tools, rates, rate_day, api)
     if shown:
         lines.append(shown)
@@ -535,10 +549,12 @@ async def _api(admin_key: str, today: date, *, closed: bool) -> tuple[Api | None
     return Api(this, last, closed=closed), None
 
 
-async def _rates(tools: list[Tool], with_usd: bool) -> tuple[dict | None, date | None, str | None]:
-    wanted = {t.currency for t in tools if t.counts and t.cost is not None}
-    if with_usd:
-        wanted.add("USD")
+async def _rates(tools: list[Tool]) -> tuple[dict | None, date | None, str | None]:
+    # Every currency something is priced in -- by any figure, not only Cost: a
+    # tool billed by usage alone has no Cost and an average instead -- and
+    # always dollars, which the totals are also shown in.
+    wanted = {t.currency for t in tools if t.counts and t.monthly() is not None}
+    wanted.add("USD")
     try:
         rates, day = await Rates().to_won(wanted)
     except FxError as exc:
@@ -563,7 +579,7 @@ async def build_costs(
     # settlement's average leaves out the very month it is judging.
     tools = await service.tools(asof=ended if settle else this_month)
     api, api_problem = await _api(admin_key, today, closed=settle)
-    rates, day, rate_problem = await _rates(tools, with_usd=bool(admin_key))
+    rates, day, rate_problem = await _rates(tools)
     if settle:
         spend = await service.spend_in(ended)
         actual = (
@@ -590,7 +606,7 @@ async def weekly_line(service: ToolService, admin_key: str, today: date) -> str 
     try:
         tools = await service.tools(asof=month_bounds(today)[0])
         api, _ = await _api(admin_key, today, closed=False)
-        rates, _, _ = await _rates(tools, with_usd=api is not None)
+        rates, _, _ = await _rates(tools)
         return cost_line(tools, rates, today, api=api)
     except Exception:
         log.exception("could not add costs to the weekly summary")

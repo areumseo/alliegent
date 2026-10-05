@@ -275,8 +275,8 @@ def test_the_actual_is_set_against_the_estimate_and_missing_records_are_said():
     text = costs_message(tools, RATES, None, TODAY, actual=actual, actual_label="September")
     # Estimate: (20+15) + (5+10) = 50 dollars; actual: 20+30 + 5+10(est) = 65.
     assert (
-        "Actual September: ₩91,000 "
-        "(plan ₩35,000, usage ₩42,000 recorded + ₩14,000 estimated)"
+        "Actual September: ₩91,000 (≈ $65.00) — "
+        "plan ₩35,000, usage ₩42,000 recorded + ₩14,000 estimated"
     ) in text
     assert "The estimate was ₩70,000: +₩21,000" in text
     assert "No record for September: Render" in text
@@ -291,7 +291,7 @@ def test_an_actual_that_matches_says_so():
 
 
 async def test_the_settlement_uses_the_months_records(monkeypatch):
-    async def rates(tools, with_usd):
+    async def rates(tools):
         return RATES, date(2026, 10, 1), None
 
     monkeypatch.setattr(build_costs, "_rates", rates)
@@ -413,7 +413,7 @@ def test_an_average_makes_a_plan_with_usage_estimated_not_understated():
 
 async def test_the_settlements_estimate_leaves_out_the_month_it_judges(monkeypatch):
     """October's actual must not be inside the average it is compared with."""
-    async def rates(tools, with_usd):
+    async def rates(tools):
         return RATES, date(2026, 11, 1), None
 
     monkeypatch.setattr(build_costs, "_rates", rates)
@@ -429,6 +429,46 @@ async def test_the_settlements_estimate_leaves_out_the_month_it_judges(monkeypat
     # Jul-Sep with history from August: (3 + 3) / 2 = 3 dollars, not the 12 an
     # average that took in October's 30 would give. The actual is 30.
     assert "The estimate was ₩4,200: +₩37,800" in text
+
+
+# -- dollars, and which currencies get a rate ------------------------------------
+
+
+def test_the_fixed_total_is_also_given_in_dollars():
+    text = costs_message([tool("Host", "5"), tool("Plan", "5")], RATES, None, TODAY)
+    # 14,000 won a month at 1,400 won to the dollar.
+    assert "In dollars: ≈ $10.00 a month · ≈ $120.00 a year" in text
+
+
+def test_no_dollar_line_without_a_dollar_rate():
+    text = costs_message([tool("Host", "5000", currency="KRW")], {"KRW": 1.0}, None, TODAY)
+    assert "In dollars" not in text
+
+
+def test_a_settlement_and_a_total_with_the_api_carry_dollars_too():
+    tools = [metered("Platform", "t1")]
+    actual = actual_for(tools, {"t1": Decimal("15")}, RATES)
+    text = costs_message(
+        tools, RATES, None, TODAY, actual=actual, actual_label="September",
+        api=Api(Decimal("10"), Decimal("30")),
+    )
+    assert "Actual September: ₩49,000 (≈ $35.00) — " in text
+    assert "a month" in text and "(≈ $" in text.split("Fixed plus the last full month")[1]
+
+
+async def test_a_usage_only_tool_with_no_cost_still_gets_its_currency_rate(monkeypatch):
+    """Priced by an average alone, its currency must still be fetched, or its
+    won figure is a question mark."""
+    seen = {}
+
+    async def to_won(self, currencies):
+        seen["wanted"] = set(currencies)
+        return {"KRW": 1.0, "USD": 1400.0, "EUR": 1500.0}, TODAY
+
+    monkeypatch.setattr(build_costs.Rates, "to_won", to_won)
+    eur = tool("Host", None, currency="EUR", billing="Usage", usage_avg=Decimal(4))
+    await build_costs._rates([eur])
+    assert seen["wanted"] == {"EUR", "USD"}
 
 
 # -- by project -------------------------------------------------------------
@@ -501,7 +541,7 @@ def test_a_month_in_progress_is_kept_out_of_the_total_that_uses_last_month():
     assert "$10.00 this month so far (₩14,000)" in text
     assert "$30.00 last month (₩42,000)" in text
     # 7,000 fixed + 42,000 for last full month, never the partial 14,000.
-    assert "₩49,000 a month" in text
+    assert "₩49,000 (≈ $35.00) a month" in text
     assert row(text, "FIXED").split()[-1] == "7,000"
 
 
@@ -512,7 +552,7 @@ def test_a_closed_month_is_the_one_the_total_uses():
         api_labels=("September", "August"),
     )
     assert "$30.00 September" in text and "$20.00 August" in text
-    assert "₩49,000 a month" in text
+    assert "₩49,000 (≈ $35.00) a month" in text
 
 
 def test_a_failed_usage_lookup_is_said_not_silent():
