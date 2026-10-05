@@ -39,6 +39,7 @@ class Jobs:
         expenses=None,
         assets=None,
         plans=None,
+        costs=None,
         english=None,
         anthropic_api_key: str = "",
         calendar_source: Callable | None = None,
@@ -52,6 +53,7 @@ class Jobs:
         self.expenses = expenses
         self.assets = assets
         self.plans = plans
+        self.costs = costs
         self.english = english
         self.config = config
         self.notify = notify
@@ -135,12 +137,37 @@ class Jobs:
                         code_done[project.id] = code_done.get(project.id, 0) + len(span.done)
             finally:
                 await github.aclose()
-        return project_log.week_message(
+        message = project_log.week_message(
             projects,
             code_done,
             today,
             stale_after_days=self.config.projects.stale_after_days,
         )
+        # What the tools cost, as one line under the week: the status and the
+        # spend are read together, which is why #build holds both.
+        line = None
+        if self.costs is not None:
+            from . import build_costs
+
+            line = await build_costs.weekly_line(self.costs, self._admin_key(), today)
+        text = "\n".join(part for part in (message, line) if part)
+        return text or None
+
+    def _admin_key(self) -> str:
+        return self._secrets.anthropic_admin_key if self._secrets else ""
+
+    async def build_costs(self, *, settle: bool = False) -> str | None:
+        """The costs table; the month just ended when `settle`."""
+        if self.costs is None:
+            return None
+        from . import build_costs
+
+        return await build_costs.build_costs(
+            self.costs, self._admin_key(), self.today(), settle=settle
+        )
+
+    async def run_build_costs(self) -> None:
+        await self._send(await self.build_costs(settle=True), "build")
 
     async def build_ai_news(self) -> str | None:
         """Collect yesterday's AI articles and write the digest.
@@ -308,13 +335,13 @@ class Jobs:
         return project_log.open_message(self.today(), entries)
 
     async def run_project_open(self) -> None:
-        await self._send(await self.build_project_open(), "projects")
+        await self._send(await self.build_project_open(), "build")
 
     async def run_project_log(self) -> None:
         logs, code_days = await self.build_project_logs()
         for project, message in logs:
             if self._post_project is None:
-                await self._send(f"**{project.title}**\n{message}", "projects")
+                await self._send(f"**{project.title}**\n{message}", "build")
                 continue
             thread = await self._post_project(project.thread_id, project.title, message)
             # A new post -- the first, or one made because the old was deleted
@@ -437,7 +464,7 @@ class Jobs:
         await self._send(await self.build_incomplete_alert(), "agenda")
 
     async def run_project_week(self) -> None:
-        await self._send(await self.build_project_week(), "projects")
+        await self._send(await self.build_project_week(), "build")
 
     async def run_ai_news(self) -> None:
         message = await self.build_ai_news()

@@ -8,19 +8,20 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 
 | Job | Default time (Asia/Seoul) | Description |
 | --- | --- | --- |
-| Daily brief | 08:00 daily | The whole day and anything overdue, in one message. Projects are not in it: they have `#projects` to themselves |
+| Daily brief | 08:00 daily | The whole day and anything overdue, in one message. Projects are not in it: they have `#build` to themselves |
 | AI news digest | 09:00 daily | Five of yesterday's AI stories, read from publication feeds — a topics line, then linked headlines with a short summary in English and Korean |
 | Incomplete alert | 14:00 and 19:30 daily | The day so far — what is left, what is done — and anything past its date. Two runs: one while the day can still change, one to close it out |
 | Weekly planning | Sat 10:00 | Prompts you to plan the coming week, showing what's in it, which days are empty, and what's carrying over |
 | Week scaffolding | *off* | Copies last week's `Recurring` items onto the coming week. Disabled until something actually repeats |
-| Project week | Sun 20:00 | Every open project's last seven days in the `#projects` Overview post — done, last active, next — with the stalled ones flagged under the table. Silent unless `NOTION_PROJECTS_DB_ID` is set |
+| Project week | Sun 20:00 | Every open project's last seven days in the `#build` Overview post — done, last active, next — with the stalled ones flagged under the table. Silent unless `NOTION_PROJECTS_DB_ID` is set |
 | English quiz | 20:30 daily | Five questions on today's lesson, answered by replying. Silent on days without a lesson |
 | Bonus rollover | 1 Apr and 1 Oct, 09:00 | Moves the half-yearly bonus from Expected into Savings once it has been paid |
 | ESPP rollover | Day after each purchase date, 09:00 | Moves ESPP contributions into Vested once they have become shares |
 | Asset prompt | Mon 09:00 | Asks for this week's balances, carrying last week's figures to edit |
 | Plan check | 1st of the month, or the first day after it with a snapshot, 09:00 | The month just finished against its row in Plans: each half against its target, where Total sits between Low and High, the change split into savings, company inflows and market, and the warnings the plan sets |
-| Project open | 08:00 daily | What is open in every project — in review, then to-do — in the `#projects` Overview post. Silent when nothing is open anywhere |
-| Project log | 22:00 daily | Each project with a GitHub repository gets its day in its own `#projects` forum post: what reached the default branch, what is in review, what is next. Silent on a day with nothing done |
+| Build costs | 1st of the month, 09:30 | The month just ended, tool by tool: fixed subscriptions in won a month, the Anthropic API's actual bill against the month before, and renewals coming up. Silent unless `NOTION_BUILD_TOOLS_DB_ID` is set |
+| Project open | 08:00 daily | What is open in every project — in review, then to-do — in the `#build` Overview post. Silent when nothing is open anywhere |
+| Project log | 22:00 daily | Each project with a GitHub repository gets its day in its own `#build` forum post: what reached the default branch, what is in review, what is next. Silent on a day with nothing done |
 | Karrot candidates | Mon 09:00 | What is decided on but not yet listed. Silent when there is nothing waiting |
 | Karrot sales | Sat 20:00 | The week's sales, with the month, the year and the running total. Silent when nothing sold and nothing is owed |
 | Weekly review | Sun 21:00 | Completion stats for the past week as a review draft |
@@ -39,7 +40,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/delete <numbers> [when]` | Move items to Notion's trash by number — recoverable there. Takes `when` the same way, `overdue` included |
 | `/change <numbers> [day] [at] [category] [project] [name] [from]` | Change what an item is or when it is — any combination of day, time, category, project and title in one edit. The time is what orders an item within its day. `at` and `project` both take `none` to clear the value; `name` takes one item at a time. `from` picks the list the numbers came off, `overdue` included |
 | `/overdue` | Overdue, unfinished items — numbered, so they can be cleared |
-| `/projects summary` · `open` · `log <project>` · `status <project> <status>` | The last seven days of every open project; what is open in each; one project's day so far, as tonight's post will say it; set a project's status in Notion (a Done one can be reopened). Typed inside a project's forum post, they answer in that post |
+| `/build summary` · `open` · `costs` · `log <project>` · `status <project> <status>` | The last seven days of every open project; what is open in each; what the build tools cost a month; one project's day so far, as tonight's post will say it; set a project's status in Notion (a Done one can be reopened). Typed inside a project's forum post, they answer in that post |
 | `/brief` | Run the daily brief now |
 | `/assets show` · `/assets trend` · `/assets plan` · `/assets gain <amount> [month]` · `/assets retirement` | Latest snapshot with what changed, the recent history, the latest snapshot against the month it is heading for, a realised gain on foreign shares recorded against the year's allowance, and income after retirement in won a month |
 | `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `spent`, `bought`, `sales`, `summary` |
@@ -61,7 +62,7 @@ Numbers are per-day, and `/done` and `/delete` take the day as an argument (`/do
 
 `/done` and `/delete` take several numbers at once (`3,5` or `3 5`) and resolve them against a single snapshot of the day. Running them one at a time would not be equivalent: completing or trashing item 3 shortens the list, so the item that was 5 becomes 4 and the next command would hit the wrong row.
 
-**Commands post to the same channel their scheduled equivalent uses**, wherever you invoke them from — agenda commands to the agenda channel, `/projects` to the projects channel, `/news` to the news channel. Run one from somewhere else and you get a one-line "Posted to #channel" instead, so the archive never splits across whichever channel you happened to be in. Run it from the destination channel and it just answers in place.
+**Commands post to the same channel their scheduled equivalent uses**, wherever you invoke them from — agenda commands to the agenda channel, `/build` to the build channel, `/news` to the news channel. Run one from somewhere else and you get a one-line "Posted to #channel" instead, so the archive never splits across whichever channel you happened to be in. Run it from the destination channel and it just answers in place.
 
 `/add`, `/done`, `/delete`, and `/change` are the exception: they answer where you typed them, since routing a one-line confirmation would turn every write into two messages.
 
@@ -91,7 +92,7 @@ Each job posts to the channel matching its kind:
 | Variable | Receives |
 | --- | --- |
 | `DISCORD_AGENDA_CHANNEL_ID` | Daily brief, incomplete alert, weekly planning, week scaffolding |
-| `DISCORD_PROJECTS_CHANNEL_ID` | The `#projects` forum: a post per project for its daily log, and an Overview post for `/projects` and the weekly summary. An ordinary text channel still works, without the posts |
+| `DISCORD_BUILD_CHANNEL_ID` | The `#build` forum: a post per project for its daily log, and an Overview post for `/build`, the weekly summary and the costs. An ordinary text channel still works, without the posts. `DISCORD_PROJECTS_CHANNEL_ID`, its name when it was `#projects`, is read if this is blank |
 | `DISCORD_REVIEW_CHANNEL_ID` | Weekly review (falls back to the agenda channel) |
 | `DISCORD_NEWS_CHANNEL_ID` | Daily AI news digest |
 | `DISCORD_KARROT_CHANNEL_ID` | Karrot listings report |
@@ -338,9 +339,20 @@ A 🌅 Retirement Income database holds one row per source of income after work 
 
 It is kept out of both the snapshots and the plan on purpose: those measure what is held now, and income that starts decades away would read there as money on hand. `/assets retirement` lists every source in its own currency and in won a month, converted at the day's European Central Bank reference rate ([Frankfurter](https://frankfurter.dev), no key) and never stored, since a rate written down would be wrong the next day. A source with no amount yet stays in the table as `?` and is named under it, so a total over what is known so far is not mistaken for the whole.
 
+## Build costs
+
+A 🛠 Build Tools database holds one row per tool used to build and run the services — `Cost` in the currency it is billed in, `Currency`, `Billing` (`Monthly`, `Yearly`, or `Usage` for a hand-typed monthly estimate), `Renews`, `Status` (`Active`, `Trial`, `Cancelled`) and a `Note`. `NOTION_BUILD_TOOLS_DB_ID` switches it on. Two sources, because the bills behave differently:
+
+- **Subscriptions are typed once.** The bot does the arithmetic: a yearly plan is a twelfth a month, and each foreign currency is converted at the day's European Central Bank rate, looked up and never stored. A `Cancelled` row stays as history and leaves the sums; a `Trial` is named and costs nothing until it converts.
+- **The Anthropic API is read live.** Usage moves every day, so a figure typed last week is stale. With `ANTHROPIC_ADMIN_KEY` set — an organisation admin key (`sk-ant-admin…`) from the Console, which is not the key the bot calls the model with and can read usage and nothing else here — the bot reads the cost report. Without it, nothing is missing but the line; keep the API in the database as a `Usage` row if you want an estimate there instead, and not both, or it is counted twice.
+
+**The live figure stays out of the fixed total.** A month still running has only part of its bill, and inside a monthly total it would climb all month and reset. It sits beneath the table next to last month's full figure, and the total *with the API* uses the last complete month. Months are cut at midnight UTC, which is how the report is bucketed, so the first and last day of a month can differ from the invoice by a few hours.
+
+`/build costs` shows it now. On the 1st the same table is posted for the month that just ended, with the month before for comparison, and the Sunday summary carries one line under the week: the fixed total, the API so far this month, and anything renewing within two weeks. A renewal inside that window is the point of the `Renews` column — long enough to cancel in time.
+
 ## Projects forum
 
-`#projects` is a Discord **forum**, and each project with a repository has a post in it that collects its days. A project is in the forum when its row in the Projects database has `GitHub` filled in — `owner/repo`, several separated by commas, or the URLs as copied from the browser (`/pulls` and all). A project without one stays out, which is how the forum is limited to the projects there is code to report on.
+`#build` is a Discord **forum**, and each project with a repository has a post in it that collects its days. A project is in the forum when its row in the Projects database has `GitHub` filled in — `owner/repo`, several separated by commas, or the URLs as copied from the browser (`/pulls` and all). A project without one stays out, which is how the forum is limited to the projects there is code to report on.
 
 At 22:00 each such project gets one message in its post:
 
@@ -350,7 +362,7 @@ At 22:00 each such project gets one message in its post:
 
 A day with nothing done posts nothing: review and to-do change slowly, and a post repeating the same open list every night stops being read. A repository that cannot be read is the exception — it says so even on a quiet day, because it will stay quiet until someone fixes it. Public repositories need no token; a private one answers 404 without `GITHUB_TOKEN`, and the post says that rather than reporting an empty day.
 
-The bot makes the post the first time a project has something to say and writes its id into `Discord Thread`, so a renamed project keeps its post; a post deleted by hand is made again. A forum takes posts, not messages, so what used to go into the channel itself — `/projects` and the weekly summary — goes into a post called **Overview**, found by name and made once.
+The bot makes the post the first time a project has something to say and writes its id into `Discord Thread`, so a renamed project keeps its post; a post deleted by hand is made again. A forum takes posts, not messages, so what used to go into the channel itself — `/build` and the weekly summary — goes into a post called **Overview**, found by name and made once.
 
 **The weekly summary** replaced a Wednesday check that named only the stalled projects: the ones moving were invisible, and a project's standing only means something beside the others'. On Sunday evening every open project gets a row — done in the last seven days, counting both finished linked agenda items and GitHub work, the last active day, and the next step — and a project that has not moved in `stale_after_days`, or has nothing linked, gets a ⚠️ line under the table.
 
@@ -358,7 +370,7 @@ The bot makes the post the first time a project has something to say and writes 
 
 **Mornings are the other half.** The nightly post records what was done; at 08:00 the Overview post gets what is left — each project's open pull requests, then its to-do, linked agenda items first and open issues after — read when the day is being planned. Every open project is in it, with or without a repository, since to-do comes from the agenda too. A project with nothing open is left out, and a morning with nothing open anywhere posts nothing. It is one message in Overview rather than one per project post, so the posts stay a record of work done rather than a daily repeat of the same open list.
 
-**Everything about projects is answered in `#projects`.** The daily brief no longer carries a project table. `/projects` is a group: `summary` for the weekly table now, `open` for the morning's list now, `log <project>` for a project's day so far, and `status <project> <status>` to set its status in Notion — any capitalisation of an offered status, an unknown one refused rather than created, and a Done project reachable so it can be reopened. A command typed inside a project's post answers in that post rather than in Overview.
+**Everything about projects is answered in `#build`.** The daily brief no longer carries a project table. `/build` is a group: `summary` for the weekly table now, `open` for the morning's list now, `log <project>` for a project's day so far, and `status <project> <status>` to set its status in Notion — any capitalisation of an offered status, an unknown one refused rather than created, and a Done project reachable so it can be reopened. A command typed inside a project's post answers in that post rather than in Overview.
 
 Preview without posting or making anything:
 

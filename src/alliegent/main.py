@@ -9,6 +9,7 @@ import discord
 
 from .agenda import AgendaService, ProjectService
 from .assets import AssetService
+from .build_costs import ToolService
 from .config import duplicate_env_keys, get_config, get_secrets
 from .english import EnglishService
 from .integrations.discord_bot import AlliegentBot
@@ -37,7 +38,7 @@ def enabled_routes(secrets) -> list[str]:
     """The channels that must exist, given which features are configured."""
     routes = ["agenda", "review", "news"]
     optional = {
-        "projects": secrets.notion_projects_db_id,
+        "build": secrets.notion_projects_db_id,
         "karrot": secrets.notion_karrot_db_id,
         "assets": secrets.notion_assets_db_id,
         "english": secrets.notion_english_lessons_db_id,
@@ -103,6 +104,12 @@ async def main() -> None:
         else None
     )
 
+    costs = (
+        ToolService(client, config, secrets.notion_build_tools_db_id)
+        if secrets.notion_build_tools_db_id
+        else None
+    )
+
     english = (
         EnglishService(
             client,
@@ -150,6 +157,7 @@ async def main() -> None:
             assets=assets,
             plans=plans,
             retirement=retirement,
+            costs=costs,
             english=english,
             secrets=secrets,
             guild_id=secrets.discord_guild_id,

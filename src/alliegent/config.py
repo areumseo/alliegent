@@ -31,6 +31,9 @@ class Secrets(BaseSettings):
     # Monthly targets to hold the asset snapshots against. Needs the assets
     # database too: a plan with nothing to compare it to reports nothing.
     notion_plans_db_id: str = ""
+    # 🛠 Build Tools: what each tool used to build and run the services costs.
+    # Fixed subscriptions are typed here; usage with an API is read live.
+    notion_build_tools_db_id: str = ""
     # 🌅 Retirement Income: pensions and other sources after work stops, each
     # in its own currency. Needs the assets database too.
     notion_retirement_db_id: str = ""
@@ -42,6 +45,10 @@ class Secrets(BaseSettings):
     notion_english_reviews_db_id: str = ""
 
     anthropic_api_key: str = ""
+    # Organisation admin key (sk-ant-admin...), which is not the key above: it
+    # can read the usage cost report and nothing else this bot does. Optional;
+    # without it the Anthropic line is whatever is typed into Build Tools.
+    anthropic_admin_key: str = ""
 
     # Optional. Public repositories are read without one; a private one needs
     # a token that can read contents, pull requests and issues.
@@ -79,6 +86,9 @@ class Secrets(BaseSettings):
     # Fallback used by any channel left unset below.
     discord_channel_id: int = 0
     discord_agenda_channel_id: int = 0
+    # #build: projects' days and weeks, and what the tools cost. The older name
+    # still works, so a .env written when it was #projects keeps going.
+    discord_build_channel_id: int = 0
     discord_projects_channel_id: int = 0
     discord_review_channel_id: int = 0
     discord_news_channel_id: int = 0
@@ -90,6 +100,7 @@ class Secrets(BaseSettings):
         "discord_guild_id",
         "discord_channel_id",
         "discord_agenda_channel_id",
+        "discord_build_channel_id",
         "discord_projects_channel_id",
         "discord_review_channel_id",
         "discord_news_channel_id",
@@ -121,7 +132,11 @@ class Secrets(BaseSettings):
         agenda = self.discord_agenda_channel_id or self.discord_channel_id
         routes = {
             "agenda": agenda,
-            "projects": self.discord_projects_channel_id or self.discord_channel_id,
+            "build": (
+                self.discord_build_channel_id
+                or self.discord_projects_channel_id
+                or self.discord_channel_id
+            ),
             "review": self.discord_review_channel_id or agenda,
             "news": self.discord_news_channel_id or self.discord_channel_id,
             "karrot": self.discord_karrot_channel_id or self.discord_channel_id,
@@ -177,7 +192,7 @@ class ProjectProps(BaseModel):
     open_count: str = ""
     progress: str = ""
     # GitHub repositories, as owner/repo or their URLs, comma-separated. A
-    # project with none stays out of the #projects forum -- which is how the
+    # project with none stays out of the #build forum -- which is how the
     # forum is limited to the projects that have code to report on.
     repos: str = "GitHub"
     # Where the bot records the forum post it made for the project. Written by
@@ -197,7 +212,7 @@ class Schedule(BaseModel):
     # Empty disables the job. Off by default: nothing in the agenda repeats
     # weekly yet, so there is no template to copy from.
     week_scaffold_time: str = ""
-    # Every open project's week, in the #projects Overview post. It took over
+    # Every open project's week, in the #build Overview post. It took over
     # from a Wednesday check that named only the stalled ones; the end of the
     # week is when "this week" means a whole one.
     project_week_weekday: str = "sun"
@@ -232,12 +247,16 @@ class Schedule(BaseModel):
     # is recorded first on or after the 1st, which is usually a Monday later.
     # The report goes out once, on the day that snapshot exists.
     plan_report_time: str = "09:00"
-    # Each project's day in its #projects post: what was done, what is in
+    # Each project's day in its #build post: what was done, what is in
     # review, what is next. Late enough to catch the evening's work.
     project_log_time: str = "22:00"
-    # What is open in every project, in the #projects Overview post: the
+    # What is open in every project, in the #build Overview post: the
     # morning half of the log, read when the day is being planned.
     project_open_time: str = "08:00"
+    # The month just ended, tool by tool, on the day after the bill. Blank the
+    # time to switch it off.
+    build_costs_day: int = 1
+    build_costs_time: str = "09:30"
 
     @field_validator("incomplete_alert", mode="before")
     @classmethod

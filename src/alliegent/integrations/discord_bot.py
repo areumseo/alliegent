@@ -36,6 +36,7 @@ class AlliegentBot(discord.Client):
         assets=None,
         plans=None,
         retirement=None,
+        costs=None,
         english=None,
         guild_id: int = 0,
         enable_chat: bool = True,
@@ -56,6 +57,7 @@ class AlliegentBot(discord.Client):
         self.assets = assets
         self.plans = plans
         self.retirement = retirement
+        self.costs = costs
         self.english = english
         self.secrets = secrets
         self.guild_id = guild_id
@@ -75,6 +77,7 @@ class AlliegentBot(discord.Client):
             expenses=expenses,
             assets=assets,
             plans=plans,
+            costs=costs,
             english=english,
             anthropic_api_key=secrets.anthropic_api_key,
             calendar_source=make_source(secrets),
@@ -209,7 +212,7 @@ class AlliegentBot(discord.Client):
                 await thread.send(part, suppress_embeds=True)
             return thread.id
 
-        forum = await self._channel("projects")
+        forum = await self._channel("build")
         if isinstance(forum, discord.ForumChannel):
             made = await forum.create_thread(
                 name=title, content=parts[0], suppress_embeds=True
@@ -218,7 +221,7 @@ class AlliegentBot(discord.Client):
                 await made.thread.send(part, suppress_embeds=True)
             return made.thread.id
         # An ordinary channel: the day goes in it, named, with no post to keep.
-        await self.notify(f"**{title}**\n{message}", "projects")
+        await self.notify(f"**{title}**\n{message}", "build")
         return None
 
     def today(self) -> date:
@@ -391,7 +394,7 @@ async def _deliver(
     await interaction.followup.send(f"📨 Posted to {name}.")
 
 
-# The #projects forum's own post: what the channel said before it was a forum.
+# The #build forum's own post: what the channel said before it was a forum.
 OVERVIEW = "Overview"
 
 
@@ -1374,7 +1377,7 @@ def _register(bot: AlliegentBot) -> None:
         await _deliver(bot, interaction, message, "assets")
 
     projects_group = app_commands.Group(
-        name="projects", description="Projects: the week, what is open, a day, a status"
+        name="build", description="Build: projects' weeks, days and status, and tool costs"
     )
     tree.add_command(projects_group)
 
@@ -1387,6 +1390,16 @@ def _register(bot: AlliegentBot) -> None:
         return False
 
     @projects_group.command(
+        name="costs", description="What the build tools cost a month, in won"
+    )
+    async def build_costs_command(interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        if bot.costs is None:
+            await interaction.followup.send("⚠️ NOTION_BUILD_TOOLS_DB_ID is not set.")
+            return
+        await _deliver(bot, interaction, await bot.jobs.build_costs(), "build")
+
+    @projects_group.command(
         name="summary", description="Every open project's last seven days"
     )
     async def projects_summary(interaction: discord.Interaction) -> None:
@@ -1394,7 +1407,7 @@ def _register(bot: AlliegentBot) -> None:
         if await _no_projects(interaction):
             return
         message = await bot.jobs.build_project_week()
-        await _deliver(bot, interaction, message or "No open projects.", "projects")
+        await _deliver(bot, interaction, message or "No open projects.", "build")
 
     @projects_group.command(
         name="open", description="What is in review and to do, in every project"
@@ -1404,7 +1417,7 @@ def _register(bot: AlliegentBot) -> None:
         if await _no_projects(interaction):
             return
         message = await bot.jobs.build_project_open()
-        await _deliver(bot, interaction, message or "Nothing open in any project.", "projects")
+        await _deliver(bot, interaction, message or "Nothing open in any project.", "build")
 
     @projects_group.command(
         name="log", description="What a project got done today, as tonight's post will say"
@@ -1426,7 +1439,7 @@ def _register(bot: AlliegentBot) -> None:
             return
         logs, _ = await bot.jobs.build_project_logs(only=found.id)
         message = logs[0][1] if logs else f"Nothing done on {found.title} today, yet."
-        await _deliver(bot, interaction, f"**{found.title}**\n{message}", "projects")
+        await _deliver(bot, interaction, f"**{found.title}**\n{message}", "build")
 
     @projects_group.command(name="status", description="Set a project's status in Notion")
     @app_commands.describe(project="Which project", status="The new status")

@@ -9,18 +9,27 @@ def test_channel_routing_prefers_the_specific_channel():
     secrets = Secrets(
         discord_channel_id=1,
         discord_agenda_channel_id=2,
-        discord_projects_channel_id=3,
+        discord_build_channel_id=3,
         discord_review_channel_id=4,
     )
     assert secrets.channel_for("agenda") == 2
-    assert secrets.channel_for("projects") == 3
+    assert secrets.channel_for("build") == 3
     assert secrets.channel_for("review") == 4
+
+
+def test_the_older_projects_channel_still_serves_build():
+    """A .env written when #build was #projects keeps working, and the new name
+    wins when both are set."""
+    old = Secrets(discord_channel_id=1, discord_projects_channel_id=7)
+    assert old.channel_for("build") == 7
+    both = Secrets(discord_projects_channel_id=7, discord_build_channel_id=8)
+    assert both.channel_for("build") == 8
 
 
 def test_unset_channels_fall_back_to_the_default():
     secrets = Secrets(discord_channel_id=1)
     assert secrets.channel_for("agenda") == 1
-    assert secrets.channel_for("projects") == 1
+    assert secrets.channel_for("build") == 1
 
 
 def test_news_has_its_own_channel():
@@ -38,8 +47,8 @@ def test_review_falls_back_to_the_agenda_channel_not_the_default():
 
 
 def test_channel_lookup_fails_loudly_when_nothing_is_configured():
-    with pytest.raises(RuntimeError, match="DISCORD_PROJECTS_CHANNEL_ID"):
-        Secrets().channel_for("projects")
+    with pytest.raises(RuntimeError, match="DISCORD_BUILD_CHANNEL_ID"):
+        Secrets().channel_for("build")
 
 
 def test_blank_ids_mean_unconfigured_not_a_crash():

@@ -369,7 +369,7 @@ def daily_brief(
         out.append(overdue_hint())
         out.append("")
 
-    # Projects are not here: they have #projects to themselves, with a
+    # Projects are not here: they have #build to themselves, with a
     # morning post of what is open in each.
     return "\n".join(out).strip()
 

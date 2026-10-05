@@ -1,0 +1,267 @@
+"""What the build tools cost: typed subscriptions plus a live usage figure.
+Tool names and amounts are invented."""
+
+from __future__ import annotations
+
+from datetime import date
+from decimal import Decimal
+
+import httpx
+import pytest
+
+from alliegent import build_costs
+from alliegent.build_costs import Api, Tool, ToolService, cost_line, costs_message
+from alliegent.config import Config
+from alliegent.integrations.anthropic_usage import AnthropicUsage, UsageError, month_bounds
+
+from .conftest import FakeNotionClient
+
+TODAY = date(2026, 10, 5)
+RATES = {"KRW": 1.0, "USD": 1400.0}
+
+
+def page(pid, name, *, currency="USD", cost=None, billing="Monthly", renews=None,
+         status="Active"):
+    def select(value):
+        return {"type": "select", "select": {"name": value}}
+
+    return {
+        "object": "page",
+        "id": pid,
+        "url": "",
+        "properties": {
+            "Name": {"type": "title", "title": [{"plain_text": name, "type": "text"}]},
+            "Currency": select(currency),
+            "Cost": {"type": "number", "number": cost},
+            "Billing": select(billing),
+            "Renews": {"type": "date", "date": {"start": renews} if renews else None},
+            "Status": select(status),
+            "Note": {"type": "rich_text", "rich_text": []},
+        },
+    }
+
+
+def tool(name, cost, **kw):
+    return Tool(name, kw.pop("currency", "USD"), None if cost is None else Decimal(cost), **kw)
+
+
+def row(text, name):
+    return next(line for line in text.splitlines() if line.startswith(name))
+
+
+# -- reading ----------------------------------------------------------------
+
+
+async def test_active_tools_come_before_cancelled_ones():
+    client = FakeNotionClient({
+        "ds_tools-db": [
+            page("a", "Zed", cost=5, status="Cancelled"),
+            page("b", "Mid", cost=20),
+            page("c", "Alpha", cost=10, status="Trial"),
+        ]
+    })
+    tools = await ToolService(client, Config(), "tools-db").tools()
+    # Active first; the rest follow by name.
+    assert [t.name for t in tools] == ["Mid", "Alpha", "Zed"]
+
+
+# -- the table --------------------------------------------------------------
+
+
+def test_a_yearly_plan_is_a_twelfth_a_month_and_converted():
+    text = costs_message(
+        [tool("Editor", "120", billing="Yearly"), tool("Host", "5")], RATES, None, TODAY
+    )
+    assert row(text, "Editor").split() == ["Editor", "USD", "120", "yr", "14,000"]
+    assert row(text, "Host").split()[-1] == "7,000"
+    assert row(text, "FIXED").split()[-1] == "21,000"
+    assert "Fixed over a year: ₩252,000" in text
+
+
+def test_a_cancelled_tool_leaves_the_table_and_the_sums():
+    text = costs_message(
+        [tool("Host", "5"), tool("Old", "50", status="Cancelled")], RATES, None, TODAY
+    )
+    assert "Old" not in text
+    assert row(text, "FIXED").split()[-1] == "7,000"
+
+
+def test_a_trial_is_named_and_costs_nothing_yet():
+    text = costs_message(
+        [tool("Host", "5"), tool("New", "30", status="Trial", renews=date(2026, 10, 9))],
+        RATES, None, TODAY,
+    )
+    assert row(text, "New").split() == ["New", "USD", "trial", "-", "-"]
+    assert row(text, "FIXED").split()[-1] == "7,000"
+    assert "⏰ New ends Fri 10/9" in text
+
+
+def test_an_unpriced_tool_is_named_rather_than_counted_as_free():
+    text = costs_message([tool("Host", "5"), tool("Mystery", None)], RATES, None, TODAY)
+    assert row(text, "Mystery").split()[-1] == "?"
+    assert "Still to price: Mystery" in text
+
+
+def test_a_renewal_inside_two_weeks_is_flagged_and_a_later_one_is_not():
+    text = costs_message(
+        [tool("Soon", "5", renews=date(2026, 10, 12)),
+         tool("Later", "5", renews=date(2026, 12, 1))],
+        RATES, None, TODAY,
+    )
+    assert "⏰ Soon renews Mon 10/12" in text
+    assert "Later renews" not in text
+
+
+def test_without_a_rate_there_are_no_won_figures_and_it_says_why():
+    text = costs_message([tool("Host", "5")], None, None, TODAY, rate_problem="down")
+    assert row(text, "Host").split()[-1] == "?"
+    assert "FIXED" not in text
+    assert "⚠️ No exchange rate" in text
+
+
+def test_no_tools_and_no_live_figure_says_so():
+    assert "No tools recorded yet" in costs_message([], RATES, None, TODAY)
+
+
+# -- the live figure --------------------------------------------------------
+
+
+def test_a_month_in_progress_is_kept_out_of_the_total_that_uses_last_month():
+    text = costs_message(
+        [tool("Host", "5")], RATES, None, TODAY, api=Api(Decimal("10"), Decimal("30"))
+    )
+    assert "$10.00 this month so far (₩14,000)" in text
+    assert "$30.00 last month (₩42,000)" in text
+    # 7,000 fixed + 42,000 for last full month, never the partial 14,000.
+    assert "₩49,000 a month" in text
+    assert row(text, "FIXED").split()[-1] == "7,000"
+
+
+def test_a_closed_month_is_the_one_the_total_uses():
+    text = costs_message(
+        [tool("Host", "5")], RATES, None, TODAY,
+        api=Api(Decimal("30"), Decimal("20"), closed=True),
+        api_labels=("September", "August"),
+    )
+    assert "$30.00 September" in text and "$20.00 August" in text
+    assert "₩49,000 a month" in text
+
+
+def test_a_failed_usage_lookup_is_said_not_silent():
+    text = costs_message([tool("Host", "5")], RATES, None, TODAY, api_problem="401")
+    assert "⚠️ Anthropic usage unavailable: 401" in text
+
+
+def usage_client(handler):
+    return httpx.AsyncClient(
+        base_url="https://api.anthropic.com", transport=httpx.MockTransport(handler)
+    )
+
+
+async def test_the_cost_report_is_summed_from_cents_to_dollars_across_pages():
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        assert request.headers["x-api-key"] == "sk-ant-admin-test"
+        assert request.headers["anthropic-version"]
+        if "page" not in request.url.params:
+            return httpx.Response(200, json={
+                "data": [{"results": [{"currency": "USD", "amount": "1234.5"}]}],
+                "has_more": True, "next_page": "p2",
+            })
+        assert request.url.params["page"] == "p2"
+        return httpx.Response(200, json={
+            "data": [{"results": [{"currency": "USD", "amount": "65.5"},
+                                  {"currency": "USD", "amount": "100"}]}],
+            "has_more": False, "next_page": None,
+        })
+
+    usage = AnthropicUsage("sk-ant-admin-test", client=usage_client(handler))
+    assert await usage.cost(date(2026, 10, 1), date(2026, 10, 6)) == Decimal("14.00")
+    assert len(seen) == 2
+    assert seen[0].url.params["starting_at"] == "2026-10-01T00:00:00Z"
+    assert seen[0].url.params["ending_at"] == "2026-10-06T00:00:00Z"
+
+
+async def test_a_refused_key_is_a_usage_error_naming_the_status():
+    usage = AnthropicUsage("bad", client=usage_client(lambda r: httpx.Response(401)))
+    with pytest.raises(UsageError, match="401"):
+        await usage.cost(date(2026, 10, 1), date(2026, 10, 6))
+
+
+def test_month_bounds_cross_a_year():
+    assert month_bounds(date(2027, 1, 15)) == (
+        date(2027, 1, 1), date(2027, 2, 1), date(2026, 12, 1)
+    )
+
+
+async def test_no_admin_key_means_no_api_figure_and_no_complaint():
+    assert await build_costs._api("", TODAY, closed=False) == (None, None)
+
+
+async def test_the_settlement_reads_the_month_that_ended_and_the_one_before(monkeypatch):
+    spans = []
+
+    async def cost(self, first, stop):
+        spans.append((first, stop))
+        return Decimal(1)
+
+    monkeypatch.setattr(AnthropicUsage, "cost", cost)
+    api, problem = await build_costs._api("k", TODAY, closed=True)
+    assert problem is None and api.closed
+    assert spans == [
+        (date(2026, 9, 1), date(2026, 10, 1)),
+        (date(2026, 8, 1), date(2026, 9, 1)),
+    ]
+
+
+async def test_an_open_month_reads_this_month_so_far(monkeypatch):
+    spans = []
+
+    async def cost(self, first, stop):
+        spans.append((first, stop))
+        return Decimal(1)
+
+    monkeypatch.setattr(AnthropicUsage, "cost", cost)
+    await build_costs._api("k", TODAY, closed=False)
+    assert spans == [
+        (date(2026, 10, 1), date(2026, 10, 6)),
+        (date(2026, 9, 1), date(2026, 10, 1)),
+    ]
+
+
+async def test_a_usage_failure_becomes_a_problem_not_an_exception(monkeypatch):
+    async def cost(self, first, stop):
+        raise UsageError("401 from the cost report")
+
+    monkeypatch.setattr(AnthropicUsage, "cost", cost)
+    assert await build_costs._api("k", TODAY, closed=False) == (
+        None, "401 from the cost report"
+    )
+
+
+# -- the weekly line --------------------------------------------------------
+
+
+def test_the_weekly_line_has_the_fixed_total_the_live_figure_and_renewals():
+    line = cost_line(
+        [tool("Host", "5", renews=date(2026, 10, 8))], RATES, TODAY,
+        api=Api(Decimal("10"), None),
+    )
+    assert line == (
+        "🛠 Build costs: ₩7,000/mo fixed · API ₩14,000 this month so far · "
+        "⏰ Host renews Thu 10/8"
+    )
+
+
+def test_nothing_to_say_is_no_line():
+    assert cost_line([], RATES, TODAY) is None
+
+
+async def test_a_broken_costs_lookup_costs_the_summary_nothing():
+    class Broken:
+        async def tools(self):
+            raise RuntimeError("notion is down")
+
+    assert await build_costs.weekly_line(Broken(), "", TODAY) is None
