@@ -38,6 +38,7 @@ JOBS = (
     "projectlog",
     "projectopen",
     "buildcosts",
+    "buildtools",
 )
 
 # Diagnostics rather than jobs: they report on the setup instead of producing
@@ -57,6 +58,7 @@ JOB_CHANNEL = {
     "projectlog": "build",
     "projectopen": "build",
     "buildcosts": "build",
+    "buildtools": "build",
 }
 
 
@@ -230,9 +232,11 @@ async def _run(name: str, commit: bool, send: bool) -> int:
         elif name == "projectopen":
             message = await jobs.build_project_open()
         elif name == "buildcosts":
-            # The table /build costs shows. The 1st's settlement is the same
-            # table for the month that just ended, so it has no preview of its own.
+            # The report /build costs gives: last month, the year so far and
+            # the year expected. The same text goes out on the 1st.
             message = await jobs.build_costs()
+        elif name == "buildtools":
+            message = await jobs.build_tools()
         elif name == "plan":
             # Never writes: no link, no Revised. A preview that changed the
             # database would make the real run on the 1st report nothing.

@@ -1390,14 +1390,95 @@ def _register(bot: AlliegentBot) -> None:
         return False
 
     @projects_group.command(
-        name="costs", description="What the build tools cost a month, in won"
+        name="costs",
+        description="Last month's cost, the year so far and the year expected",
     )
-    async def build_costs_command(interaction: discord.Interaction) -> None:
+    @app_commands.describe(month="YYYY-MM to report (defaults to last month)")
+    async def build_costs_command(
+        interaction: discord.Interaction, month: str | None = None
+    ) -> None:
         await interaction.response.defer()
         if bot.costs is None:
             await interaction.followup.send("⚠️ NOTION_BUILD_TOOLS_DB_ID is not set.")
             return
-        await _deliver(bot, interaction, await bot.jobs.build_costs(), "build")
+        from ..build_costs import parse_month
+
+        try:
+            when = parse_month(month) if month else None
+        except ValueError as exc:
+            await interaction.followup.send(f"⚠️ {exc}")
+            return
+        await _deliver(bot, interaction, await bot.jobs.build_costs(when), "build")
+
+    @projects_group.command(
+        name="tools", description="The tools as they stand, a month each in won"
+    )
+    async def build_tools_command(interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        if bot.costs is None:
+            await interaction.followup.send("⚠️ NOTION_BUILD_TOOLS_DB_ID is not set.")
+            return
+        await _deliver(bot, interaction, await bot.jobs.build_tools(), "build")
+
+    @projects_group.command(
+        name="spend", description="Record what a usage-billed tool charged for a month"
+    )
+    @app_commands.describe(
+        tool="A tool billed by usage",
+        amount="The charge, in the tool's own currency",
+        month="YYYY-MM it was for (defaults to this month)",
+        note="Optional note, e.g. Monthly Invoice",
+    )
+    async def build_spend_command(
+        interaction: discord.Interaction,
+        tool: str,
+        amount: float,
+        month: str | None = None,
+        note: str | None = None,
+    ) -> None:
+        await interaction.response.defer()
+        if bot.costs is None:
+            await interaction.followup.send("⚠️ NOTION_BUILD_TOOLS_DB_ID is not set.")
+            return
+        from decimal import Decimal
+
+        from ..build_costs import month_bounds, parse_month
+
+        try:
+            if amount <= 0:
+                raise ValueError("Give the charge as a positive amount.")
+            when = parse_month(month) if month else month_bounds(bot.today())[0]
+            found = await bot.costs.find(tool)
+            total = await bot.costs.record_spend(
+                found, when, Decimal(str(amount)), note or ""
+            )
+        except ValueError as exc:
+            await interaction.followup.send(f"⚠️ {exc}")
+            return
+        # A write confirmation, answered in place like /assets gain.
+        await interaction.followup.send(
+            f"🧾 Recorded — **{found.name}** {found.currency} {amount:,.2f} "
+            f"({when.strftime('%Y-%m')})\n"
+            f"_That month so far: {found.currency} {total:,.2f}_"
+        )
+
+    async def _metered_tool_options(
+        interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """The tools that are billed by usage, since only those take a charge."""
+        try:
+            tools = await bot.costs.tools() if bot.costs else []
+        except Exception:
+            log.exception("tool autocomplete failed")
+            tools = []
+        typed = current.casefold()
+        return [
+            app_commands.Choice(name=t.name, value=t.name)
+            for t in tools
+            if t.metered and typed in t.name.casefold()
+        ][:25]
+
+    build_spend_command.autocomplete("tool")(_metered_tool_options)
 
     @projects_group.command(
         name="summary", description="Every open project's last seven days"
