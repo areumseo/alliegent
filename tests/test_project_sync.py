@@ -285,3 +285,24 @@ async def test_a_done_project_can_be_found_to_reopen_it():
 
     with pytest.raises(ValueError):
         await projects.find("Old")
+
+
+async def test_the_open_projects_are_read_together_not_one_after_another():
+    """Each project is a query against the agenda; a few of them in a row is a
+    few round trips of waiting."""
+    import asyncio
+
+    class SlowAgenda:
+        props = type("P", (), {"project": "Project"})()
+
+        async def items_for_project(self, project_id):
+            await asyncio.sleep(0.2)
+            return []
+
+    _, _, projects = services(
+        [project_page("p1", "A"), project_page("p2", "B"), project_page("p3", "C")]
+    )
+    started = asyncio.get_running_loop().time()
+    got = await projects.active(TODAY, SlowAgenda())
+    assert len(got) == 3
+    assert asyncio.get_running_loop().time() - started < 0.4   # not 0.6
