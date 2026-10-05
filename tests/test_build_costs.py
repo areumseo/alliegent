@@ -11,11 +11,9 @@ import pytest
 
 from alliegent import build_costs
 from alliegent.build_costs import (
-    Actual,
     Api,
     Tool,
     ToolService,
-    actual_for,
     cost_line,
     costs_message,
 )
@@ -222,91 +220,8 @@ def spend_service(pages, tools=()):
 SEP = date(2026, 9, 1)
 
 
-async def test_spend_is_read_for_the_month_asked_and_summed_per_tool():
-    service = spend_service([
-        spend_page("s1", "2026-09", "t1", 10),
-        spend_page("s2", "2026-09", "t1", 2.5),   # a second invoice, not a correction
-        spend_page("s3", "2026-09", "t2", 7),
-        spend_page("s4", "2026-08", "t1", 99),    # another month
-        spend_page("s5", "September", "t1", 99),  # not a month: skipped, not guessed
-    ])
-    assert await service.spend_in(SEP) == {"t1": Decimal("12.5"), "t2": Decimal(7)}
-
-
-async def test_a_month_with_nothing_recorded_is_empty_not_unknown():
-    assert await spend_service([]).spend_in(SEP) == {}
-
-
-async def test_without_a_spend_database_there_is_nothing_to_say():
-    client = FakeNotionClient({"ds_tools-db": []})
-    assert await ToolService(client, Config(), "tools-db").spend_in(SEP) is None
-
-
 def metered(name, tool_id, cost="20", usage="15", **kw):
     return tool(name, cost, billing=("Monthly", "Usage"), usage=usage, id=tool_id, **kw)
-
-
-def test_a_recorded_month_replaces_the_estimate_and_a_missing_one_is_named():
-    tools = [
-        metered("Platform", "t1"),                       # plan 20 + usage
-        tool("Host", "8", billing="Usage", id="t2"),     # usage alone, estimated 8
-        tool("Editor", "10", id="t3"),                   # plan only
-    ]
-    got = actual_for(tools, {"t1": Decimal("22")}, RATES)
-    # Plan fees: 20 + 10 = 30 dollars. Recorded: 22. Host estimated at 8.
-    assert got == Actual(
-        total=round(60 * 1400), fixed=round(30 * 1400),
-        recorded=round(22 * 1400), estimated=round(8 * 1400), missing=("Host",),
-    )
-
-
-def test_a_cancelled_tool_and_a_plan_only_tool_are_never_missing():
-    got = actual_for(
-        [tool("Old", "50", billing="Usage", status="Cancelled", id="t1"),
-         tool("Editor", "10", id="t2")],
-        {}, RATES,
-    )
-    assert got.missing == () and got.recorded == 0
-
-
-def test_the_actual_is_set_against_the_estimate_and_missing_records_are_said():
-    tools = [metered("Platform", "t1"), metered("Render", "t2", cost="5", usage="10")]
-    actual = actual_for(tools, {"t1": Decimal("30")}, RATES)
-    text = costs_message(tools, RATES, None, TODAY, actual=actual, actual_label="September")
-    # Estimate: (20+15) + (5+10) = 50 dollars; actual: 20+30 + 5+10(est) = 65.
-    assert (
-        "Actual September: ₩91,000 (≈ $65.00) — "
-        "plan ₩35,000, usage ₩42,000 recorded + ₩14,000 estimated"
-    ) in text
-    assert "The estimate was ₩70,000: +₩21,000" in text
-    assert "No record for September: Render" in text
-
-
-def test_an_actual_that_matches_says_so():
-    tools = [metered("Platform", "t1")]
-    actual = actual_for(tools, {"t1": Decimal("15")}, RATES)
-    text = costs_message(tools, RATES, None, TODAY, actual=actual, actual_label="September")
-    assert "on it" in text
-    assert "No record" not in text
-
-
-async def test_the_settlement_uses_the_months_records(monkeypatch):
-    async def rates(tools):
-        return RATES, date(2026, 10, 1), None
-
-    monkeypatch.setattr(build_costs, "_rates", rates)
-    service = spend_service(
-        [spend_page("s1", "2026-09", "t1", 30), spend_page("s2", "2026-10", "t1", 99)],
-        tools=[page("t1", "Platform", cost=20, billing="Monthly")],
-    )
-    # The row above is a plain plan; make it metered with an estimate.
-    service._client.pages["ds_tools-db"][0]["properties"]["Billing"] = {
-        "type": "multi_select",
-        "multi_select": [{"name": "Monthly"}, {"name": "Usage"}],
-    }
-    text = await build_costs.build_costs(service, "", date(2026, 10, 1), settle=True)
-    assert "Build costs — September 2026" in text
-    assert "Actual September: ₩70,000" in text   # 20 + 30 recorded, not October's 99
 
 
 # -- usage averaged from what was recorded ------------------------------------
@@ -411,26 +326,6 @@ def test_an_average_makes_a_plan_with_usage_estimated_not_understated():
     assert row(text, "Platform").split()[-1] == "49,000"
 
 
-async def test_the_settlements_estimate_leaves_out_the_month_it_judges(monkeypatch):
-    """October's actual must not be inside the average it is compared with."""
-    async def rates(tools):
-        return RATES, date(2026, 11, 1), None
-
-    monkeypatch.setattr(build_costs, "_rates", rates)
-    service = spend_service(
-        [
-            spend_page("a", "2026-08", "t1", 3),
-            spend_page("b", "2026-09", "t1", 3),
-            spend_page("c", "2026-10", "t1", 30),   # the month being settled
-        ],
-        tools=usage_tool_pages(),
-    )
-    text = await build_costs.build_costs(service, "", date(2026, 11, 1), settle=True)
-    # Jul-Sep with history from August: (3 + 3) / 2 = 3 dollars, not the 12 an
-    # average that took in October's 30 would give. The actual is 30.
-    assert "The estimate was ₩4,200: +₩37,800" in text
-
-
 # -- dollars, and which currencies get a rate ------------------------------------
 
 
@@ -443,17 +338,6 @@ def test_the_fixed_total_is_also_given_in_dollars():
 def test_no_dollar_line_without_a_dollar_rate():
     text = costs_message([tool("Host", "5000", currency="KRW")], {"KRW": 1.0}, None, TODAY)
     assert "In dollars" not in text
-
-
-def test_a_settlement_and_a_total_with_the_api_carry_dollars_too():
-    tools = [metered("Platform", "t1")]
-    actual = actual_for(tools, {"t1": Decimal("15")}, RATES)
-    text = costs_message(
-        tools, RATES, None, TODAY, actual=actual, actual_label="September",
-        api=Api(Decimal("10"), Decimal("30")),
-    )
-    assert "Actual September: ₩49,000 (≈ $35.00) — " in text
-    assert "a month" in text and "(≈ $" in text.split("Fixed plus the last full month")[1]
 
 
 async def test_a_usage_only_tool_with_no_cost_still_gets_its_currency_rate(monkeypatch):
@@ -545,16 +429,6 @@ def test_a_month_in_progress_is_kept_out_of_the_total_that_uses_last_month():
     assert row(text, "FIXED").split()[-1] == "7,000"
 
 
-def test_a_closed_month_is_the_one_the_total_uses():
-    text = costs_message(
-        [tool("Host", "5")], RATES, None, TODAY,
-        api=Api(Decimal("30"), Decimal("20"), closed=True),
-        api_labels=("September", "August"),
-    )
-    assert "$30.00 September" in text and "$20.00 August" in text
-    assert "₩49,000 (≈ $35.00) a month" in text
-
-
 def test_a_failed_usage_lookup_is_said_not_silent():
     text = costs_message([tool("Host", "5")], RATES, None, TODAY, api_problem="401")
     assert "⚠️ Anthropic usage unavailable: 401" in text
@@ -605,23 +479,7 @@ def test_month_bounds_cross_a_year():
 
 
 async def test_no_admin_key_means_no_api_figure_and_no_complaint():
-    assert await build_costs._api("", TODAY, closed=False) == (None, None)
-
-
-async def test_the_settlement_reads_the_month_that_ended_and_the_one_before(monkeypatch):
-    spans = []
-
-    async def cost(self, first, stop):
-        spans.append((first, stop))
-        return Decimal(1)
-
-    monkeypatch.setattr(AnthropicUsage, "cost", cost)
-    api, problem = await build_costs._api("k", TODAY, closed=True)
-    assert problem is None and api.closed
-    assert spans == [
-        (date(2026, 9, 1), date(2026, 10, 1)),
-        (date(2026, 8, 1), date(2026, 9, 1)),
-    ]
+    assert await build_costs._api("", TODAY) == (None, None)
 
 
 async def test_an_open_month_reads_this_month_so_far(monkeypatch):
@@ -632,7 +490,7 @@ async def test_an_open_month_reads_this_month_so_far(monkeypatch):
         return Decimal(1)
 
     monkeypatch.setattr(AnthropicUsage, "cost", cost)
-    await build_costs._api("k", TODAY, closed=False)
+    await build_costs._api("k", TODAY)
     assert spans == [
         (date(2026, 10, 1), date(2026, 10, 6)),
         (date(2026, 9, 1), date(2026, 10, 1)),
@@ -644,7 +502,7 @@ async def test_a_usage_failure_becomes_a_problem_not_an_exception(monkeypatch):
         raise UsageError("401 from the cost report")
 
     monkeypatch.setattr(AnthropicUsage, "cost", cost)
-    assert await build_costs._api("k", TODAY, closed=False) == (
+    assert await build_costs._api("k", TODAY) == (
         None, "401 from the cost report"
     )
 

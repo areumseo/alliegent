@@ -156,25 +156,37 @@ class Jobs:
     def _admin_key(self) -> str:
         return self._secrets.anthropic_admin_key if self._secrets else ""
 
-    async def build_costs(self, *, settle: bool = False) -> str | None:
-        """The costs table; the month just ended when `settle`."""
+    async def _project_names(self) -> dict[str, str]:
+        """Titles for the Projects relation. Without a projects database the
+        by-project split is simply not shown, rather than naming them by id."""
+        if self.projects is None:
+            return {}
+        return {p.id: p.title for p in await self.projects.all_projects()}
+
+    async def build_costs(self, month: date | None = None) -> str | None:
+        """The cost report: a month (default last), the year so far, the year
+        expected."""
+        if self.costs is None:
+            return None
+        from . import build_report
+
+        return await build_report.build_report(
+            self.costs, self._admin_key(), self.today(), month,
+            names=await self._project_names(),
+        )
+
+    async def build_tools(self) -> str | None:
+        """The tools as they stand, a month each."""
         if self.costs is None:
             return None
         from . import build_costs
 
-        # Titles for the Projects relation. Without a projects database the
-        # split is simply not shown, rather than naming projects by id.
-        names = (
-            {p.id: p.title for p in await self.projects.all_projects()}
-            if self.projects is not None
-            else {}
-        )
-        return await build_costs.build_costs(
-            self.costs, self._admin_key(), self.today(), settle=settle, names=names
+        return await build_costs.tools_table(
+            self.costs, self._admin_key(), self.today(), names=await self._project_names()
         )
 
     async def run_build_costs(self) -> None:
-        await self._send(await self.build_costs(settle=True), "build")
+        await self._send(await self.build_costs(), "build")
 
     async def build_ai_news(self) -> str | None:
         """Collect yesterday's AI articles and write the digest.

@@ -377,7 +377,8 @@ def test_the_plan_has_its_own_subcommands():
 def test_build_is_a_group_of_its_own_commands():
     names = {c.qualified_name for c in leaf_commands(make_bot())}
     assert {
-        "build summary", "build open", "build log", "build status", "build costs"
+        "build summary", "build open", "build log", "build status",
+        "build costs", "build tools", "build spend",
     } <= names
 
 

@@ -22,6 +22,7 @@ fixture here is invented.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -62,6 +63,9 @@ class Tool:
     # Averaged from Build Spend by the service: the last three complete months.
     # Never typed; Usage (mo), when filled, wins over it.
     usage_avg: Decimal | None = None
+    # The month it began being paid. Empty counts it from January of the year
+    # being totalled, which is right for a tool that predates it.
+    since: date | None = None
 
     @property
     def metered(self) -> bool:
@@ -129,24 +133,11 @@ class Tool:
 
 
 @dataclass(frozen=True)
-class Actual:
-    """A finished month in won: what was really billed where it was recorded,
-    the estimate where it was not, and who is missing a record."""
-
-    total: int
-    fixed: int  # plan fees, which are known without a record
-    recorded: int
-    estimated: int
-    missing: tuple[str, ...]
-
-
-@dataclass(frozen=True)
 class Api:
     """The live usage figure, in dollars."""
 
     this: Decimal
     last: Decimal | None
-    closed: bool = False  # `this` is a finished month rather than one in progress
 
 
 class ToolService:
@@ -181,12 +172,17 @@ class ToolService:
             note=n.read_text(page, "Note"),
             project_ids=tuple(n.read_relation_ids(page, "Projects")),
             id=page.get("id", ""),
+            since=n.read_date(page, "Since"),
         )
 
-    async def _spend_rows(self) -> list[tuple[date, str, Decimal]]:
-        """Every recorded charge as (month, tool id, amount). A month is titled
-        YYYY-MM, as the plan rows are; a title that is not a month is skipped
-        rather than guessed, and so is a row with no amount."""
+    async def spend_rows(self) -> list[tuple[date, str, Decimal]]:
+        """Every recorded charge as (month, tool id, amount), in the tool's own
+        currency. A month is titled YYYY-MM, as the plan rows are; a title that
+        is not a month is skipped rather than guessed, and so is a row with no
+        amount. Several rows for a tool in a month are all returned: a second
+        invoice is a second row, not a correction. Nothing without a database."""
+        if not self._spend_db_id:
+            return []
         if self._spend_ds is None:
             self._spend_ds = await self._client.resolve_data_source(self._spend_db_id)
         rows: list[tuple[date, str, Decimal]] = []
@@ -198,22 +194,6 @@ class ToolService:
             for tool_id in n.read_relation_ids(page, "Tool"):
                 rows.append((month, tool_id, Decimal(str(amount))))
         return rows
-
-    async def spend_in(self, first: date) -> dict[str, Decimal] | None:
-        """Usage charges actually recorded for the month beginning `first`, by
-        tool id and in the tool's own currency. None when there is no Build
-        Spend database, which is not the same as a month with nothing in it.
-
-        Several rows for one tool in a month add up, since a second invoice is
-        a second row, not a correction.
-        """
-        if not self._spend_db_id:
-            return None
-        out: dict[str, Decimal] = {}
-        for month, tool_id, amount in await self._spend_rows():
-            if month == first:
-                out[tool_id] = out.get(tool_id, Decimal(0)) + amount
-        return out
 
     async def usage_averages(self, asof: date) -> dict[str, Decimal]:
         """A typical month's usage per tool, from what was recorded: the three
@@ -229,7 +209,7 @@ class ToolService:
         """
         if not self._spend_db_id:
             return {}
-        rows = await self._spend_rows()
+        rows = await self.spend_rows()
         first_seen: dict[str, date] = {}
         by_month: dict[tuple[str, date], Decimal] = {}
         for month, tool_id, amount in rows:
@@ -244,6 +224,51 @@ class ToolService:
                 total = sum((by_month.get((tool_id, m), Decimal(0)) for m in counted), Decimal(0))
                 out[tool_id] = total / len(counted)
         return out
+
+    async def find(self, name: str) -> Tool:
+        """A tool billed by usage, by name: exact in any case, else a unique
+        part of one. Refused when it is not billed by usage, because a charge
+        recorded against a plan-only tool would be read by nothing."""
+        needle = name.strip().casefold()
+        tools = await self.tools()
+        hits = [t for t in tools if t.name.casefold() == needle] or [
+            t for t in tools if needle and needle in t.name.casefold()
+        ]
+        if not hits:
+            raise ValueError(f"No tool called {name!r}.")
+        if len(hits) > 1:
+            raise ValueError(
+                f"{name!r} could be " + ", ".join(t.name for t in hits) + ". Be more specific."
+            )
+        if not hits[0].metered:
+            raise ValueError(
+                f"{hits[0].name} is not billed by usage. Add Usage to its Billing first."
+            )
+        return hits[0]
+
+    async def record_spend(
+        self, tool: Tool, month: date, amount: Decimal, note: str = ""
+    ) -> Decimal:
+        """Write one charge to Build Spend and return the tool's total for that
+        month with it in. A second charge in a month is another row, not a
+        replacement: it is a second invoice."""
+        if not self._spend_db_id:
+            raise ValueError("NOTION_BUILD_SPEND_DB_ID is not set.")
+        before = sum(
+            (a for m, tool_id, a in await self.spend_rows() if m == month and tool_id == tool.id),
+            Decimal(0),
+        )
+        if self._spend_ds is None:
+            self._spend_ds = await self._client.resolve_data_source(self._spend_db_id)
+        props: dict = {
+            "Month": n.title(month.strftime("%Y-%m")),
+            "Tool": n.relation([tool.id]),
+            "Amount": n.number(float(amount)),
+        }
+        if note:
+            props["Note"] = n.rich_text(note)
+        await self._client.create_page(self._spend_ds, props)
+        return before + amount
 
     async def tools(self, asof: date | None = None) -> list[Tool]:
         """The tools, with usage averaged from Build Spend as it stood for the
@@ -267,6 +292,14 @@ def _month(text: str) -> date | None:
         return None
 
 
+def parse_month(text: str) -> date:
+    """A month argument as the first of it; ValueError with the format if not."""
+    month = _month(text) if re.fullmatch(r"\s*\d{4}-\d{2}\s*", text) else None
+    if month is None:
+        raise ValueError("Give the month as YYYY-MM, e.g. 2026-09.")
+    return month
+
+
 def _months_before(first: date, count: int) -> date:
     year, month = divmod(first.year * 12 + first.month - 1 - count, 12)
     return date(year, month + 1, 1)
@@ -283,52 +316,22 @@ def _won(tool: Tool, rates: dict[str, float]) -> int | None:
     return round(float(monthly) * rates[tool.currency])
 
 
-def actual_for(
-    tools: list[Tool], spend: dict[str, Decimal], rates: dict[str, float]
-) -> Actual:
-    """The finished month: plan fees as known, each usage tool at what was
-    recorded or, lacking a record, at its estimate -- and named as missing, so
-    an estimate cannot pass for an invoice."""
-    fixed = recorded = estimated = 0
-    missing: list[str] = []
-    for t in tools:
-        if not t.counts or t.currency not in rates:
-            continue
-        rate = rates[t.currency]
-        plan = t.plan_monthly()
-        if plan is not None:
-            fixed += round(float(plan) * rate)
-        if not t.metered:
-            continue
-        if t.id in spend:
-            recorded += round(float(spend[t.id]) * rate)
-            continue
-        missing.append(t.name)
-        guess = t.usage_monthly()
-        if guess is not None:
-            estimated += round(float(guess) * rate)
-    return Actual(fixed + recorded + estimated, fixed, recorded, estimated, tuple(missing))
-
-
 SHARED = "Shared"
 
 
-def by_project(
-    tools: list[Tool], rates: dict[str, float], names: dict[str, str]
+def split_by_project(
+    items: list[tuple[Tool, int]], names: dict[str, str]
 ) -> list[tuple[str, int]]:
-    """Fixed won a month per project, largest first, Shared last.
+    """Won per project, largest first, Shared last.
 
     A tool for several projects is split equally between them -- the one rule
-    that needs no weights to keep up to date, and that adds back to the fixed
-    total exactly: the odd won goes to the first projects rather than being
-    rounded away. A tool with no project is Shared, not spread across all of
-    them, because who it is for is the thing the column records.
+    that needs no weights to keep up to date, and that adds back to the total
+    exactly: the odd won goes to the first projects rather than being rounded
+    away. A tool with no project is Shared, not spread across all of them,
+    because who it is for is the thing the column records.
     """
     totals: dict[str, int] = {}
-    for t in tools:
-        won = _won(t, rates) if t.counts else None
-        if won is None:
-            continue
+    for t, won in items:
         if not t.project_ids:
             totals[SHARED] = totals.get(SHARED, 0) + won
             continue
@@ -342,6 +345,14 @@ def by_project(
     if shared is not None:
         out.append((SHARED, shared))
     return out
+
+
+def by_project(
+    tools: list[Tool], rates: dict[str, float], names: dict[str, str]
+) -> list[tuple[str, int]]:
+    """Fixed won a month per project, for the tools as they stand."""
+    items = [(t, won) for t in tools if t.counts and (won := _won(t, rates)) is not None]
+    return split_by_project(items, names)
 
 
 def _soon(tools: list[Tool], today: date) -> list[str]:
@@ -384,10 +395,7 @@ def costs_message(
     api_problem: str | None = None,
     rate_problem: str | None = None,
     title: str = "Build costs",
-    api_labels: tuple[str, str] = ("this month so far", "last month"),
     names: dict[str, str] | None = None,
-    actual: Actual | None = None,
-    actual_label: str = "",
 ) -> str:
     rates = rates or {}
     if not tools and api is None:
@@ -438,34 +446,15 @@ def costs_message(
         """An approximate dollar figure beside a won one; nothing without a rate."""
         return f" (≈ ${won / usd:,.2f})" if usd else ""
 
-    if actual is not None and counted:
-        detail = f"plan ₩{actual.fixed:,}, usage ₩{actual.recorded:,} recorded"
-        if actual.estimated:
-            detail += f" + ₩{actual.estimated:,} estimated"
-        lines.append(
-            f"Actual {actual_label}: ₩{actual.total:,}{dollars(actual.total)} — {detail}"
-        )
-        diff = actual.total - total
-        lines.append(
-            f"The estimate was ₩{total:,}: "
-            + ("on it" if diff == 0 else f"{'+' if diff > 0 else '-'}₩{abs(diff):,}")
-        )
-        if actual.missing:
-            lines.append(
-                f"No record for {actual_label}: " + ", ".join(actual.missing)
-            )
-
     if api is not None and usd:
-        this_label, last_label = api_labels
-        parts = [f"${api.this:,.2f} {this_label} (₩{round(float(api.this) * usd):,})"]
+        parts = [f"${api.this:,.2f} this month so far (₩{round(float(api.this) * usd):,})"]
         if api.last is not None:
-            parts.append(f"${api.last:,.2f} {last_label} (₩{round(float(api.last) * usd):,})")
+            parts.append(f"${api.last:,.2f} last month (₩{round(float(api.last) * usd):,})")
         lines.append("Anthropic API: " + " · ".join(parts))
         if split:
             lines.append("_The API is not split by project._")
-        full = api.this if api.closed else api.last
-        if full is not None and counted:
-            with_api = total + round(float(full) * usd)
+        if api.last is not None and counted:
+            with_api = total + round(float(api.last) * usd)
             lines.append(
                 "Fixed plus the last full month of API: "
                 f"₩{with_api:,}{dollars(with_api)} a month"
@@ -526,27 +515,21 @@ def cost_line(
 # -- gathering ---------------------------------------------------------------
 
 
-async def _api(admin_key: str, today: date, *, closed: bool) -> tuple[Api | None, str | None]:
-    """The live figure, or why there is none. Never raises: a cost report that
-    is down should cost the message its API line, not the whole message."""
+async def _api(admin_key: str, today: date) -> tuple[Api | None, str | None]:
+    """The live figure -- this month so far against the last full one -- or why
+    there is none. Never raises: a cost report that is down should cost the
+    message its API line, not the whole message."""
     if not admin_key:
         return None, None
-    first, nxt, prev = month_bounds(today)
-    # Closed: the month that just ended against the one before it. Open: this
-    # month so far against the last full one.
-    spans = (
-        ((prev, first), (month_bounds(prev)[2], prev))
-        if closed
-        else ((first, today + timedelta(days=1)), (prev, first))
-    )
+    first, _, prev = month_bounds(today)
     try:
         usage = AnthropicUsage(admin_key)
-        this = await usage.cost(*spans[0])
-        last = await usage.cost(*spans[1])
+        this = await usage.cost(first, today + timedelta(days=1))
+        last = await usage.cost(prev, first)
     except UsageError as exc:
         log.warning("Anthropic usage: %s", exc)
         return None, str(exc)
-    return Api(this, last, closed=closed), None
+    return Api(this, last), None
 
 
 async def _rates(tools: list[Tool]) -> tuple[dict | None, date | None, str | None]:
@@ -563,40 +546,20 @@ async def _rates(tools: list[Tool]) -> tuple[dict | None, date | None, str | Non
     return rates, day, None
 
 
-async def build_costs(
+async def tools_table(
     service: ToolService,
     admin_key: str,
     today: date,
     *,
-    settle: bool = False,
     names: dict[str, str] | None = None,
 ) -> str:
-    """The costs table: now for /build costs, or the month just ended for the
-    settlement on the 1st."""
-    this_month = month_bounds(today)[0]
-    ended = month_bounds(today)[2]
-    # The estimate is as it stood before the month it is held against: a
-    # settlement's average leaves out the very month it is judging.
-    tools = await service.tools(asof=ended if settle else this_month)
-    api, api_problem = await _api(admin_key, today, closed=settle)
+    """The tools as they stand, a month each in won -- what /build tools shows."""
+    tools = await service.tools(asof=month_bounds(today)[0])
+    api, api_problem = await _api(admin_key, today)
     rates, day, rate_problem = await _rates(tools)
-    if settle:
-        spend = await service.spend_in(ended)
-        actual = (
-            actual_for(tools, spend, rates) if spend is not None and rates else None
-        )
-        return costs_message(
-            tools, rates, day, today, api=api, api_problem=api_problem,
-            rate_problem=rate_problem,
-            title=f"Build costs — {ended.strftime('%B %Y')}",
-            api_labels=(ended.strftime("%B"), month_bounds(ended)[2].strftime("%B")),
-            names=names,
-            actual=actual,
-            actual_label=ended.strftime("%B"),
-        )
     return costs_message(
         tools, rates, day, today, api=api, api_problem=api_problem,
-        rate_problem=rate_problem, names=names,
+        rate_problem=rate_problem, names=names, title="Build tools",
     )
 
 
@@ -605,7 +568,7 @@ async def weekly_line(service: ToolService, admin_key: str, today: date) -> str 
     so the summary still goes out."""
     try:
         tools = await service.tools(asof=month_bounds(today)[0])
-        api, _ = await _api(admin_key, today, closed=False)
+        api, _ = await _api(admin_key, today)
         rates, _, _ = await _rates(tools)
         return cost_line(tools, rates, today, api=api)
     except Exception:
