@@ -10,7 +10,15 @@ import httpx
 import pytest
 
 from alliegent import build_costs
-from alliegent.build_costs import Api, Tool, ToolService, cost_line, costs_message
+from alliegent.build_costs import (
+    Actual,
+    Api,
+    Tool,
+    ToolService,
+    actual_for,
+    cost_line,
+    costs_message,
+)
 from alliegent.config import Config
 from alliegent.integrations.anthropic_usage import AnthropicUsage, UsageError, month_bounds
 
@@ -188,6 +196,117 @@ def test_without_a_rate_there_are_no_won_figures_and_it_says_why():
 
 def test_no_tools_and_no_live_figure_says_so():
     assert "No tools recorded yet" in costs_message([], RATES, None, TODAY)
+
+
+# -- what a month really cost -------------------------------------------------
+
+
+def spend_page(pid, month, tool_id, amount):
+    return {
+        "object": "page",
+        "id": pid,
+        "url": "",
+        "properties": {
+            "Month": {"type": "title", "title": [{"plain_text": month, "type": "text"}]},
+            "Tool": {"type": "relation", "relation": [{"id": tool_id}]},
+            "Amount": {"type": "number", "number": amount},
+        },
+    }
+
+
+def spend_service(pages, tools=()):
+    client = FakeNotionClient({"ds_tools-db": list(tools), "ds_spend-db": pages})
+    return ToolService(client, Config(), "tools-db", "spend-db")
+
+
+SEP = date(2026, 9, 1)
+
+
+async def test_spend_is_read_for_the_month_asked_and_summed_per_tool():
+    service = spend_service([
+        spend_page("s1", "2026-09", "t1", 10),
+        spend_page("s2", "2026-09", "t1", 2.5),   # a second invoice, not a correction
+        spend_page("s3", "2026-09", "t2", 7),
+        spend_page("s4", "2026-08", "t1", 99),    # another month
+        spend_page("s5", "September", "t1", 99),  # not a month: skipped, not guessed
+    ])
+    assert await service.spend_in(SEP) == {"t1": Decimal("12.5"), "t2": Decimal(7)}
+
+
+async def test_a_month_with_nothing_recorded_is_empty_not_unknown():
+    assert await spend_service([]).spend_in(SEP) == {}
+
+
+async def test_without_a_spend_database_there_is_nothing_to_say():
+    client = FakeNotionClient({"ds_tools-db": []})
+    assert await ToolService(client, Config(), "tools-db").spend_in(SEP) is None
+
+
+def metered(name, tool_id, cost="20", usage="15", **kw):
+    return tool(name, cost, billing=("Monthly", "Usage"), usage=usage, id=tool_id, **kw)
+
+
+def test_a_recorded_month_replaces_the_estimate_and_a_missing_one_is_named():
+    tools = [
+        metered("Platform", "t1"),                       # plan 20 + usage
+        tool("Host", "8", billing="Usage", id="t2"),     # usage alone, estimated 8
+        tool("Editor", "10", id="t3"),                   # plan only
+    ]
+    got = actual_for(tools, {"t1": Decimal("22")}, RATES)
+    # Plan fees: 20 + 10 = 30 dollars. Recorded: 22. Host estimated at 8.
+    assert got == Actual(
+        total=round(60 * 1400), fixed=round(30 * 1400),
+        recorded=round(22 * 1400), estimated=round(8 * 1400), missing=("Host",),
+    )
+
+
+def test_a_cancelled_tool_and_a_plan_only_tool_are_never_missing():
+    got = actual_for(
+        [tool("Old", "50", billing="Usage", status="Cancelled", id="t1"),
+         tool("Editor", "10", id="t2")],
+        {}, RATES,
+    )
+    assert got.missing == () and got.recorded == 0
+
+
+def test_the_actual_is_set_against_the_estimate_and_missing_records_are_said():
+    tools = [metered("Platform", "t1"), metered("Render", "t2", cost="5", usage="10")]
+    actual = actual_for(tools, {"t1": Decimal("30")}, RATES)
+    text = costs_message(tools, RATES, None, TODAY, actual=actual, actual_label="September")
+    # Estimate: (20+15) + (5+10) = 50 dollars; actual: 20+30 + 5+10(est) = 65.
+    assert (
+        "Actual September: ₩91,000 "
+        "(plan ₩35,000, usage ₩42,000 recorded + ₩14,000 estimated)"
+    ) in text
+    assert "The estimate was ₩70,000: +₩21,000" in text
+    assert "No record for September: Render" in text
+
+
+def test_an_actual_that_matches_says_so():
+    tools = [metered("Platform", "t1")]
+    actual = actual_for(tools, {"t1": Decimal("15")}, RATES)
+    text = costs_message(tools, RATES, None, TODAY, actual=actual, actual_label="September")
+    assert "on it" in text
+    assert "No record" not in text
+
+
+async def test_the_settlement_uses_the_months_records(monkeypatch):
+    async def rates(tools, with_usd):
+        return RATES, date(2026, 10, 1), None
+
+    monkeypatch.setattr(build_costs, "_rates", rates)
+    service = spend_service(
+        [spend_page("s1", "2026-09", "t1", 30), spend_page("s2", "2026-10", "t1", 99)],
+        tools=[page("t1", "Platform", cost=20, billing="Monthly")],
+    )
+    # The row above is a plain plan; make it metered with an estimate.
+    service._client.pages["ds_tools-db"][0]["properties"]["Billing"] = {
+        "type": "multi_select",
+        "multi_select": [{"name": "Monthly"}, {"name": "Usage"}],
+    }
+    text = await build_costs.build_costs(service, "", date(2026, 10, 1), settle=True)
+    assert "Build costs — September 2026" in text
+    assert "Actual September: ₩70,000" in text   # 20 + 30 recorded, not October's 99
 
 
 # -- by project -------------------------------------------------------------
