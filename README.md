@@ -42,6 +42,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/overdue` | Overdue, unfinished items — numbered, so they can be cleared |
 | `/build summary` · `open` · `costs [month]` · `tools` · `spend <tool> <amount> [month] [note]` · `log <project>` · `status <project> <status>` | The last seven days of every open project; what is open in each; the cost report for a month (last month by default); the tools as they stand, a month each; a usage charge recorded in Build Spend; one project's day so far, as tonight's post will say it; set a project's status in Notion (a Done one can be reopened). Typed inside a project's forum post, they answer in that post |
 | `/brief` | Run the daily brief now |
+| `/ask <question>` | Ask alliegent what it thinks, from any channel. It answers where it was asked, from that channel's own reports — costs and project status in `#build`, the snapshot and plan in `#assets`, sales in `#karrot`, the day anywhere else — and gives a view first, then the reasons. It has no tools and writes nothing |
 | `/assets show` · `/assets trend` · `/assets plan` · `/assets gain <amount> [month]` · `/assets retirement` | Latest snapshot with what changed, the recent history, the latest snapshot against the month it is heading for, a realised gain on foreign shares recorded against the year's allowance, and income after retirement in won a month |
 | `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `spent`, `bought`, `sales`, `summary` |
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
@@ -332,6 +333,14 @@ uv run python -m alliegent.cli plan
 On a day with nothing to report it says how many months of plan it read, which is enough to prove the database id, the integration's access and the column names before the first real run.
 
 **Between checks, from Discord.** `/assets plan` holds the latest snapshot against the month it is heading for — the first row not yet behind it — and writes nothing, so a look taken mid-month cannot change what the 1st finds. A snapshot part-way through a month reads short until that month's pay and inflows land, and the reply says so. `/assets gain <amount> [month]` adds a realised gain to the month's `Realized Gain` (a loss as a negative number; added, not replaced, since a month can hold more than one sale) and answers with the year's total against the allowance. A month with no row of its own — a sale before the plan began — goes on the first row of the same year, because the allowance counts the year, not the month.
+
+## Asking for an opinion
+
+`/ask <question>` is the other half of the mention chat. The chat agent manages the agenda — it looks things up and adds, completes and deletes. `/ask` gives a view: "should I cancel this?", "is the Stockpulse work slowing down?", "can I move more into the funds this month?" It works in every channel and answers in the one it was typed in, never routed elsewhere.
+
+A view is only worth having if it is made from your numbers, so the command reads the channel it was typed in and gives the model the same reports the bot would post there: the project week and the cost report in `#build`, the latest snapshot and the plan in `#assets`, the sales report in `#karrot`, and the day's brief in the agenda and review channels or any channel it does not recognise. A post inside a forum counts as the forum. The model is told that those reports are all it has, not to invent a figure that is not in them, and to say so when they do not answer. It gives a recommendation first, then the reasons, and disagrees when it thinks you are wrong.
+
+It has no tools and writes nothing, which is why it is kept apart from the chat agent: asking for an opinion can never change a row. A report that cannot be read is left out rather than failing the answer. The reports go to the Anthropic API together with the question — amounts included, in `#build` and `#assets` — as the agenda does when the bot is mentioned. It needs `ANTHROPIC_API_KEY`, and replies in English, as everything the bot writes does.
 
 ## Retirement income
 
