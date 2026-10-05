@@ -342,7 +342,7 @@ A view is only worth having if it is made from your numbers, so the command read
 
 **It stays quick, and gives up politely.** The reports are read together rather than one after another, a complete set is reused for five minutes so a follow-up in the same channel is fast, and anything still running after 25 seconds is left out and named to the model (`Not available just now: costs`) instead of holding the answer up. The model call itself gives up after a minute with a short apology. The log says where the time went (`ask in build: reports 3.2s, answer 6.1s`), so a slow one can be told from a slow model.
 
-It has no tools and writes nothing, which is why it is kept apart from the chat agent: asking for an opinion can never change a row. A report that cannot be read is left out rather than failing the answer. The reports go to the Anthropic API together with the question — amounts included, in `#build` and `#assets` — as the agenda does when the bot is mentioned. It needs `ANTHROPIC_API_KEY`, and replies in English, as everything the bot writes does.
+It has no tools and writes nothing, which is why it is kept apart from the chat agent: asking for an opinion can never change a row. A report that cannot be read is left out rather than failing the answer. The reports go to the Anthropic API together with the question — amounts included, in `#build` and `#assets` — as the agenda does when the bot is mentioned. It needs `ANTHROPIC_API_KEY`. It answers in the language you ask in — the one place the bot does not default to English, since an opinion is a conversation and is easier to take in your own language — and quotes names and item titles exactly as the reports have them.
 
 ## Retirement income
 

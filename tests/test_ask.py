@@ -183,13 +183,14 @@ async def test_the_model_has_no_tools_so_asking_can_never_change_a_row():
     assert "tools" not in client.calls[0]
 
 
-async def test_it_is_told_to_say_what_it_thinks_not_to_invent_figures_and_to_reply_in_english():
+async def test_it_is_told_to_say_what_it_thinks_not_to_invent_figures_and_to_match_the_language():
     client = Client()
     await asked(client)
     system = " ".join(client.calls[0]["system"].split())   # as one line
     assert "Start with what you think" in system
     assert "Do not invent a figure" in system
-    assert "Always reply in English" in system
+    assert "Reply in the language the question is written in" in system
+    assert "Always reply in English" not in system
 
 
 async def test_a_refusal_is_said_plainly():
