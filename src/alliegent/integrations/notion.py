@@ -441,6 +441,17 @@ def read_select(page: dict[str, Any], prop: str) -> str | None:
     return value.get("name") if value else None
 
 
+def read_multi_select(page: dict[str, Any], prop: str) -> list[str]:
+    """The chosen option names. A column that is still a single select reads as
+    a list of one, so a database converted to multi-select needs no migration."""
+    value = (page.get("properties", {}).get(prop) or {})
+    multi = value.get("multi_select")
+    if multi is not None:
+        return [option["name"] for option in multi if option.get("name")]
+    single = value.get("select")
+    return [single["name"]] if single and single.get("name") else []
+
+
 def checkbox(value: bool) -> dict[str, Any]:
     return {"checkbox": value}
 

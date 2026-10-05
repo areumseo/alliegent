@@ -38,10 +38,11 @@ log = logging.getLogger(__name__)
 HOME = "KRW"
 # How far ahead a renewal is worth a mention: long enough to cancel in time.
 RENEWAL_DAYS = 14
-# Cost per month for each way a tool is billed. "Usage" is a hand-typed monthly
-# estimate for a tool with no report API.
-PER_MONTH = {"Monthly": 1, "Usage": 1, "Yearly": 12}
-PER_LABEL = {"Monthly": "mo", "Usage": "use", "Yearly": "yr"}
+# A tool can be billed more than one way: a plan fee (Monthly or Yearly) with
+# usage on top. Cost is always the plan fee; the usage on top is a typical
+# month's, typed in Usage (mo). A tool billed by Usage alone has no plan, and
+# its Cost is read as that monthly estimate, as it was before the two parted.
+PLANS = ("Monthly", "Yearly")
 
 
 @dataclass(frozen=True)
@@ -49,13 +50,22 @@ class Tool:
     name: str
     currency: str
     cost: Decimal | None
-    billing: str = "Monthly"
+    billing: tuple[str, ...] = ("Monthly",)
     renews: date | None = None
     status: str = "Active"
     note: str = ""
     # Projects it is for. Empty means shared: the Claude plan or the editor
     # serve everything, and pinning them to one project would be wrong.
     project_ids: tuple[str, ...] = ()
+    usage: Decimal | None = None
+
+    @property
+    def metered(self) -> bool:
+        return "Usage" in self.billing
+
+    @property
+    def has_plan(self) -> bool:
+        return any(b in PLANS for b in self.billing)
 
     @property
     def counts(self) -> bool:
@@ -63,10 +73,40 @@ class Tool:
         trial costs nothing until it converts."""
         return self.status == "Active"
 
-    def monthly(self) -> Decimal | None:
-        if self.cost is None:
+    def plan_monthly(self) -> Decimal | None:
+        """The plan fee a month: a yearly one is a twelfth."""
+        if not self.has_plan or self.cost is None:
             return None
-        return self.cost / PER_MONTH.get(self.billing, 1)
+        return self.cost / (12 if "Yearly" in self.billing else 1)
+
+    def usage_monthly(self) -> Decimal | None:
+        if not self.metered:
+            return None
+        if self.usage is not None:
+            return self.usage
+        return None if self.has_plan else self.cost
+
+    def monthly(self) -> Decimal | None:
+        """Plan plus usage; None only when neither has a figure."""
+        parts = [p for p in (self.plan_monthly(), self.usage_monthly()) if p is not None]
+        return sum(parts, Decimal(0)) if parts else None
+
+    @property
+    def per(self) -> str:
+        plan = "yr" if "Yearly" in self.billing else "mo"
+        if not self.has_plan:
+            return "use"
+        return f"{plan}+use" if self.metered else plan
+
+    @property
+    def shown_cost(self) -> str:
+        """What was typed, in the tool's own currency: the plan fee, with the
+        usual usage after a plus."""
+        fee = self.cost if self.has_plan else self.usage_monthly()
+        text = _amount(fee) if fee is not None else "?"
+        if self.has_plan and self.metered:
+            text += f"+{_amount(self.usage)}" if self.usage is not None else "+?"
+        return text
 
 
 @dataclass(frozen=True)
@@ -93,11 +133,13 @@ class ToolService:
     @staticmethod
     def _to_tool(page: dict) -> Tool:
         cost = n.read_number(page, "Cost")
+        usage = n.read_number(page, "Usage (mo)")
         return Tool(
             name=n.read_title(page, "Name"),
             currency=(n.read_select(page, "Currency") or HOME).upper(),
             cost=None if cost is None else Decimal(str(cost)),
-            billing=n.read_select(page, "Billing") or "Monthly",
+            billing=tuple(n.read_multi_select(page, "Billing")) or ("Monthly",),
+            usage=None if usage is None else Decimal(str(usage)),
             renews=n.read_date(page, "Renews"),
             status=n.read_select(page, "Status") or "Active",
             note=n.read_text(page, "Note"),
@@ -220,8 +262,8 @@ def costs_message(
         rows.append((
             t.name,
             t.currency,
-            _amount(t.cost) if t.cost is not None else "?",
-            PER_LABEL.get(t.billing, "mo"),
+            t.shown_cost,
+            t.per,
             f"{won:,}" if won is not None else "?",
         ))
     if counted:
@@ -266,9 +308,16 @@ def costs_message(
         lines.append(f"⚠️ No exchange rate, so no won figures: {rate_problem}")
     if api_problem:
         lines.append(f"⚠️ Anthropic usage unavailable: {api_problem}")
-    unpriced = [t.name for t in tools if t.counts and t.cost is None]
+    unpriced = [t.name for t in tools if t.counts and t.monthly() is None]
     if unpriced:
         lines.append("Still to price: " + ", ".join(unpriced))
+    # A plan with usage on top and no estimate of the usage: counted at the plan
+    # fee alone, which understates it, so it is said.
+    unestimated = [
+        t.name for t in tools if t.counts and t.metered and t.has_plan and t.usage is None
+    ]
+    if unestimated:
+        lines.append("Usage not estimated, counted at the plan fee: " + ", ".join(unestimated))
     soon = _soon(tools, today)
     if soon:
         lines.append("⏰ " + " · ".join(soon))

@@ -42,6 +42,11 @@ def page(pid, name, *, currency="USD", cost=None, billing="Monthly", renews=None
 
 
 def tool(name, cost, **kw):
+    """`billing` as one word or several, `usage` as a string, for brevity."""
+    billing = kw.pop("billing", "Monthly")
+    kw["billing"] = (billing,) if isinstance(billing, str) else tuple(billing)
+    if kw.get("usage") is not None:
+        kw["usage"] = Decimal(kw["usage"])
     return Tool(name, kw.pop("currency", "USD"), None if cost is None else Decimal(cost), **kw)
 
 
@@ -53,6 +58,24 @@ def row(text, name):
 
 
 # -- reading ----------------------------------------------------------------
+
+
+async def test_billing_reads_as_several_choices_or_as_the_old_single_one():
+    multi = page("a", "Platform", cost=20)
+    multi["properties"]["Billing"] = {
+        "type": "multi_select",
+        "multi_select": [{"name": "Monthly"}, {"name": "Usage"}],
+    }
+    multi["properties"]["Usage (mo)"] = {"type": "number", "number": 15}
+    old = page("b", "Host", cost=5, billing="Yearly")  # still a single select
+    empty = page("c", "Blank", cost=1)
+    empty["properties"]["Billing"] = {"type": "multi_select", "multi_select": []}
+    client = FakeNotionClient({"ds_tools-db": [multi, old, empty]})
+    tools = {t.name: t for t in await ToolService(client, Config(), "tools-db").tools()}
+    assert tools["Platform"].billing == ("Monthly", "Usage")
+    assert tools["Platform"].usage == Decimal(15)
+    assert tools["Host"].billing == ("Yearly",)
+    assert tools["Blank"].billing == ("Monthly",)
 
 
 async def test_active_tools_come_before_cancelled_ones():
@@ -79,6 +102,47 @@ def test_a_yearly_plan_is_a_twelfth_a_month_and_converted():
     assert row(text, "Host").split()[-1] == "7,000"
     assert row(text, "FIXED").split()[-1] == "21,000"
     assert "Fixed over a year: ₩252,000" in text
+
+
+def test_a_plan_with_usage_on_top_is_both_parts():
+    text = costs_message(
+        [tool("Platform", "20", billing=("Monthly", "Usage"), usage="15")], RATES, None, TODAY
+    )
+    assert row(text, "Platform").split() == ["Platform", "USD", "20+15", "mo+use", "49,000"]
+
+
+def test_a_yearly_plan_with_usage_is_a_twelfth_plus_the_usage():
+    text = costs_message(
+        [tool("Suite", "120", billing=("Yearly", "Usage"), usage="10")], RATES, None, TODAY
+    )
+    # 120/12 + 10 = 20 dollars a month.
+    assert row(text, "Suite").split() == ["Suite", "USD", "120+10", "yr+use", "28,000"]
+
+
+def test_usage_alone_reads_cost_as_the_monthly_estimate_as_it_always_did():
+    text = costs_message([tool("Host", "8", billing="Usage")], RATES, None, TODAY)
+    assert row(text, "Host").split() == ["Host", "USD", "8", "use", "11,200"]
+
+
+def test_usage_alone_prefers_the_usage_column_when_it_is_filled():
+    text = costs_message(
+        [tool("Host", "8", billing="Usage", usage="12")], RATES, None, TODAY
+    )
+    assert row(text, "Host").split()[-1] == "16,800"
+
+
+def test_a_plan_with_usage_but_no_estimate_is_counted_at_the_fee_and_says_so():
+    text = costs_message(
+        [tool("Platform", "20", billing=("Monthly", "Usage"))], RATES, None, TODAY
+    )
+    assert row(text, "Platform").split()[-1] == "28,000"
+    assert "+?" in row(text, "Platform")
+    assert "Usage not estimated, counted at the plan fee: Platform" in text
+
+
+def test_usage_alone_with_nothing_typed_is_unpriced():
+    text = costs_message([tool("Host", None, billing="Usage")], RATES, None, TODAY)
+    assert "Still to price: Host" in text
 
 
 def test_a_cancelled_tool_leaves_the_table_and_the_sums():
