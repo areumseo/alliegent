@@ -348,6 +348,8 @@ A 🛠 Build Tools database holds one row per tool used to build and run the ser
 
 **The live figure stays out of the fixed total.** A month still running has only part of its bill, and inside a monthly total it would climb all month and reset. It sits beneath the table next to last month's full figure, and the total *with the API* uses the last complete month. Months are cut at midnight UTC, which is how the report is bucketed, so the first and last day of a month can differ from the invoice by a few hours.
 
+**By project.** A `Projects` relation on each row says what the tool is for. A tool for several projects is split equally between them — the one rule that needs no weights kept up to date, and it adds back to the fixed total to the won, the odd won going to the first projects rather than being rounded away. A tool with no project is **Shared**, listed last and not spread across all of them: the editor or the Claude plan serves everything, and who a tool is for is exactly what the column records. The API is not split, since the cost report is by organisation, not by project. The table appears once any tool is linked.
+
 `/build costs` shows it now. On the 1st the same table is posted for the month that just ended, with the month before for comparison, and the Sunday summary carries one line under the week: the fixed total, the API so far this month, and anything renewing within two weeks. A renewal inside that window is the point of the `Renews` column — long enough to cancel in time.
 
 ## Projects forum
