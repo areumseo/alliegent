@@ -19,7 +19,9 @@ the bot is mentioned. Amounts included, in #build and #assets.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from datetime import date
 
 from . import assets as assets_module
@@ -28,26 +30,32 @@ log = logging.getLogger(__name__)
 
 MODEL = "claude-sonnet-5"
 MAX_TOKENS = 1500
+# The model call gives up after this, so a stuck request answers with an apology
+# instead of leaving "thinking…" up for fifteen minutes.
+ANSWER_TIMEOUT = 60.0
 # Enough for two reports and a plan; past it a report is padding the model
 # would have to read past, and the bill grows with it.
 CONTEXT_LIMIT = 14000
 
 SYSTEM = """\
-You are alliegent, giving your honest opinion to the one person whose agenda,
-projects, assets and tool costs you look after. Today is {today} ({weekday}).
-They asked in the {where} channel, so the figures below are that area's
-reports -- the only data you have. Do not invent a figure that is not in them,
-and say so plainly when they do not answer the question.
+You are alliegent, talking over chat with the one person whose agenda, projects,
+assets and tool costs you look after. They have asked what you think. Today is
+{today} ({weekday}). They asked in the {where} channel, so the figures below are
+that area's reports -- the only data you have. Do not invent a figure that is
+not in them, and say so plainly when they do not answer the question.
 
-Give a view first: a recommendation or a judgement, in a sentence. Then the
-reasons, from their numbers, in a few lines. Say what would change your mind if
-that is useful. Disagree when you think they are wrong; do not flatter, and do
-not hedge a view into nothing. On money, give reasoning, not guarantees, and
-skip boilerplate disclaimers.
+Talk the way a thoughtful colleague who knows their situation would: plain,
+natural sentences in a few short paragraphs. Start with what you think, said
+the way you would say it out loud, then why, from their numbers. If something
+could change your mind, say it in a sentence rather than as a labelled part. No
+headings and no labels such as "Verdict", "Reasoning" or "Conclusion", and no
+bullet lists unless you are listing figures. Be warm without flattering: it is
+fine to say "I'd" and "I think", that a number looks fine, or that you are not
+sure. When you think they are wrong, say so kindly and plainly. On money, give
+your reasoning, not guarantees, and skip boilerplate disclaimers.
 
-This is chat: stay under about 200 words unless asked for more. Always reply in
-English, even when the question is in Korean -- keep Korean names and titles
-verbatim.
+Stay under about 200 words unless asked for more. Always reply in English, even
+when the question is in Korean -- keep Korean names and titles verbatim.
 
 Reports from the {where} channel:
 
@@ -74,6 +82,15 @@ def channel_kind(secrets, *channel_ids: int | None) -> str | None:
     return None
 
 
+# How long the reports get before the answer goes ahead without the ones still
+# running, and how long a set of reports is reused. A follow-up question in the
+# same channel a minute later wants the same reports, not another tour of Notion
+# and GitHub.
+CONTEXT_TIMEOUT = 25.0
+CACHE_SECONDS = 300.0
+_cache: dict[str, tuple[float, str]] = {}
+
+
 async def _safe(label: str, awaitable) -> str | None:
     """One report, or nothing: a failing source costs the answer that report,
     not the answer."""
@@ -84,23 +101,64 @@ async def _safe(label: str, awaitable) -> str | None:
         return None
 
 
-async def gather_context(jobs, kind: str | None) -> str:
-    """The reports for a channel, as the bot would post them there."""
-    parts: list[str | None] = []
+def _sources(jobs, kind: str | None) -> list[tuple[str, object]]:
+    """The reports an area is given, as (label, awaitable)."""
     if kind == "build":
-        parts.append(await _safe("project week", jobs.build_project_week()))
-        parts.append(await _safe("costs", jobs.build_costs()))
-    elif kind == "assets":
-        parts.append(await _safe("assets", _assets(jobs)))
-        parts.append(await _safe("plan", _plan(jobs)))
-    elif kind == "karrot":
-        parts.append(await _safe("karrot", jobs.build_karrot_report()))
-    elif kind in ("news", "english"):
-        pass  # nothing of theirs to read here; the model is told there is none
-    else:
-        parts.append(await _safe("the day", jobs.build_daily_brief()))
-    text = "\n\n".join(p for p in parts if p)
-    return text[:CONTEXT_LIMIT] or "(no reports for this channel)"
+        return [("project status", jobs.build_project_week()), ("costs", jobs.build_costs())]
+    if kind == "assets":
+        return [("assets", _assets(jobs)), ("plan", _plan(jobs))]
+    if kind == "karrot":
+        return [("karrot sales", jobs.build_karrot_report())]
+    if kind in ("news", "english"):
+        return []  # nothing of theirs to read here; the model is told there is none
+    return [("the day", jobs.build_daily_brief())]
+
+
+async def gather_context(
+    jobs,
+    kind: str | None,
+    *,
+    timeout: float = CONTEXT_TIMEOUT,
+    clock=time.monotonic,
+) -> str:
+    """The reports for a channel, as the bot would post them there.
+
+    Read together, since they are independent and one after another they add
+    up. Whatever is still running when `timeout` passes is dropped and named, so
+    the model knows what it does not have -- a slow report costs the answer that
+    report, never the answer. A complete set is kept for a few minutes.
+    """
+    key = kind or ""
+    hit = _cache.get(key)
+    if hit and clock() - hit[0] < CACHE_SECONDS:
+        return hit[1]
+
+    sources = _sources(jobs, kind)
+    tasks = [(label, asyncio.ensure_future(_safe(label, coro))) for label, coro in sources]
+    if tasks:
+        _, pending = await asyncio.wait([t for _, t in tasks], timeout=timeout)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    parts: list[str] = []
+    missing: list[str] = []
+    for label, task in tasks:
+        text = None if task.cancelled() else task.result()
+        if text:
+            parts.append(text)
+        else:
+            missing.append(label)
+
+    text = "\n\n".join(parts)[:CONTEXT_LIMIT]
+    if missing:
+        text += ("\n\n" if text else "") + "(Not available just now: " + ", ".join(missing) + ")"
+    elif not text:
+        text = "(no reports for this channel)"
+    if tasks and not missing:
+        _cache[key] = (clock(), text)
+    return text
 
 
 async def _assets(jobs) -> str | None:
@@ -134,7 +192,7 @@ async def answer(
     from anthropic import AsyncAnthropic
 
     own = client is None
-    client = client or AsyncAnthropic(api_key=api_key)
+    client = client or AsyncAnthropic(api_key=api_key, timeout=ANSWER_TIMEOUT, max_retries=1)
     try:
         response = await client.messages.create(
             model=MODEL,

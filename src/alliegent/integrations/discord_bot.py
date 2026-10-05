@@ -7,6 +7,7 @@ import logging
 import re
 from collections.abc import Coroutine
 from datetime import date, datetime, time, timedelta
+from time import monotonic
 from typing import Any
 
 import discord
@@ -1386,18 +1387,38 @@ def _register(bot: AlliegentBot) -> None:
         if not bot.secrets.anthropic_api_key:
             await interaction.followup.send("⚠️ ANTHROPIC_API_KEY is not set.")
             return
-        parent = getattr(interaction.channel, "parent_id", None)
-        kind = ask_module.channel_kind(bot.secrets, interaction.channel_id, parent)
+        # Everything that can fail is inside: after defer(), an error that
+        # escapes leaves "thinking…" showing until Discord gives up on it.
+        started = monotonic()
+        reports_took = 0.0
         try:
+            parent = getattr(interaction.channel, "parent_id", None)
+            kind = ask_module.channel_kind(bot.secrets, interaction.channel_id, parent)
             context = await ask_module.gather_context(bot.jobs, kind)
-            reply = await ask_module.answer(
-                question, context, api_key=bot.secrets.anthropic_api_key,
-                today=bot.today(), kind=kind,
+            reports_took = monotonic() - started
+            reply = await asyncio.wait_for(
+                ask_module.answer(
+                    question, context, api_key=bot.secrets.anthropic_api_key,
+                    today=bot.today(), kind=kind,
+                ),
+                timeout=ask_module.ANSWER_TIMEOUT + 5,
             )
+        except TimeoutError:
+            log.warning("ask timed out after %.0fs", monotonic() - started)
+            await interaction.followup.send(
+                "⚠️ That took too long, so I gave up. Try again in a minute."
+            )
+            return
         except Exception:
             log.exception("ask failed")
             await interaction.followup.send("⚠️ I couldn't answer that just now.")
             return
+        # Where the time went, so a slow one can be told from a slow model.
+        log.info(
+            "ask in %s: reports %.1fs, answer %.1fs",
+            kind or "an unrecognised channel", reports_took,
+            monotonic() - started - reports_took,
+        )
         await _reply(interaction, reply)
 
     projects_group = app_commands.Group(

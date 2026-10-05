@@ -317,3 +317,52 @@ def test_a_month_argument_must_be_a_month():
     for bad in ("September", "2026-13", "2026-9", "09", ""):
         with pytest.raises(ValueError, match="YYYY-MM"):
             parse_month(bad)
+
+
+# -- trips to Notion -----------------------------------------------------------------------
+
+
+async def test_a_report_reads_the_tools_and_the_charges_once_each():
+    """Every read is a trip to Notion, and the report looks at two months."""
+    svc = basic()
+    reads = []
+    original = svc._client.query
+
+    def counting(ds, **kw):
+        reads.append(ds)
+        return original(ds, **kw)
+
+    svc._client.query = counting
+    await report(svc)
+    assert reads.count("ds_tools-db") == 1
+    assert reads.count("ds_spend-db") == 1
+
+
+async def test_tools_for_gives_each_month_the_average_as_it_stood_then():
+    svc = basic()
+    sep, oct_ = await svc.tools_for([date(2026, 9, 1), date(2026, 10, 1)])
+    host = lambda tools: next(t for t in tools if t.name == "Host")  # noqa: E731
+    # Before September: July and August, (3 + 6) / 2. Before October: July to September.
+    assert host(sep).usage_avg == Decimal("4.5")
+    assert host(oct_).usage_avg == Decimal(6)
+
+
+async def test_the_api_months_are_asked_for_together(monkeypatch):
+    import asyncio
+
+    from alliegent.integrations.anthropic_usage import AnthropicUsage
+
+    running = {"now": 0, "peak": 0}
+
+    async def cost(self, first, stop):
+        running["now"] += 1
+        running["peak"] = max(running["peak"], running["now"])
+        await asyncio.sleep(0.01)
+        running["now"] -= 1
+        return Decimal(1)
+
+    monkeypatch.setattr(AnthropicUsage, "cost", cost)
+    months = [date(2026, m, 1) for m in range(1, 10)]
+    got, problem = await build_report._api_months("k", months, 1000.0)
+    assert problem is None and got == {m: 1000 for m in months}
+    assert running["peak"] > 1

@@ -10,6 +10,7 @@ flag so a dry run can report what it would create without creating it.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
@@ -123,18 +124,24 @@ class Jobs:
         if coded:
             github = GitHub(self._secrets.github_token if self._secrets else "")
             first = today - timedelta(days=6)
+            async def done_in(project, repo) -> tuple[str, int]:
+                try:
+                    span = await github.span(
+                        repo, first, today + timedelta(days=1), self.config.tz,
+                        open_items=False,
+                    )
+                except (GitHubError, httpx.HTTPError) as exc:
+                    log.warning("GitHub: %s", exc)
+                    return project.id, 0
+                return project.id, len(span.done)
+
             try:
-                for project in coded:
-                    for repo in project.repos:
-                        try:
-                            span = await github.span(
-                                repo, first, today + timedelta(days=1), self.config.tz,
-                                open_items=False,
-                            )
-                        except (GitHubError, httpx.HTTPError) as exc:
-                            log.warning("GitHub: %s", exc)
-                            continue
-                        code_done[project.id] = code_done.get(project.id, 0) + len(span.done)
+                # Every repository at once: they are independent, and one after
+                # another a few projects is most of a minute.
+                for project_id, count in await asyncio.gather(
+                    *(done_in(p, r) for p in coded for r in p.repos)
+                ):
+                    code_done[project_id] = code_done.get(project_id, 0) + count
             finally:
                 await github.aclose()
         message = project_log.week_message(

@@ -24,6 +24,7 @@ fixture here is invented.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import date
@@ -118,15 +119,17 @@ async def _api_months(
     """Won per month from the cost report, or why there is none. Never raises."""
     if not admin_key or not usd:
         return {}, None
-    out: dict[date, int] = {}
     usage = AnthropicUsage(admin_key)
     try:
-        for first in months:
-            out[first] = round(float(await usage.cost(first, month_bounds(first)[1])) * usd)
+        # A request a month, together: a year is twelve, and one after another
+        # they are most of the wait.
+        costs = await asyncio.gather(
+            *(usage.cost(first, month_bounds(first)[1]) for first in months)
+        )
     except UsageError as exc:
         log.warning("Anthropic usage: %s", exc)
         return {}, str(exc)
-    return out, None
+    return {first: round(float(c) * usd) for first, c in zip(months, costs, strict=True)}, None
 
 
 def _signed(value: int) -> str:
@@ -255,10 +258,11 @@ async def build_report(
     # The estimate for the reported month is the average as it stood *before*
     # it, so a month is never held against an average that contains it. The
     # months ahead use the average including it.
-    tools = await service.tools(asof=month)
-    ahead_tools = await service.tools(asof=_months_before(month, -1))
-    rates, day, rate_problem = await _rates(tools)
     spend = await service.spend_rows()
+    tools, ahead_tools = await service.tools_for(
+        [month, _months_before(month, -1)], spend
+    )
+    rates, day, rate_problem = await _rates(tools)
 
     year = [date(month.year, m, 1) for m in range(1, month.month + 1)]
     wanted = sorted({*year, prior})

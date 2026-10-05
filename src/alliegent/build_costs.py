@@ -140,6 +140,27 @@ class Api:
     last: Decimal | None
 
 
+def average_usage(
+    rows: list[tuple[date, str, Decimal]], asof: date
+) -> dict[str, Decimal]:
+    """A typical month's usage per tool id from recorded charges, for the month
+    beginning `asof`; see ToolService.usage_averages for the rule."""
+    first_seen: dict[str, date] = {}
+    by_month: dict[tuple[str, date], Decimal] = {}
+    for month, tool_id, amount in rows:
+        first_seen[tool_id] = min(first_seen.get(tool_id, month), month)
+        key = (tool_id, month)
+        by_month[key] = by_month.get(key, Decimal(0)) + amount
+    window = [_months_before(asof, k) for k in (3, 2, 1)]
+    out: dict[str, Decimal] = {}
+    for tool_id, started in first_seen.items():
+        counted = [m for m in window if m >= started]
+        if counted:
+            total = sum((by_month.get((tool_id, m), Decimal(0)) for m in counted), Decimal(0))
+            out[tool_id] = total / len(counted)
+    return out
+
+
 class ToolService:
     def __init__(
         self, client: NotionClient, config: Config, db_id: str, spend_db_id: str = ""
@@ -209,21 +230,7 @@ class ToolService:
         """
         if not self._spend_db_id:
             return {}
-        rows = await self.spend_rows()
-        first_seen: dict[str, date] = {}
-        by_month: dict[tuple[str, date], Decimal] = {}
-        for month, tool_id, amount in rows:
-            first_seen[tool_id] = min(first_seen.get(tool_id, month), month)
-            key = (tool_id, month)
-            by_month[key] = by_month.get(key, Decimal(0)) + amount
-        window = [_months_before(asof, k) for k in (3, 2, 1)]
-        out: dict[str, Decimal] = {}
-        for tool_id, started in first_seen.items():
-            counted = [m for m in window if m >= started]
-            if counted:
-                total = sum((by_month.get((tool_id, m), Decimal(0)) for m in counted), Decimal(0))
-                out[tool_id] = total / len(counted)
-        return out
+        return average_usage(await self.spend_rows(), asof)
 
     async def find(self, name: str) -> Tool:
         """A tool billed by usage, by name: exact in any case, else a unique
@@ -270,16 +277,37 @@ class ToolService:
         await self._client.create_page(self._spend_ds, props)
         return before + amount
 
+    async def tools_for(
+        self,
+        asofs: list[date],
+        spend: list[tuple[date, str, Decimal]] | None = None,
+    ) -> list[list[Tool]]:
+        """The tools once for several months: each list has usage averaged from
+        Build Spend as it stood for that month. The tools and the charges are
+        read a single time, which is what a report that looks at two months
+        would otherwise do twice -- and every read is a trip to Notion."""
+        ds = await self.data_source_id()
+        rows = [self._to_tool(page) async for page in self._client.query(ds)]
+        if spend is None:
+            spend = await self.spend_rows()
+        out = []
+        for asof in asofs:
+            averages = average_usage(spend, asof) if self._spend_db_id else {}
+            tools = [
+                replace(t, usage_avg=averages.get(t.id)) if t.id in averages else t
+                for t in rows
+            ]
+            out.append(sorted((t for t in tools if t.name), key=lambda t: (not t.counts, t.name)))
+        return out
+
     async def tools(self, asof: date | None = None) -> list[Tool]:
         """The tools, with usage averaged from Build Spend as it stood for the
         month beginning `asof` (left out: no averages)."""
-        ds = await self.data_source_id()
-        rows = [self._to_tool(page) async for page in self._client.query(ds)]
-        averages = await self.usage_averages(asof) if asof else {}
-        tools = [
-            replace(t, usage_avg=averages.get(t.id)) if t.id in averages else t for t in rows
-        ]
-        return sorted((t for t in tools if t.name), key=lambda t: (not t.counts, t.name))
+        if asof is None:
+            ds = await self.data_source_id()
+            rows = [self._to_tool(page) async for page in self._client.query(ds)]
+            return sorted((t for t in rows if t.name), key=lambda t: (not t.counts, t.name))
+        return (await self.tools_for([asof]))[0]
 
 
 # -- layout ------------------------------------------------------------------
