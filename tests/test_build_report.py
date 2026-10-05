@@ -88,6 +88,13 @@ async def test_the_month_the_year_so_far_and_the_year_expected():
     assert "Expected for 2026: ₩48,000 (≈ $48.00) — 3 more months at about ₩7,000" in text
 
 
+async def test_the_three_headline_figures_are_bullets():
+    lines = (await report(basic())).splitlines()
+    assert [line.split(":")[0] for line in lines[1:4]] == [
+        "• September", "• Year so far (Jan–Sep)", "• Expected for 2026"
+    ]
+
+
 async def test_the_default_month_is_the_one_before_todays():
     assert "September 2026" in await report(basic())
 

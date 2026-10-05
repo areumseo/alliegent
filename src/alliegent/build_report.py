@@ -169,11 +169,11 @@ def report_message(
     lines = [f"📊 **Build costs — {label}**"]
     diff = this.total - before.total
     lines.append(
-        f"{month.strftime('%B')}: ₩{this.total:,}{dollars(this.total)} · "
+        f"• {month.strftime('%B')}: ₩{this.total:,}{dollars(this.total)} · "
         f"vs {before.first.strftime('%B')} {'+' if diff >= 0 else '-'}₩{abs(diff):,}"
     )
     lines.append(
-        f"Year so far ({first_month}–{month.strftime('%b')}): "
+        f"• Year so far ({first_month}–{month.strftime('%b')}): "
         f"₩{spent:,}{dollars(spent)}"
     )
     tail = (
@@ -181,7 +181,7 @@ def report_message(
         f"₩{round(ahead / left) if left else 0:,}"
     )
     lines.append(
-        f"Expected for {month.year}: ₩{expected:,}{dollars(expected)}"
+        f"• Expected for {month.year}: ₩{expected:,}{dollars(expected)}"
         + (f" — {tail}" if left else "")
     )
 
