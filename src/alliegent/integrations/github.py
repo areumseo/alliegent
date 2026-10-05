@@ -16,6 +16,7 @@ which is reported as that rather than as an empty day.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -25,6 +26,8 @@ import httpx
 
 log = logging.getLogger(__name__)
 
+# How many of those lookups run at once.
+PULL_LOOKUPS = 8
 API = "https://api.github.com"
 
 
@@ -97,8 +100,19 @@ class GitHub:
             per_page=100,
         )
         seen_prs: set[int] = set()
-        for commit in reversed(commits):  # oldest first, the order work happened in
-            pulls = await self._get(repo, f"/commits/{commit['sha']}/pulls")
+        ordered = list(reversed(commits))  # oldest first, the order work happened in
+
+        # One lookup per commit, which one after another is minutes for a busy
+        # week; together, a few seconds. A few at a time, so a long week does
+        # not become a burst the API answers with a rate limit.
+        gate = asyncio.Semaphore(PULL_LOOKUPS)
+
+        async def pulls_of(sha: str) -> list:
+            async with gate:
+                return await self._get(repo, f"/commits/{sha}/pulls")
+
+        looked_up = await asyncio.gather(*(pulls_of(c["sha"]) for c in ordered))
+        for commit, pulls in zip(ordered, looked_up, strict=True):
             merged = [p for p in pulls if p.get("merged_at")]
             if merged:
                 pr = merged[0]
