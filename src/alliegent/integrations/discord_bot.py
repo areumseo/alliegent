@@ -12,6 +12,7 @@ from typing import Any
 import discord
 from discord import app_commands
 
+from .. import ask as ask_module
 from .. import assets as assets_module
 from .. import karrot, reports
 from ..agenda import AgendaService, Project, ProjectService
@@ -1375,6 +1376,29 @@ def _register(bot: AlliegentBot) -> None:
             problem = str(exc)
         message = retirement_message(sources, rates, day, rate_problem=problem)
         await _deliver(bot, interaction, message, "assets")
+
+    @tree.command(name="ask", description="Ask alliegent what it thinks")
+    @app_commands.describe(question="What you want an opinion on")
+    async def ask_cmd(interaction: discord.Interaction, question: str) -> None:
+        # Answered where it is asked, in whichever channel: an opinion belongs to
+        # the conversation it was asked in, so it is never routed elsewhere.
+        await interaction.response.defer()
+        if not bot.secrets.anthropic_api_key:
+            await interaction.followup.send("⚠️ ANTHROPIC_API_KEY is not set.")
+            return
+        parent = getattr(interaction.channel, "parent_id", None)
+        kind = ask_module.channel_kind(bot.secrets, interaction.channel_id, parent)
+        try:
+            context = await ask_module.gather_context(bot.jobs, kind)
+            reply = await ask_module.answer(
+                question, context, api_key=bot.secrets.anthropic_api_key,
+                today=bot.today(), kind=kind,
+            )
+        except Exception:
+            log.exception("ask failed")
+            await interaction.followup.send("⚠️ I couldn't answer that just now.")
+            return
+        await _reply(interaction, reply)
 
     projects_group = app_commands.Group(
         name="build", description="Build: projects' weeks, days and status, and tool costs"
