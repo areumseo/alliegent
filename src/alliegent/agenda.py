@@ -6,6 +6,7 @@ agenda items and projects so the jobs and Discord commands stay readable.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from collections import Counter
@@ -616,14 +617,18 @@ class ProjectService:
     async def active(self, today: date, agenda: AgendaService) -> list[Project]:
         """Open projects, each with its next action and last activity derived.
 
-        Costs one agenda query per open project, so it is for the places that
-        actually show those two columns: the brief, /projects, and the stale
-        check.
+        Costs one agenda query per open project, run together, so it is for the
+        places that actually show those two columns: /build summary, the weekly
+        summary and the nightly sync.
         """
         projects = await self.open_projects()
         if not agenda.props.project:
             return projects
-        return [await self._with_activity(p, today, agenda) for p in projects]
+        # Together: each is its own query against the agenda, and one after
+        # another a few projects is a few round trips of waiting for nothing.
+        return list(
+            await asyncio.gather(*(self._with_activity(p, today, agenda) for p in projects))
+        )
 
     async def all_projects(self) -> list[Project]:
         """Every project, done ones included -- for reopening one by name."""

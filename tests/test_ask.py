@@ -276,3 +276,19 @@ async def test_an_incomplete_set_is_not_kept_so_the_next_ask_tries_again():
     got = await ask.gather_context(Jobs(costs=True), "build")
     assert "Not available" in got
     assert await ask.gather_context(Jobs(), "build") == "[week]\n\n[costs]"
+
+
+async def test_the_answer_asks_for_low_effort_so_it_does_not_think_for_a_minute():
+    client = Client()
+    await asked(client)
+    assert client.calls[0]["output_config"] == {"effort": "low"}
+
+
+async def test_each_report_logs_how_long_it_took(caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="alliegent.ask"):
+        await ask.gather_context(Jobs(), "build")
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(m.startswith("ask: read project status in") for m in messages)
+    assert any(m.startswith("ask: read costs in") for m in messages)

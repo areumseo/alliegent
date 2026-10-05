@@ -96,11 +96,15 @@ _cache: dict[str, tuple[float, str]] = {}
 async def _safe(label: str, awaitable) -> str | None:
     """One report, or nothing: a failing source costs the answer that report,
     not the answer."""
+    started = time.monotonic()
     try:
         return await awaitable
     except Exception:
         log.exception("ask: could not read %s", label)
         return None
+    finally:
+        # Per report, so a slow ask can be traced to the one that made it slow.
+        log.info("ask: read %s in %.1fs", label, time.monotonic() - started)
 
 
 def _sources(jobs, kind: str | None) -> list[tuple[str, object]]:
@@ -205,7 +209,10 @@ async def answer(
                 where=f"#{kind}" if kind else "this",
                 context=context,
             ),
-            output_config={"effort": "medium"},
+            # Low, as the chat agent has it. The figures are already in the prompt, so
+            # what is left is saying what they mean, and a long think before it is
+            # most of what made the answer take a minute.
+            output_config={"effort": "low"},
             messages=[{"role": "user", "content": question}],
         )
     finally:
