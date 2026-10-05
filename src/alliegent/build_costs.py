@@ -53,6 +53,9 @@ class Tool:
     renews: date | None = None
     status: str = "Active"
     note: str = ""
+    # Projects it is for. Empty means shared: the Claude plan or the editor
+    # serve everything, and pinning them to one project would be wrong.
+    project_ids: tuple[str, ...] = ()
 
     @property
     def counts(self) -> bool:
@@ -98,6 +101,7 @@ class ToolService:
             renews=n.read_date(page, "Renews"),
             status=n.read_select(page, "Status") or "Active",
             note=n.read_text(page, "Note"),
+            project_ids=tuple(n.read_relation_ids(page, "Projects")),
         )
 
     async def tools(self) -> list[Tool]:
@@ -118,6 +122,40 @@ def _won(tool: Tool, rates: dict[str, float]) -> int | None:
     if monthly is None or tool.currency not in rates:
         return None
     return round(float(monthly) * rates[tool.currency])
+
+
+SHARED = "Shared"
+
+
+def by_project(
+    tools: list[Tool], rates: dict[str, float], names: dict[str, str]
+) -> list[tuple[str, int]]:
+    """Fixed won a month per project, largest first, Shared last.
+
+    A tool for several projects is split equally between them -- the one rule
+    that needs no weights to keep up to date, and that adds back to the fixed
+    total exactly: the odd won goes to the first projects rather than being
+    rounded away. A tool with no project is Shared, not spread across all of
+    them, because who it is for is the thing the column records.
+    """
+    totals: dict[str, int] = {}
+    for t in tools:
+        won = _won(t, rates) if t.counts else None
+        if won is None:
+            continue
+        if not t.project_ids:
+            totals[SHARED] = totals.get(SHARED, 0) + won
+            continue
+        ids = sorted(t.project_ids, key=lambda i: names.get(i, i))
+        share, extra = divmod(won, len(ids))
+        for index, pid in enumerate(ids):
+            label = names.get(pid, "(removed project)")
+            totals[label] = totals.get(label, 0) + share + (1 if index < extra else 0)
+    shared = totals.pop(SHARED, None)
+    out = sorted(totals.items(), key=lambda kv: (-kv[1], kv[0]))
+    if shared is not None:
+        out.append((SHARED, shared))
+    return out
 
 
 def _soon(tools: list[Tool], today: date) -> list[str]:
@@ -161,6 +199,7 @@ def costs_message(
     rate_problem: str | None = None,
     title: str = "Build costs",
     api_labels: tuple[str, str] = ("this month so far", "last month"),
+    names: dict[str, str] | None = None,
 ) -> str:
     rates = rates or {}
     if not tools and api is None:
@@ -193,6 +232,18 @@ def costs_message(
         ("Tool", "Cur", "Cost", "Per", "KRW/mo"), rows, flex=0, right=(2, 4)
     )
 
+    # Only with titles to show: without a projects database the split would be
+    # a table of "(removed project)".
+    split = by_project(tools, rates, names) if names and any(t.project_ids for t in tools) else []
+    if split:
+        lines.append("**By project** (fixed, KRW/mo)")
+        lines += reports._table(
+            ("Project", "KRW/mo"),
+            [*(((name, f"{won:,}")) for name, won in split), None,
+             ("TOTAL", f"{sum(won for _, won in split):,}")],
+            flex=0, right=(1,),
+        )
+
     usd = rates.get("USD")
     if api is not None and usd:
         this_label, last_label = api_labels
@@ -200,6 +251,8 @@ def costs_message(
         if api.last is not None:
             parts.append(f"${api.last:,.2f} {last_label} (₩{round(float(api.last) * usd):,})")
         lines.append("Anthropic API: " + " · ".join(parts))
+        if split:
+            lines.append("_The API is not split by project._")
         full = api.this if api.closed else api.last
         if full is not None and counted:
             with_api = total + round(float(full) * usd)
@@ -283,7 +336,12 @@ async def _rates(tools: list[Tool], with_usd: bool) -> tuple[dict | None, date |
 
 
 async def build_costs(
-    service: ToolService, admin_key: str, today: date, *, settle: bool = False
+    service: ToolService,
+    admin_key: str,
+    today: date,
+    *,
+    settle: bool = False,
+    names: dict[str, str] | None = None,
 ) -> str:
     """The costs table: now for /build costs, or the month just ended for the
     settlement on the 1st."""
@@ -297,9 +355,11 @@ async def build_costs(
             rate_problem=rate_problem,
             title=f"Build costs — {ended.strftime('%B %Y')}",
             api_labels=(ended.strftime("%B"), month_bounds(ended)[2].strftime("%B")),
+            names=names,
         )
     return costs_message(
-        tools, rates, day, today, api=api, api_problem=api_problem, rate_problem=rate_problem
+        tools, rates, day, today, api=api, api_problem=api_problem,
+        rate_problem=rate_problem, names=names,
     )
 
 

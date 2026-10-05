@@ -162,8 +162,15 @@ class Jobs:
             return None
         from . import build_costs
 
+        # Titles for the Projects relation. Without a projects database the
+        # split is simply not shown, rather than naming projects by id.
+        names = (
+            {p.id: p.title for p in await self.projects.all_projects()}
+            if self.projects is not None
+            else {}
+        )
         return await build_costs.build_costs(
-            self.costs, self._admin_key(), self.today(), settle=settle
+            self.costs, self._admin_key(), self.today(), settle=settle, names=names
         )
 
     async def run_build_costs(self) -> None:

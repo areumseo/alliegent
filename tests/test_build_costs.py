@@ -45,6 +45,9 @@ def tool(name, cost, **kw):
     return Tool(name, kw.pop("currency", "USD"), None if cost is None else Decimal(cost), **kw)
 
 
+NAMES = {"pa": "Alpha", "pb": "Beta", "pc": "Gamma"}
+
+
 def row(text, name):
     return next(line for line in text.splitlines() if line.startswith(name))
 
@@ -121,6 +124,66 @@ def test_without_a_rate_there_are_no_won_figures_and_it_says_why():
 
 def test_no_tools_and_no_live_figure_says_so():
     assert "No tools recorded yet" in costs_message([], RATES, None, TODAY)
+
+
+# -- by project -------------------------------------------------------------
+
+
+def test_a_tool_for_several_projects_is_split_equally_and_adds_back_exactly():
+    # 7,000 across three is 2,333 + 2,333 + 2,334: the odd won is not lost.
+    split = build_costs.by_project(
+        [tool("Editor", "5", project_ids=("pa", "pb", "pc"))], RATES, NAMES
+    )
+    assert sum(won for _, won in split) == 7000
+    assert sorted(won for _, won in split) == [2333, 2333, 2334]
+
+
+def test_a_tool_with_no_project_is_shared_and_listed_last():
+    split = build_costs.by_project(
+        [tool("Plan", "10"), tool("Host", "5", project_ids=("pa",)),
+         tool("Analytics", "1", project_ids=("pb",))],
+        RATES, NAMES,
+    )
+    assert split == [("Alpha", 7000), ("Beta", 1400), ("Shared", 14000)]
+
+
+def test_cancelled_trial_and_unpriced_tools_are_not_split():
+    split = build_costs.by_project(
+        [tool("Old", "50", status="Cancelled", project_ids=("pa",)),
+         tool("New", "30", status="Trial", project_ids=("pa",)),
+         tool("Mystery", None, project_ids=("pa",))],
+        RATES, NAMES,
+    )
+    assert split == []
+
+
+def test_the_project_table_follows_the_tool_table_and_totals_the_fixed_figure():
+    text = costs_message(
+        [tool("Host", "5", project_ids=("pa",)), tool("Plan", "10")],
+        RATES, None, TODAY, names=NAMES,
+        api=Api(Decimal("10"), Decimal("30")),
+    )
+    assert "**By project**" in text
+    assert row(text, "Alpha").split()[-1] == "7,000"
+    assert row(text, "Shared").split()[-1] == "14,000"
+    assert row(text, "TOTAL").split()[-1] == "21,000"
+    assert "The API is not split by project" in text
+
+
+def test_no_project_table_without_links_or_without_titles():
+    linked = [tool("Host", "5", project_ids=("pa",))]
+    assert "By project" not in costs_message([tool("Host", "5")], RATES, None, TODAY, names=NAMES)
+    assert "By project" not in costs_message(linked, RATES, None, TODAY, names={})
+
+
+async def test_the_projects_relation_is_read_from_the_row():
+    row_page = page("a", "Host", cost=5)
+    row_page["properties"]["Projects"] = {
+        "type": "relation", "relation": [{"id": "pa"}, {"id": "pb"}]
+    }
+    client = FakeNotionClient({"ds_tools-db": [row_page]})
+    [t] = await ToolService(client, Config(), "tools-db").tools()
+    assert t.project_ids == ("pa", "pb")
 
 
 # -- the live figure --------------------------------------------------------
