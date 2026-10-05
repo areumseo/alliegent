@@ -28,7 +28,7 @@ JOB_CHANNELS = {
     "weekly_planning": "agenda",
     "week_scaffold": "agenda",
     "weekly_review": "review",
-    "project_week": "projects",
+    "project_week": "build",
     "ai_news": "news",
     "karrot_report": "karrot",
     "karrot_candidates": "karrot",
@@ -37,8 +37,9 @@ JOB_CHANNELS = {
     "bonus_rollover": "assets",
     "espp_rollover": "assets",
     "plan_check": "assets",
-    "project_log": "projects",
-    "project_open": "projects",
+    "project_log": "build",
+    "project_open": "build",
+    "build_costs": "build",
 }
 
 
@@ -167,6 +168,25 @@ def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
     add("plan_check", jobs.run_plan_check, time=sched.plan_report_time)
     add("project_log", jobs.run_project_log, time=sched.project_log_time)
     add("project_open", jobs.run_project_open, time=sched.project_open_time)
+    if sched.build_costs_time.strip():
+        hour, minute = _hhmm(sched.build_costs_time)
+        scheduler.add_job(
+            _announcing(jobs, "build_costs", jobs.run_build_costs),
+            CronTrigger(
+                day=sched.build_costs_day, hour=hour, minute=minute, timezone=config.tz
+            ),
+            id="build_costs",
+            name="build_costs",
+            # Once a month: a restart at 09:30 should not cost the settlement.
+            misfire_grace_time=24 * 3600,
+            coalesce=True,
+            max_instances=1,
+        )
+        log.info(
+            "scheduled build_costs on day %d at %s",
+            sched.build_costs_day,
+            sched.build_costs_time,
+        )
     add(
         "asset_prompt",
         jobs.run_asset_prompt,

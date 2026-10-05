@@ -16,6 +16,6 @@ def test_a_check_is_not_a_job():
 
 
 def test_routes_match_the_scheduled_jobs():
-    assert JOB_CHANNEL["projectweek"] == "projects"
+    assert JOB_CHANNEL["projectweek"] == "build"
     assert JOB_CHANNEL["review"] == "review"
     assert JOB_CHANNEL["brief"] == "agenda"

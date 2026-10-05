@@ -255,7 +255,7 @@ async def test_jobs_route_to_their_own_channel_kinds():
     await jobs.run_week_scaffold()
     await jobs.run_project_week()
     await jobs.run_weekly_review()
-    assert [kind for _, kind in sent] == ["agenda", "agenda", "projects", "review"]
+    assert [kind for _, kind in sent] == ["agenda", "agenda", "build", "review"]
 
 
 def test_scheduler_registers_the_enabled_jobs():
@@ -278,6 +278,7 @@ def test_scheduler_registers_the_enabled_jobs():
         "plan_check",
         "project_log",
         "project_open",
+        "build_costs",
         "weekly_planning",
         "project_week",
         "weekly_review",

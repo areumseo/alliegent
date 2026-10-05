@@ -37,6 +37,7 @@ JOBS = (
     "plan",
     "projectlog",
     "projectopen",
+    "buildcosts",
 )
 
 # Diagnostics rather than jobs: they report on the setup instead of producing
@@ -50,11 +51,12 @@ JOB_CHANNEL = {
     "incomplete": "agenda",
     "planning": "agenda",
     "scaffold": "agenda",
-    "projectweek": "projects",
+    "projectweek": "build",
     "review": "review",
     "plan": "assets",
-    "projectlog": "projects",
-    "projectopen": "projects",
+    "projectlog": "build",
+    "projectopen": "build",
+    "buildcosts": "build",
 }
 
 
@@ -182,6 +184,13 @@ async def _run(name: str, commit: bool, send: bool) -> int:
         if assets and secrets.notion_plans_db_id
         else None
     )
+    from .build_costs import ToolService
+
+    costs = (
+        ToolService(client, config, secrets.notion_build_tools_db_id)
+        if secrets.notion_build_tools_db_id
+        else None
+    )
     jobs = Jobs(
         agenda,
         projects,
@@ -189,6 +198,7 @@ async def _run(name: str, commit: bool, send: bool) -> int:
         printer,
         assets=assets,
         plans=plans,
+        costs=costs,
         anthropic_api_key=secrets.anthropic_api_key,
         calendar_source=make_source(secrets),
         secrets=secrets,
@@ -214,6 +224,10 @@ async def _run(name: str, commit: bool, send: bool) -> int:
             message = "\n\n".join(f"**{p.title}**\n{m}" for p, m in logs) or None
         elif name == "projectopen":
             message = await jobs.build_project_open()
+        elif name == "buildcosts":
+            # The table /build costs shows. The 1st's settlement is the same
+            # table for the month that just ended, so it has no preview of its own.
+            message = await jobs.build_costs()
         elif name == "plan":
             # Never writes: no link, no Revised. A preview that changed the
             # database would make the real run on the 1st report nothing.

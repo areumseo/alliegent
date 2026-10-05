@@ -1,4 +1,4 @@
-"""A project's day, for its post in the #projects forum.
+"""A project's day, for its post in the #build forum.
 
 Three sections, each from what already records it rather than from anything
 typed for the purpose:
