@@ -58,6 +58,7 @@ class Tool:
     # serve everything, and pinning them to one project would be wrong.
     project_ids: tuple[str, ...] = ()
     usage: Decimal | None = None
+    id: str = ""
 
     @property
     def metered(self) -> bool:
@@ -110,6 +111,18 @@ class Tool:
 
 
 @dataclass(frozen=True)
+class Actual:
+    """A finished month in won: what was really billed where it was recorded,
+    the estimate where it was not, and who is missing a record."""
+
+    total: int
+    fixed: int  # plan fees, which are known without a record
+    recorded: int
+    estimated: int
+    missing: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Api:
     """The live usage figure, in dollars."""
 
@@ -119,11 +132,16 @@ class Api:
 
 
 class ToolService:
-    def __init__(self, client: NotionClient, config: Config, db_id: str) -> None:
+    def __init__(
+        self, client: NotionClient, config: Config, db_id: str, spend_db_id: str = ""
+    ) -> None:
         self._client = client
         self._cfg = config
         self._db_id = db_id
         self._ds_id: str | None = None
+        # Optional: with no Build Spend database a month is only ever estimated.
+        self._spend_db_id = spend_db_id
+        self._spend_ds: str | None = None
 
     async def data_source_id(self) -> str:
         if self._ds_id is None:
@@ -144,7 +162,33 @@ class ToolService:
             status=n.read_select(page, "Status") or "Active",
             note=n.read_text(page, "Note"),
             project_ids=tuple(n.read_relation_ids(page, "Projects")),
+            id=page.get("id", ""),
         )
+
+    async def spend_in(self, first: date) -> dict[str, Decimal] | None:
+        """Usage charges actually recorded for the month beginning `first`, by
+        tool id and in the tool's own currency. None when there is no Build
+        Spend database, which is not the same as a month with nothing in it.
+
+        A month is titled YYYY-MM, as the plan rows are. Several rows for one
+        tool in a month add up, since a second invoice is a second row, not a
+        correction; a title that is not a month is skipped rather than guessed.
+        """
+        if not self._spend_db_id:
+            return None
+        if self._spend_ds is None:
+            self._spend_ds = await self._client.resolve_data_source(self._spend_db_id)
+        wanted = first.strftime("%Y-%m")
+        out: dict[str, Decimal] = {}
+        async for page in self._client.query(self._spend_ds):
+            if n.read_title(page, "Month").strip()[:7] != wanted:
+                continue
+            amount = n.read_number(page, "Amount")
+            if amount is None:
+                continue
+            for tool_id in n.read_relation_ids(page, "Tool"):
+                out[tool_id] = out.get(tool_id, Decimal(0)) + Decimal(str(amount))
+        return out
 
     async def tools(self) -> list[Tool]:
         ds = await self.data_source_id()
@@ -164,6 +208,33 @@ def _won(tool: Tool, rates: dict[str, float]) -> int | None:
     if monthly is None or tool.currency not in rates:
         return None
     return round(float(monthly) * rates[tool.currency])
+
+
+def actual_for(
+    tools: list[Tool], spend: dict[str, Decimal], rates: dict[str, float]
+) -> Actual:
+    """The finished month: plan fees as known, each usage tool at what was
+    recorded or, lacking a record, at its estimate -- and named as missing, so
+    an estimate cannot pass for an invoice."""
+    fixed = recorded = estimated = 0
+    missing: list[str] = []
+    for t in tools:
+        if not t.counts or t.currency not in rates:
+            continue
+        rate = rates[t.currency]
+        plan = t.plan_monthly()
+        if plan is not None:
+            fixed += round(float(plan) * rate)
+        if not t.metered:
+            continue
+        if t.id in spend:
+            recorded += round(float(spend[t.id]) * rate)
+            continue
+        missing.append(t.name)
+        guess = t.usage_monthly()
+        if guess is not None:
+            estimated += round(float(guess) * rate)
+    return Actual(fixed + recorded + estimated, fixed, recorded, estimated, tuple(missing))
 
 
 SHARED = "Shared"
@@ -242,6 +313,8 @@ def costs_message(
     title: str = "Build costs",
     api_labels: tuple[str, str] = ("this month so far", "last month"),
     names: dict[str, str] | None = None,
+    actual: Actual | None = None,
+    actual_label: str = "",
 ) -> str:
     rates = rates or {}
     if not tools and api is None:
@@ -285,6 +358,21 @@ def costs_message(
              ("TOTAL", f"{sum(won for _, won in split):,}")],
             flex=0, right=(1,),
         )
+
+    if actual is not None and counted:
+        detail = f"plan ₩{actual.fixed:,}, usage ₩{actual.recorded:,} recorded"
+        if actual.estimated:
+            detail += f" + ₩{actual.estimated:,} estimated"
+        lines.append(f"Actual {actual_label}: ₩{actual.total:,} ({detail})")
+        diff = actual.total - total
+        lines.append(
+            f"The estimate was ₩{total:,}: "
+            + ("on it" if diff == 0 else f"{'+' if diff > 0 else '-'}₩{abs(diff):,}")
+        )
+        if actual.missing:
+            lines.append(
+                f"No record for {actual_label}: " + ", ".join(actual.missing)
+            )
 
     usd = rates.get("USD")
     if api is not None and usd:
@@ -399,12 +487,18 @@ async def build_costs(
     rates, day, rate_problem = await _rates(tools, with_usd=bool(admin_key))
     if settle:
         ended = month_bounds(today)[2]
+        spend = await service.spend_in(ended)
+        actual = (
+            actual_for(tools, spend, rates) if spend is not None and rates else None
+        )
         return costs_message(
             tools, rates, day, today, api=api, api_problem=api_problem,
             rate_problem=rate_problem,
             title=f"Build costs — {ended.strftime('%B %Y')}",
             api_labels=(ended.strftime("%B"), month_bounds(ended)[2].strftime("%B")),
             names=names,
+            actual=actual,
+            actual_label=ended.strftime("%B"),
         )
     return costs_message(
         tools, rates, day, today, api=api, api_problem=api_problem,

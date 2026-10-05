@@ -34,6 +34,9 @@ class Secrets(BaseSettings):
     # 🛠 Build Tools: what each tool used to build and run the services costs.
     # Fixed subscriptions are typed here; usage with an API is read live.
     notion_build_tools_db_id: str = ""
+    # 🧾 Build Spend: what usage-billed tools actually charged, one row per tool
+    # per month. Optional; without it a month is only ever estimated.
+    notion_build_spend_db_id: str = ""
     # 🌅 Retirement Income: pensions and other sources after work stops, each
     # in its own currency. Needs the assets database too.
     notion_retirement_db_id: str = ""

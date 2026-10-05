@@ -187,7 +187,12 @@ async def _run(name: str, commit: bool, send: bool) -> int:
     from .build_costs import ToolService
 
     costs = (
-        ToolService(client, config, secrets.notion_build_tools_db_id)
+        ToolService(
+            client,
+            config,
+            secrets.notion_build_tools_db_id,
+            secrets.notion_build_spend_db_id,
+        )
         if secrets.notion_build_tools_db_id
         else None
     )
