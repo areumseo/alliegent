@@ -309,6 +309,128 @@ async def test_the_settlement_uses_the_months_records(monkeypatch):
     assert "Actual September: ₩70,000" in text   # 20 + 30 recorded, not October's 99
 
 
+# -- usage averaged from what was recorded ------------------------------------
+
+OCT = date(2026, 10, 1)
+
+
+def usage_tool_pages():
+    """One tool billed by usage alone, id 't1'."""
+    row = page("t1", "Host", billing="Usage")
+    row["properties"]["Billing"] = {"type": "multi_select", "multi_select": [{"name": "Usage"}]}
+    return [row]
+
+
+async def test_the_average_is_the_three_complete_months_before_the_one_asked():
+    service = spend_service([
+        spend_page("a", "2026-07", "t1", 6),
+        spend_page("b", "2026-08", "t1", 9),
+        spend_page("c", "2026-09", "t1", 12),
+        spend_page("d", "2026-10", "t1", 99),   # the month in progress: left out
+    ])
+    assert await service.usage_averages(OCT) == {"t1": Decimal(9)}
+
+
+async def test_a_month_with_no_row_counts_as_nothing_once_the_tool_has_history():
+    service = spend_service([
+        spend_page("a", "2026-07", "t1", 9),
+        spend_page("c", "2026-09", "t1", 9),
+    ])
+    assert await service.usage_averages(OCT) == {"t1": Decimal(6)}   # (9 + 0 + 9) / 3
+
+
+async def test_months_before_the_first_record_are_not_counted():
+    service = spend_service([
+        spend_page("b", "2026-08", "t1", 10),
+        spend_page("c", "2026-09", "t1", 20),
+    ])
+    assert await service.usage_averages(OCT) == {"t1": Decimal(15)}  # over two, not three
+
+
+async def test_a_tool_first_recorded_this_month_has_no_average_yet():
+    service = spend_service([spend_page("d", "2026-10", "t1", 5)])
+    assert await service.usage_averages(OCT) == {}
+
+
+async def test_an_old_lump_does_not_carry_into_the_estimate():
+    """A prepaid credit bought in May is not a typical month in October."""
+    service = spend_service([
+        spend_page("a", "2026-05", "t1", 60),
+        spend_page("b", "2026-08", "t1", 3),
+        spend_page("c", "2026-09", "t1", 6),
+    ])
+    assert await service.usage_averages(OCT) == {"t1": Decimal(3)}   # (0 + 3 + 6) / 3
+
+
+async def test_several_rows_in_a_month_add_up_in_the_average():
+    service = spend_service([
+        spend_page("a", "2026-09", "t1", 4),
+        spend_page("b", "2026-09", "t1", 5),
+        spend_page("c", "2026-07", "t1", 0),
+    ])
+    assert await service.usage_averages(OCT) == {"t1": Decimal(3)}   # 9 over three months
+
+
+async def test_tools_carry_the_average_only_when_asked_for_a_month():
+    service = spend_service(
+        [spend_page("a", "2026-09", "t1", 30)], tools=usage_tool_pages()
+    )
+    [plain] = await service.tools()
+    [averaged] = await service.tools(asof=OCT)
+    assert plain.usage_avg is None
+    assert averaged.usage_avg == Decimal(30)   # one month of history, so over one
+
+
+def test_a_typed_usage_beats_the_average_which_beats_the_old_cost():
+    typed = tool("A", "8", billing="Usage", usage="12", usage_avg=Decimal(5))
+    averaged = tool("B", "8", billing="Usage", usage_avg=Decimal(5))
+    legacy = tool("C", "8", billing="Usage")
+    assert typed.usage_monthly() == Decimal(12)
+    assert averaged.usage_monthly() == Decimal(5)
+    assert legacy.usage_monthly() == Decimal(8)
+
+
+def test_a_computed_figure_is_marked_with_a_tilde_and_a_typed_one_is_not():
+    text = costs_message(
+        [tool("Host", None, billing="Usage", usage_avg=Decimal("7.95")),
+         tool("Platform", "20", billing=("Monthly", "Usage"), usage_avg=Decimal(15)),
+         tool("Typed", "20", billing=("Monthly", "Usage"), usage="15")],
+        RATES, None, TODAY,
+    )
+    assert row(text, "Host").split()[2] == "~7.95"
+    assert row(text, "Platform").split()[2] == "20+~15"
+    assert row(text, "Typed").split()[2] == "20+15"
+
+
+def test_an_average_makes_a_plan_with_usage_estimated_not_understated():
+    text = costs_message(
+        [tool("Platform", "20", billing=("Monthly", "Usage"), usage_avg=Decimal(15))],
+        RATES, None, TODAY,
+    )
+    assert "Usage not estimated" not in text
+    assert row(text, "Platform").split()[-1] == "49,000"
+
+
+async def test_the_settlements_estimate_leaves_out_the_month_it_judges(monkeypatch):
+    """October's actual must not be inside the average it is compared with."""
+    async def rates(tools, with_usd):
+        return RATES, date(2026, 11, 1), None
+
+    monkeypatch.setattr(build_costs, "_rates", rates)
+    service = spend_service(
+        [
+            spend_page("a", "2026-08", "t1", 3),
+            spend_page("b", "2026-09", "t1", 3),
+            spend_page("c", "2026-10", "t1", 30),   # the month being settled
+        ],
+        tools=usage_tool_pages(),
+    )
+    text = await build_costs.build_costs(service, "", date(2026, 11, 1), settle=True)
+    # Jul-Sep with history from August: (3 + 3) / 2 = 3 dollars, not the 12 an
+    # average that took in October's 30 would give. The actual is 30.
+    assert "The estimate was ₩4,200: +₩37,800" in text
+
+
 # -- by project -------------------------------------------------------------
 
 
