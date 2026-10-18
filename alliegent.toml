@@ -63,6 +63,7 @@ status = "Status"       # status OR select OR checkbox — auto-detected
 recurring = "" # checkbox marking items that repeat weekly
 category = "Category"   # select; copied onto scaffolded items
 project = "Project DB"  # relation to the projects DB; "" disables the link
+priority = "Priority"   # select (High / Medium / Low); "" disables it
 
 [agenda.status_values]
 # Used when `status` is a status/select property. Ignored for checkbox.

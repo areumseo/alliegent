@@ -639,6 +639,22 @@ async def resolve_category(bot: AlliegentBot, text: str) -> str:
     raise ValueError(f"No category called {text!r}. Try: " + ", ".join(names))
 
 
+async def resolve_priority(bot: AlliegentBot, text: str) -> str:
+    """Match a typed priority to one the database offers, as categories are.
+
+    Refused rather than created when unknown, for the same reason: "Hgih"
+    would become a fourth priority that no filter on High ever finds.
+    """
+    names = await bot.agenda.priority_names()
+    if not names:
+        raise ValueError("This agenda has no Priority column.")
+    wanted = _normalise(text)
+    for name in names:
+        if _normalise(name) == wanted:
+            return name
+    raise ValueError(f"No priority called {text!r}. Try: " + ", ".join(names))
+
+
 async def resolve_project(bot: AlliegentBot, text: str) -> Project:
     """Match a typed project name to an open project.
 
@@ -770,6 +786,7 @@ def _register(bot: AlliegentBot) -> None:
         when="오늘 / 내일 / 모레 / today / tomorrow / 2026-08-15 / 08-15 (default: today)",
         at="Time of day, e.g. 14:00 or 2pm. Without one it goes to the end of the day",
         category="Which category. Left out, it is guessed from how you filed this before",
+        priority="How much it matters, e.g. High / Medium / Low. Optional",
         project="Which project this belongs to",
         cal="Also put it in the calendar. Off unless you say so",
     )
@@ -779,6 +796,7 @@ def _register(bot: AlliegentBot) -> None:
         when: str | None = None,
         at: str | None = None,
         category: str | None = None,
+        priority: str | None = None,
         project: str | None = None,
         cal: bool = False,
     ) -> None:
@@ -790,6 +808,7 @@ def _register(bot: AlliegentBot) -> None:
             # there would quietly leave the day unordered.
             clock = parse_time(at) or time_in_title(task)
             filed_as = await resolve_category(bot, category) if category else None
+            ranked = await resolve_priority(bot, priority) if priority else None
             belongs_to = await resolve_project(bot, project) if project else None
         except ValueError as exc:
             await interaction.followup.send(f"⚠️ {exc}")
@@ -803,10 +822,13 @@ def _register(bot: AlliegentBot) -> None:
             at=clock,
             category=filed_as,
             infer_category=filed_as is None,
+            priority=ranked,
             project_id=belongs_to.id if belongs_to else None,
         )
 
         filed = f" · {item.category}" if item.category else ""
+        if item.priority:
+            filed += f" · {item.priority}"
         if belongs_to:
             filed += f" · {belongs_to.title}"
         when_text = reports.fmt_date(day)
@@ -838,6 +860,21 @@ def _register(bot: AlliegentBot) -> None:
             if typed in name.casefold()
         ][:25]
 
+    async def _priority_options(
+        interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        try:
+            names = await bot.agenda.priority_names()
+        except Exception:
+            log.exception("priority autocomplete failed")
+            names = []
+        typed = current.casefold()
+        return [
+            app_commands.Choice(name=name, value=name)
+            for name in names
+            if typed in name.casefold()
+        ][:25]
+
     async def _project_options(
         interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
@@ -855,6 +892,7 @@ def _register(bot: AlliegentBot) -> None:
         ][:25]
 
     add_cmd.autocomplete("category")(_category_options)
+    add_cmd.autocomplete("priority")(_priority_options)
     add_cmd.autocomplete("project")(_project_options)
 
     @tree.command(name="done", description="Mark items done by their listed number")
@@ -916,13 +954,15 @@ def _register(bot: AlliegentBot) -> None:
         )
 
     @tree.command(
-        name="change", description="Change an item's day, time, category, project or name"
+        name="change",
+        description="Change an item's day, time, category, priority, project or name",
     )
     @app_commands.describe(
         numbers="Which items, by their listed number (3 or 3,5)",
         day="New day, e.g. 내일 / tomorrow / 08-20",
         at="New time: 14:00, 2pm, or 'none' to clear it and send it to the end",
         category="New category",
+        priority="New priority, or 'none' to clear it",
         project="Which project it belongs to, or 'none' to unlink it",
         name="New title. One item at a time, since it replaces the title outright",
         frm="Which list they're on now: a day, or `overdue` (defaults to today)",
@@ -934,14 +974,16 @@ def _register(bot: AlliegentBot) -> None:
         day: str | None = None,
         at: str | None = None,
         category: str | None = None,
+        priority: str | None = None,
         project: str | None = None,
         name: str | None = None,
         frm: str | None = None,
     ) -> None:
         await interaction.response.defer()
-        if not any((day, at, category, project, name)):
+        if not any((day, at, category, priority, project, name)):
             await interaction.followup.send(
-                "⚠️ Say what to change: `day`, `at`, `category`, `project` or `name`."
+                "⚠️ Say what to change: `day`, `at`, `category`, `priority`, `project` "
+                "or `name`."
             )
             return
 
@@ -956,6 +998,10 @@ def _register(bot: AlliegentBot) -> None:
             # of the other edits have been written.
             clock = parse_time(at) if at else None
             filed_as = await resolve_category(bot, category) if category else None
+            unrank = bool(priority) and means_clear(priority)
+            ranked = (
+                await resolve_priority(bot, priority) if priority and not unrank else None
+            )
             # "none" unlinks; any other word has to name a project that exists.
             unlink = bool(project) and means_clear(project)
             belongs_to = (
@@ -982,6 +1028,8 @@ def _register(bot: AlliegentBot) -> None:
                 await bot.agenda.set_time(item.id, on, clock if at else item.at)
             if filed_as:
                 await bot.agenda.set_category(item.id, filed_as)
+            if priority:
+                await bot.agenda.set_priority(item.id, ranked)
             if project:
                 await bot.agenda.set_project(
                     item.id, belongs_to.id if belongs_to else None
@@ -998,6 +1046,8 @@ def _register(bot: AlliegentBot) -> None:
             changes.append(f"time → **{reports.fmt_time(clock) if clock else 'end of day'}**")
         if filed_as:
             changes.append(f"category → **{filed_as}**")
+        if priority:
+            changes.append(f"priority → **{ranked}**" if ranked else "priority cleared")
         if project:
             changes.append(
                 f"project → **{belongs_to.title}**" if belongs_to else "project cleared"
@@ -1007,6 +1057,7 @@ def _register(bot: AlliegentBot) -> None:
         await interaction.followup.send(f"✏️ {titles} — " + ", ".join(changes))
 
     change_cmd.autocomplete("category")(_category_options)
+    change_cmd.autocomplete("priority")(_priority_options)
     change_cmd.autocomplete("project")(_project_options)
 
     @tree.command(name="overdue", description="Show overdue, unfinished items")

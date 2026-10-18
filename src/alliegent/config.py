@@ -173,6 +173,9 @@ class AgendaProps(BaseModel):
     recurring: str = "Recurring"
     category: str = "Category"
     project: str = ""
+    # A select, suggested as High / Medium / Low. Optional on every item, and
+    # "" turns the column off entirely.
+    priority: str = "Priority"
 
 
 class ProjectProps(BaseModel):
