@@ -50,6 +50,9 @@ class AgendaItem:
     # Closed without being done. `done` stays true for it -- it is finished
     # with -- so this is what tells the two apart wherever that matters.
     canceled: bool = False
+    # Optional, and never part of the sort: the numbers /done and /delete take
+    # are positions in the day, and a priority edit must not renumber them.
+    priority: str | None = None
 
     def sort_key(self) -> tuple:
         """Where this item sits in its day.
@@ -187,10 +190,21 @@ class AgendaService:
         the statuses are: renaming a select option is the user's business, and
         a copy kept in the code would go stale without anything saying so.
         """
-        if not self.props.category:
+        return await self._select_options(self.props.category)
+
+    async def priority_names(self) -> list[str]:
+        """Every priority the database offers, in the order Notion lists them.
+
+        Schema-read like the categories, so High/Medium/Low is only the
+        suggested set: whatever options the column has are the ones offered.
+        """
+        return await self._select_options(self.props.priority)
+
+    async def _select_options(self, prop: str) -> list[str]:
+        if not prop:
             return []
         schema = await self._client.get_schema(await self.data_source_id())
-        definition = schema.get(self.props.category) or {}
+        definition = schema.get(prop) or {}
         if definition.get("type") != "select":
             return []
         return [
@@ -240,6 +254,7 @@ class AgendaService:
             canceled=n.is_canceled(
                 page, p.status, self._cfg.agenda.status_values["done"], self._closed
             ),
+            priority=n.read_select(page, p.priority) if p.priority else None,
         )
 
     async def items_between(self, start: date, end: date) -> list[AgendaItem]:
@@ -360,6 +375,7 @@ class AgendaService:
         recurring: bool = False,
         category: str | None = None,
         infer_category: bool = False,
+        priority: str | None = None,
     ) -> AgendaItem:
         p = self.props
         if category is None and infer_category:
@@ -374,6 +390,8 @@ class AgendaService:
             properties[p.recurring] = n.checkbox(True)
         if category and p.category:
             properties[p.category] = n.select(category)
+        if priority and p.priority:
+            properties[p.priority] = n.select(priority)
         page = await self._client.create_page(await self.data_source_id(), properties)
         return self._to_item(page)
 
@@ -423,6 +441,14 @@ class AgendaService:
             page_id, {self.props.category: n.select(category)}
         )
 
+    async def set_priority(self, page_id: str, priority: str | None) -> None:
+        """Set an item's priority, or clear it with None."""
+        if not self.props.priority:
+            raise ValueError("This agenda has no Priority column.")
+        await self._client.update_page(
+            page_id, {self.props.priority: {"select": {"name": priority} if priority else None}}
+        )
+
     async def plan_week(self, week_start: date) -> list[tuple[str, date, str | None]]:
         """Work out which recurring items are missing from the given week.
 
@@ -434,6 +460,12 @@ class AgendaService:
         Returns (title, target_day, category) for each item that would be
         created, so callers can preview without writing.
         """
+        return [
+            (item.title, day, item.category) for item, day in await self._plan(week_start)
+        ]
+
+    async def _plan(self, week_start: date) -> list[tuple[AgendaItem, date]]:
+        """Last week's recurring rows still missing, each with its new day."""
         days = self._cfg.agenda.scaffold_days
         week_end = week_start + timedelta(days=days - 1)
         prev_start = week_start - timedelta(days=7)
@@ -448,7 +480,7 @@ class AgendaService:
             (item.title, item.day) for item in await self.items_between(week_start, week_end)
         }
 
-        planned: list[tuple[str, date, str | None]] = []
+        planned: list[tuple[AgendaItem, date]] = []
         for item in template:
             assert item.day is not None
             target = item.day + timedelta(days=7)
@@ -456,15 +488,20 @@ class AgendaService:
                 continue
             if (item.title, target) in existing:
                 continue
-            planned.append((item.title, target, item.category))
+            planned.append((item, target))
         return planned
 
     async def scaffold_week(self, week_start: date) -> list[tuple[str, date, str | None]]:
         """Create the missing recurring rows returned by `plan_week`."""
-        planned = await self.plan_week(week_start)
-        for title, day, category in planned:
-            await self.add_item(title, day, recurring=True, category=category)
-        return planned
+        planned = await self._plan(week_start)
+        # Priority rides along with the category: a class that mattered last
+        # week matters this week, and resetting it would be a chore every Monday.
+        for item, day in planned:
+            await self.add_item(
+                item.title, day, recurring=True, category=item.category,
+                priority=item.priority,
+            )
+        return [(item.title, day, item.category) for item, day in planned]
 
 
 class ProjectService:

@@ -101,6 +101,17 @@ def _table_mark(item: AgendaItem) -> str:
     return MARKS[""]
 
 
+def _priority(item: AgendaItem) -> str:
+    """The priority as one table cell: H / M / L for the suggested names.
+
+    A name already two cells or narrower ("P1", "상") is shown as it is;
+    anything longer is cut to its first letter, since the column is there to
+    be scanned down, not read.
+    """
+    name = item.priority or ""
+    return name if _width(name) <= 2 else name[0].upper()
+
+
 def _rows(
     items: list[AgendaItem],
     *,
@@ -122,7 +133,10 @@ def _rows(
         matched += 1
         if limit is not None and len(rows) >= limit:
             continue
-        rows.append((str(idx), _table_mark(item), when(item), item.title, item.category or ""))
+        rows.append(
+            (str(idx), _table_mark(item), when(item), _priority(item), item.title,
+             item.category or "")
+        )
     return rows, matched - len(rows)
 
 
@@ -132,6 +146,7 @@ def _table(
     *,
     flex: int,
     right: tuple[int, ...] = (),
+    optional: tuple[int, ...] = (),
 ) -> list[str]:
     """Render cells as a padded code block. Empty when there is nothing.
 
@@ -142,9 +157,22 @@ def _table(
     A None row is a rule, the same one drawn under the header. It is for rows
     that must not be read as adding up with the ones above them: a total, or
     a figure that is a slice of a row already shown.
+
+    `optional` names columns dropped when no row fills them, so a column most
+    days leave empty costs no width on those days.
     """
     if not any(rows):
         return []
+    drop = {
+        col for col in optional
+        if not any(row[col] for row in rows if row is not None)
+    }
+    if drop:
+        keep = [col for col in range(len(header)) if col not in drop]
+        header = tuple(header[col] for col in keep)
+        rows = [None if row is None else tuple(row[col] for col in keep) for row in rows]
+        flex -= sum(1 for col in drop if col < flex)
+        right = tuple(keep.index(col) for col in right if col in keep)
     cells = [header, *(row for row in rows if row is not None)]
     widths = [max(_width(row[col]) for row in cells) for col in range(len(header))]
 
@@ -171,8 +199,11 @@ def _table(
 
 
 def _task_table(rows: list[tuple[str, ...]], when_header: str) -> list[str]:
-    """Numbered task rows: number, state, when, title, category."""
-    return _table(("#", "", when_header, "Task", "Category"), rows, flex=3, right=(0,))
+    """Numbered task rows: number, state, when, priority, title, category."""
+    return _table(
+        ("#", "", when_header, "P", "Task", "Category"), rows,
+        flex=4, right=(0,), optional=(3,),
+    )
 
 
 def _bullets(items: list[AgendaItem], *, numbered: bool = False) -> list[str]:
@@ -227,10 +258,14 @@ def _closed_table(todays: list[AgendaItem], *, canceled: bool) -> list[str]:
         if item.done and item.canceled == canceled
     ]
     return _table(
-        ("#", "Time", "Task", "Category"),
-        [(number, when, title, category) for number, _, when, title, category in picked],
-        flex=2,
+        ("#", "Time", "P", "Task", "Category"),
+        [
+            (number, when, prio, title, category)
+            for number, _, when, prio, title, category in picked
+        ],
+        flex=3,
         right=(0,),
+        optional=(2,),
     )
 
 
@@ -498,16 +533,16 @@ def weekly_review(start: date, end: date, items: list[AgendaItem]) -> str:
             label += f" {did}/{planned}"
         for offset, entry in enumerate(entries):
             rows.append(
-                (label if offset == 0 else "", _table_mark(entry), entry.title,
-                 entry.category or "")
+                (label if offset == 0 else "", _table_mark(entry), _priority(entry),
+                 entry.title, entry.category or "")
             )
     for offset, entry in enumerate(undated):
         rows.append(
-            ("no date" if offset == 0 else "", _table_mark(entry), entry.title,
-             entry.category or "")
+            ("no date" if offset == 0 else "", _table_mark(entry), _priority(entry),
+             entry.title, entry.category or "")
         )
 
-    out += _table(("Day", "", "Task", "Category"), rows, flex=2)
+    out += _table(("Day", "", "P", "Task", "Category"), rows, flex=3, optional=(2,))
     out.append("")
 
     out.append("_What went well, what got stuck, what to change next week._")

@@ -103,6 +103,7 @@ def test_add_command_options():
         "when",
         "at",
         "category",
+        "priority",
         "project",
         "cal",
     }
@@ -449,6 +450,7 @@ def test_change_covers_every_editable_field():
         "day",
         "at",
         "category",
+        "priority",
         "project",
         "name",
         "from",

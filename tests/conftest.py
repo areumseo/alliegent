@@ -18,6 +18,7 @@ def make_page(
     projects: list[str] | None = None,
     recurring: bool | None = None,
     category: str | None = None,
+    priority: str | None = None,
     in_trash: bool = False,
 ) -> dict[str, Any]:
     """Build a Notion page object shaped the way the API returns it."""
@@ -42,6 +43,8 @@ def make_page(
         props["Recurring"] = {"type": "checkbox", "checkbox": recurring}
     if category is not None:
         props["Category"] = {"type": "select", "select": {"name": category}}
+    if priority is not None:
+        props["Priority"] = {"type": "select", "select": {"name": priority}}
     return {
         "object": "page",
         "id": page_id,
