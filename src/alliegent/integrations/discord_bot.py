@@ -275,6 +275,22 @@ class AlliegentBot(discord.Client):
             mood.confirmation(entry, wrote=reply.raw_text is not None),
             mention_author=False,
         )
+        await self._mood_notice(day, " ".join(t for t in (message.content, reply.raw_text) if t))
+
+    async def _mood_notice(self, day: date, written: str) -> None:
+        """After a check-in: point to people if what was written says danger,
+        otherwise send whichever offer the rules call for, if any."""
+        if mood.mentions_crisis(written):
+            # Every time, never on a cooldown: this is the one message that
+            # must not be skipped for having been sent before.
+            await self.notify(mood.SAFETY_NOW, "mood")
+            self.mood.log_prompt(day, "safety")
+            return
+        notice = mood.due_notice(self.mood, day)
+        if notice is not None:
+            kind, text = notice
+            await self.notify(text, "mood")
+            self.mood.log_prompt(day, kind)
 
     async def _transcribe(self, attachment: discord.Attachment) -> str:
         """Transcribe on this machine; the audio is deleted straight after."""
@@ -1738,6 +1754,7 @@ def _register(bot: AlliegentBot) -> None:
         await interaction.response.send_message(
             mood.confirmation(entry), ephemeral=private
         )
+        await bot._mood_notice(day, note or "")
 
     @tree.command(name="week", description="The last seven days in #mood")
     async def week_cmd(interaction: discord.Interaction) -> None:
@@ -1773,6 +1790,7 @@ def _register(bot: AlliegentBot) -> None:
         await interaction.response.send_message(
             mood.talk_summary(end, entries), ephemeral=private
         )
+        bot.mood.mark_answered("talk_offer")
 
     @tree.command(name="brief", description="Run the daily brief now")
     async def brief_cmd(interaction: discord.Interaction) -> None:

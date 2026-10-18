@@ -175,6 +175,37 @@ class MoodStore:
             ).fetchone()
         return row is not None
 
+    def last_logged(self, kind: str) -> date | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT MAX(date) AS day FROM prompt_log WHERE kind = ?", (kind,)
+            ).fetchone()
+        return date.fromisoformat(row["day"]) if row["day"] else None
+
+    def daily_prompts(self, start: date, end: date) -> list[tuple[date, bool]]:
+        """Each day the question was asked from start to end, and whether answered."""
+        with self._connect() as db:
+            rows = db.execute(
+                """
+                SELECT date, MAX(answered) AS answered FROM prompt_log
+                WHERE kind = 'daily' AND date BETWEEN ? AND ?
+                GROUP BY date ORDER BY date
+                """,
+                (start.isoformat(), end.isoformat()),
+            ).fetchall()
+        return [(date.fromisoformat(r["date"]), bool(r["answered"])) for r in rows]
+
+    def mark_answered(self, kind: str) -> None:
+        """The latest prompt of a kind was taken up -- /talk after an offer."""
+        with self._connect() as db:
+            db.execute(
+                """
+                UPDATE prompt_log SET answered = 1 WHERE id =
+                  (SELECT MAX(id) FROM prompt_log WHERE kind = ?)
+                """,
+                (kind,),
+            )
+
     def has_raw(self, day: date) -> bool:
         with self._connect() as db:
             row = db.execute(
@@ -576,3 +607,96 @@ def talk_summary(end: date, entries: list[Checkin]) -> str:
     # A note with a fence in it would end the block early.
     body = "\n".join(lines).replace("```", "'''")
     return f"```\n{body}\n```"
+
+
+# -- noticing ------------------------------------------------------------------
+# Simple rules, kept as constants so they can be tuned once there is data.
+
+LOW_SCORE = 2  # a day scored this or lower is a low day
+LOW_RUN_DAYS = 3  # A: this many low days in a row
+SILENT_DAYS = 3  # B: this many daily questions in a row left unanswered
+RECENT_DAYS = 7  # C: the last week's average...
+BASELINE_DAYS = 28  # ...against the four weeks before it...
+DROP = 1.0  # ...lower by this much or more
+RECENT_MIN, BASELINE_MIN = 3, 7  # C needs this many scores on each side
+OFFER_COOLDOWN_DAYS = 7  # an offer is not repeated within a week
+SAFETY_RUN_DAYS = 7  # low this long: point to people, not to /talk
+
+OFFER = (
+    "Seems like things have been hard lately. Want to talk? `/talk` makes a summary to start from."
+)
+
+# The one place #mood speaks Korean: the line it points to is a Korean
+# service, and this is not a moment to be reading a second language.
+SAFETY_NOW = (
+    "지금 많이 힘든 것 같아. 이건 혼자, 또는 나랑만 버틸 일이 아니야. "
+    "가까운 사람에게 연락하거나, 자살예방상담전화 **109**(24시간)에 전화해 줘. "
+    "당장 위험하면 **112**나 **119**."
+)
+SAFETY_LOW = (
+    "일주일 넘게 낮은 점수가 이어지고 있어. 가까운 사람이나 전문가와 이야기해 보면 좋겠어. "
+    "많이 힘들 땐 자살예방상담전화 **109**(24시간)."
+)
+
+# Phrases that mean someone may be in danger. Matched with spaces removed, so
+# "죽고 싶다" and "죽고싶다" both count. Kept narrow on purpose: "끝내고 싶다"
+# is usually about work, and a false alarm here teaches the reader to skip it.
+_CRISIS = [
+    "죽고싶",
+    "자살",
+    "자해",
+    "사라지고싶",
+    "살기싫",
+    "살고싶지않",
+    "죽어버리",
+    "killmyself",
+    "suicid",
+    "selfharm",
+    "wanttodie",
+    "endmylife",
+    "hurtmyself",
+]
+
+
+def mentions_crisis(text: str) -> bool:
+    squashed = re.sub(r"[\s\-']", "", text.casefold())
+    return any(phrase in squashed for phrase in _CRISIS)
+
+
+def _since(day: date, today: date, days: int) -> bool:
+    return day is not None and (today - day).days < days
+
+
+def due_notice(store: MoodStore, today: date, *, silence: bool = False) -> tuple[str, str] | None:
+    """(kind, message) when a rule fires and its cooldown allows, else None.
+
+    A long low stretch points to people first; shorter signals offer /talk.
+    `silence` adds rule B, which only makes sense before the day's question.
+    Each kind is sent at most once a week, and an unanswered one is not
+    followed up: answering is optional, and a nudge would be pressure.
+    """
+    window = store.between(today - timedelta(days=RECENT_DAYS + BASELINE_DAYS), today)
+    runs = [run for run in low_runs(window, at_most=LOW_SCORE, length=1) if run[1] == today]
+    current = (runs[0][1] - runs[0][0]).days + 1 if runs else 0
+
+    if current >= SAFETY_RUN_DAYS:
+        if not _since(store.last_logged("safety"), today, OFFER_COOLDOWN_DAYS):
+            return "safety", SAFETY_LOW
+        return None
+    if _since(store.last_logged("talk_offer"), today, OFFER_COOLDOWN_DAYS):
+        return None
+
+    fired = current >= LOW_RUN_DAYS
+    if not fired and silence:
+        asked = store.daily_prompts(today - timedelta(days=SILENT_DAYS), today - timedelta(days=1))
+        fired = len(asked) == SILENT_DAYS and not any(answered for _, answered in asked)
+    if not fired:
+        recent = [e for e in window if e.day > today - timedelta(days=RECENT_DAYS)]
+        baseline = [e for e in window if e.day <= today - timedelta(days=RECENT_DAYS)]
+        now, then = average(recent), average(baseline)
+        enough = (
+            sum(e.score is not None for e in recent) >= RECENT_MIN
+            and sum(e.score is not None for e in baseline) >= BASELINE_MIN
+        )
+        fired = enough and now is not None and then is not None and then - now >= DROP
+    return ("talk_offer", OFFER) if fired else None

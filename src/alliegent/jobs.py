@@ -423,6 +423,14 @@ class Jobs:
         if self.mood.get(today) is not None or self.mood.prompted(today, "daily"):
             log.info("mood check-in already done or asked today")
             return
+        # Three unanswered evenings: the offer goes out in place of a fourth
+        # question, rather than as one more thing to answer.
+        notice = mood.due_notice(self.mood, today, silence=True)
+        if notice is not None:
+            kind, message = notice
+            await self.notify(message, "mood")
+            self.mood.log_prompt(today, kind)
+            return
         await self.notify(mood.PROMPT, "mood")
         self.mood.log_prompt(today, "daily")
 

@@ -318,6 +318,16 @@ A score is a digit from 1 to 5 or a face (😞 1, 😕 2, 😐 3, 😊 4, 😁 5
 
 **The week** is worked out on the machine, with no model involved. It states what the scores were, how much of the agenda got done on low and high days, and which words repeated in notes; it does not say what any of that means. Long entries and transcripts are never read for it.
 
+**Noticing.** Three rules, kept as constants at the bottom of `mood.py` so they can be tuned once there is data:
+
+- three days in a row scored 2 or lower,
+- three evening questions in a row left unanswered,
+- the last seven days averaging a point or more below the four weeks before.
+
+When one fires, `#mood` gets one line, once: an offer to talk, with `/talk` to start from. It is not repeated for seven days and never followed up. After three unanswered evenings the offer goes out instead of a fourth question.
+
+**The safety line.** Seven or more days in a row scored 2 or lower, or anything written in `#mood` that suggests danger (죽고 싶다, 자해, *want to die*, and similar), gets a different message instead: reach someone close, or call 자살예방상담전화 **109** (24 hours), or 112 / 119 in an emergency. The danger message is sent every time, with no cooldown. These are the one place `#mood` writes Korean, because the line it points to is a Korean service. The bot does not diagnose, assess or interpret, and gives no advice nobody asked for.
+
 **What may leave the machine.** Nothing, as built: no part of `#mood` calls a model. The rule if one is ever added is that only scores and one-line notes may be sent; long entries and transcripts stay in `mood.db`. `/talk` is for carrying elsewhere by hand, so it follows the same rule. Mentioning the bot in `#mood` is still a check-in, so nothing written there goes to the chat agent.
 
 ## Assets

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import stat
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -14,7 +14,10 @@ from alliegent.integrations.discord_bot import AlliegentBot
 from alliegent.jobs import Jobs
 from alliegent.mood import (
     NOTE_MAX,
+    OFFER,
     PROMPT,
+    SAFETY_LOW,
+    SAFETY_NOW,
     TALK_NOTE_MAX,
     Checkin,
     MoodStore,
@@ -22,7 +25,9 @@ from alliegent.mood import (
     VoiceUnavailable,
     checkin_day,
     confirmation,
+    due_notice,
     low_runs,
+    mentions_crisis,
     parse_reply,
     parse_score,
     talk_summary,
@@ -396,3 +401,108 @@ def test_talk_summary_cuts_long_notes():
     text = talk_summary(DAY, [_entry(DAY, 3, "x" * NOTE_MAX)])
     assert "x" * TALK_NOTE_MAX not in text
     assert "x" * (TALK_NOTE_MAX - 1) + "…" in text
+
+
+# -- step 5: noticing --------------------------------------------------------------
+
+
+def _days(store, scores, end=DAY):
+    """Score consecutive days ending at `end`, oldest first."""
+    for offset, score in enumerate(reversed(scores)):
+        store.upsert(end - timedelta(days=offset), score)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "죽고 싶다",
+        "그냥 죽고싶어",
+        "자해했어",
+        "사라지고 싶어",
+        "I want to die",
+        "self-harm",
+        "suicidal",
+    ],
+)
+def test_crisis_phrases_are_noticed(text):
+    assert mentions_crisis(text)
+
+
+@pytest.mark.parametrize("text", ["일 빨리 끝내고 싶다", "죽을 만큼 피곤", "dead tired", "3"])
+def test_ordinary_tiredness_is_not_a_crisis(text):
+    assert not mentions_crisis(text)
+
+
+def test_three_low_days_offer_talk_once_a_week(store):
+    _days(store, [4, 2, 1, 2])
+    assert due_notice(store, DAY) == ("talk_offer", OFFER)
+    store.log_prompt(DAY, "talk_offer")
+    _days(store, [2], end=DAY + timedelta(days=1))
+    assert due_notice(store, DAY + timedelta(days=1)) is None
+    _days(store, [2] * 7, end=DAY + timedelta(days=7))
+    # Seven days after the offer the cooldown is over -- and the stretch is
+    # now long enough that it points to people rather than to /talk.
+    assert due_notice(store, DAY + timedelta(days=7))[0] == "safety"
+
+
+def test_two_low_days_are_not_enough(store):
+    _days(store, [4, 2, 2])
+    assert due_notice(store, DAY) is None
+
+
+def test_a_week_of_low_days_points_to_people(store):
+    _days(store, [2, 1, 2, 2, 1, 2, 2])
+    assert due_notice(store, DAY) == ("safety", SAFETY_LOW)
+
+
+def test_three_unanswered_questions_offer_talk_before_the_fourth(store):
+    for back in (3, 2, 1):
+        store.log_prompt(DAY - timedelta(days=back), "daily")
+    assert due_notice(store, DAY) is None
+    assert due_notice(store, DAY, silence=True) == ("talk_offer", OFFER)
+
+
+def test_an_answered_question_breaks_the_silence(store):
+    for back in (3, 2, 1):
+        store.log_prompt(DAY - timedelta(days=back), "daily")
+    store.upsert(DAY - timedelta(days=2), 4)
+    assert due_notice(store, DAY, silence=True) is None
+
+
+def test_a_drop_against_the_month_before_offers_talk(store):
+    for back in range(8, 20):
+        store.upsert(DAY - timedelta(days=back), 4)
+    _days(store, [3, 3, 3])
+    assert due_notice(store, DAY) == ("talk_offer", OFFER)
+
+
+def test_a_drop_needs_enough_days_on_both_sides(store):
+    for back in range(8, 12):
+        store.upsert(DAY - timedelta(days=back), 5)
+    _days(store, [3, 3, 3])
+    assert due_notice(store, DAY) is None
+
+
+async def test_a_crisis_message_gets_the_safety_line(store, monkeypatch):
+    monkeypatch.setattr("alliegent.mood.checkin_day", lambda now: DAY)
+    bot = _bot(store)
+    bot.notify = AsyncMock()
+    await bot.on_message(_message("2 오늘은 정말 죽고 싶다"))
+    bot.notify.assert_awaited_once_with(SAFETY_NOW, "mood")
+    assert "109" in SAFETY_NOW
+
+
+async def test_a_crisis_in_a_long_entry_is_noticed_too(store, monkeypatch):
+    monkeypatch.setattr("alliegent.mood.checkin_day", lambda now: DAY)
+    bot = _bot(store)
+    bot.notify = AsyncMock()
+    await bot.on_message(_message("긴 하루였다\n가끔 사라지고 싶다는 생각이 든다"))
+    bot.notify.assert_awaited_once_with(SAFETY_NOW, "mood")
+
+
+async def test_the_offer_replaces_the_question_after_three_silent_days(store):
+    jobs, sent = _jobs(store)
+    for back in (3, 2, 1):
+        store.log_prompt(DAY - timedelta(days=back), "daily")
+    await jobs.run_mood_checkin()
+    assert sent == [(OFFER, "mood")]
