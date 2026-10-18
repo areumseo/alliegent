@@ -272,6 +272,9 @@ class Schedule(BaseModel):
     # The one question #mood asks each day. Silent if the day already has a
     # check-in. Blank the time to switch it off.
     mood_checkin: str = "21:00"
+    # The week in #mood, after Sunday's check-in has had its chance.
+    mood_week_weekday: str = "sun"
+    mood_week_time: str = "21:30"
 
     @field_validator("incomplete_alert", mode="before")
     @classmethod

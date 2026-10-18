@@ -295,3 +295,181 @@ def transcribe(path: Path, model: str) -> str:
         # mlx-whisper decodes audio with the ffmpeg binary.
         raise VoiceUnavailable("ffmpeg is not installed (brew install ffmpeg)") from exc
     return str(result.get("text", "")).strip()
+
+
+# -- the week ------------------------------------------------------------------
+
+# Words too common in a mood note to say anything when they repeat.
+_STOPWORDS = {
+    "the",
+    "and",
+    "but",
+    "was",
+    "for",
+    "with",
+    "too",
+    "very",
+    "just",
+    "today",
+    "really",
+    "bit",
+    "lot",
+    "day",
+    "got",
+    "not",
+    "had",
+    "have",
+    "feel",
+    "felt",
+    "오늘",
+    "너무",
+    "그냥",
+    "진짜",
+    "조금",
+    "많이",
+    "정말",
+    "하루",
+    "그래도",
+    "약간",
+    "계속",
+    "다시",
+    "그리고",
+    "근데",
+    "했다",
+    "했어",
+    "같아",
+    "있었다",
+}
+# Particles that turn one Korean word into several. Stripped longest first,
+# and only when what is left still has two characters.
+_PARTICLES = sorted(
+    [
+        "에서",
+        "에게",
+        "으로",
+        "이랑",
+        "하고",
+        "까지",
+        "부터",
+        "보다",
+        "은",
+        "는",
+        "이",
+        "가",
+        "을",
+        "를",
+        "에",
+        "도",
+        "로",
+        "와",
+        "과",
+        "랑",
+        "의",
+    ],
+    key=len,
+    reverse=True,
+)
+
+
+def _words(text: str) -> set[str]:
+    out = set()
+    for word in re.findall(r"[\w']+", text.casefold()):
+        for particle in _PARTICLES:
+            if word.endswith(particle) and len(word) - len(particle) >= 2:
+                word = word[: -len(particle)]
+                break
+        if len(word) >= 2 and not word.isdigit() and word not in _STOPWORDS:
+            out.add(word)
+    return out
+
+
+def repeated_words(
+    entries: list[Checkin], *, least: int = 2, limit: int = 5
+) -> list[tuple[str, int]]:
+    """Words in two or more days' notes, with how many days.
+
+    Read from notes, summaries and keywords only. Long entries are not read:
+    what this finds is posted back to the channel, and an entry is never quoted.
+    """
+    counts: dict[str, int] = {}
+    for entry in entries:
+        text = " ".join(t for t in (entry.note, entry.summary, entry.keywords) if t)
+        for word in _words(text):
+            counts[word] = counts.get(word, 0) + 1
+    ranked = sorted(
+        ((w, n) for w, n in counts.items() if n >= least), key=lambda pair: (-pair[1], pair[0])
+    )
+    return ranked[:limit]
+
+
+def average(entries: list[Checkin]) -> float | None:
+    scores = [e.score for e in entries if e.score is not None]
+    return sum(scores) / len(scores) if scores else None
+
+
+def week_report(
+    end: date,
+    entries: list[Checkin],
+    *,
+    before: list[Checkin] = (),
+    agenda: dict[date, tuple[int, int]] | None = None,
+) -> str | None:
+    """Seven days to `end`: each day's score, what got done, and what repeats.
+
+    Facts only. It says what the scores were and what came up more than once;
+    it does not say what they mean. `agenda` is each day's (done, planned),
+    when the agenda could be read. None when the week has no check-ins.
+    """
+    from . import reports
+
+    if not any(e.score is not None or e.note for e in entries):
+        return None
+    start = end - timedelta(days=6)
+    by_day = {e.day: e for e in entries}
+    rows = []
+    for offset in range(7):
+        day = start + timedelta(days=offset)
+        entry = by_day.get(day)
+        score = entry.score if entry and entry.score is not None else None
+        done = ""
+        if agenda is not None:
+            finished, planned = agenda.get(day, (0, 0))
+            done = f"{finished}/{planned}" if planned else "-"
+        rows.append(
+            (
+                reports.fmt_date(day),
+                str(score) if score is not None else "-",
+                "#" * score if score else "",
+                done,
+            )
+        )
+    lines = [f"🌙 **Mood — {reports.fmt_date(start)} to {reports.fmt_date(end)}**", ""]
+    lines += reports._table(("Day", "Score", "", "Done"), rows, flex=2, right=(1, 3), optional=(3,))
+
+    mean = average(entries)
+    scored = sum(1 for e in entries if e.score is not None)
+    if mean is not None:
+        line = f"Average {mean:.1f} over {scored} day{'s' * (scored != 1)}"
+        previous = average(list(before))
+        if previous is not None:
+            line += f" (the week before: {previous:.1f})"
+        lines.append(line + ".")
+
+    if agenda is not None:
+        low = [d for d in by_day if (by_day[d].score or 3) <= 2 and agenda.get(d, (0, 0))[1]]
+        high = [d for d in by_day if (by_day[d].score or 0) >= 4 and agenda.get(d, (0, 0))[1]]
+        if low and high:
+
+            def rate(days: list[date]) -> int:
+                done = sum(agenda[d][0] for d in days)
+                planned = sum(agenda[d][1] for d in days)
+                return round(done / planned * 100)
+
+            lines.append(
+                f"Agenda done: {rate(low)}% on days scored 1-2, {rate(high)}% on days scored 4-5."
+            )
+
+    words = repeated_words(entries)
+    if words:
+        lines.append("Came up more than once: " + ", ".join(f"{w} ({n})" for w, n in words) + ".")
+    return "\n".join(lines)

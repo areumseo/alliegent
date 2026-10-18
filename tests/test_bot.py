@@ -37,6 +37,7 @@ EXPECTED = {
     "karrot",
     "assets",
     "checkin",
+    "week",
 }
 
 
@@ -241,6 +242,7 @@ COMMAND_CHANNELS = {
     "news": "news",
     "karrot": "karrot",
     "assets": "assets",
+    "week": "mood",
 }
 
 # Short write confirmations answer in place: routing a one-line "Added — X"
@@ -257,7 +259,8 @@ def test_every_command_either_routes_or_is_deliberately_inline():
 
 def test_routed_kinds_all_resolve_to_a_channel():
     secrets = Secrets(discord_channel_id=1)
-    for kind in set(COMMAND_CHANNELS.values()):
+    # Except #mood, which deliberately has no fallback (see test_mood).
+    for kind in set(COMMAND_CHANNELS.values()) - {"mood"}:
         assert secrets.channel_for(kind) > 0
 
 

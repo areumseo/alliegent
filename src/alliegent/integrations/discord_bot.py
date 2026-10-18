@@ -1739,6 +1739,20 @@ def _register(bot: AlliegentBot) -> None:
             mood.confirmation(entry), ephemeral=private
         )
 
+    @tree.command(name="week", description="The last seven days in #mood")
+    async def week_cmd(interaction: discord.Interaction) -> None:
+        private = interaction.channel_id != bot.secrets.discord_mood_channel_id
+        await interaction.response.defer(ephemeral=private)
+        if bot.mood is None:
+            await interaction.followup.send("⚠️ DISCORD_MOOD_CHANNEL_ID is not set.")
+            return
+        day = mood.checkin_day(datetime.now(bot.config.tz))
+        message = await bot.jobs.build_mood_week(day)
+        if message is None:
+            await interaction.followup.send("No check-ins in the last seven days.")
+            return
+        await _deliver(bot, interaction, message, "mood")
+
     @tree.command(name="brief", description="Run the daily brief now")
     async def brief_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.defer()

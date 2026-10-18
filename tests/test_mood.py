@@ -15,6 +15,7 @@ from alliegent.jobs import Jobs
 from alliegent.mood import (
     NOTE_MAX,
     PROMPT,
+    Checkin,
     MoodStore,
     Reply,
     VoiceUnavailable,
@@ -22,6 +23,7 @@ from alliegent.mood import (
     confirmation,
     parse_reply,
     parse_score,
+    week_report,
 )
 
 from .conftest import FakeNotionClient
@@ -294,3 +296,60 @@ async def test_voice_without_mlx_says_so(store, monkeypatch):
     await bot.on_message(message)
     assert store.get(DAY) is None
     assert "Could not transcribe" in message.reply.await_args.args[0]
+
+
+# -- step 3: the week ------------------------------------------------------------
+
+
+def _entry(day, score, note=None):
+    return Checkin(day=day, score=score, note=note, summary=None, keywords=None)
+
+
+def test_week_report_lists_every_day_and_the_average():
+    end = DAY
+    entries = [
+        _entry(date(2026, 10, 13), 2, "회사에서 회의가 길었다"),
+        _entry(date(2026, 10, 15), 4, "운동 후 개운"),
+        _entry(date(2026, 10, 17), 3, "회사 일이 많음, 운동"),
+    ]
+    agenda = {date(2026, 10, 13): (1, 4), date(2026, 10, 15): (3, 3)}
+    text = week_report(end, entries, before=[_entry(date(2026, 10, 8), 4)], agenda=agenda)
+    assert "Mon 10/12 to Sun 10/18" in text
+    assert "Average 3.0 over 3 days (the week before: 4.0)." in text
+    assert "Agenda done: 25% on days scored 1-2, 100% on days scored 4-5." in text
+    assert "회사 (2)" in text and "운동 (2)" in text
+    # Seven rows, scored or not.
+    assert text.count("\n") >= 10
+    assert "3 ###" in text
+
+
+def test_week_report_leaves_raw_entries_out():
+    entries = [
+        Checkin(day=DAY, score=2, note=None, summary=None, keywords=None),
+    ]
+    # Raw text is not even a field on a Checkin: the report cannot quote it.
+    assert "raw" not in Checkin.__dataclass_fields__
+    assert week_report(DAY, entries) is not None
+
+
+def test_week_report_is_silent_without_check_ins():
+    assert week_report(DAY, []) is None
+
+
+def test_week_report_drops_the_agenda_column_when_unreadable():
+    text = week_report(DAY, [_entry(DAY, 3)], agenda=None)
+    assert "Done" not in text
+    assert "Agenda done" not in text
+
+
+async def test_mood_week_job_posts_to_mood(store):
+    jobs, sent = _jobs(store)
+    store.upsert(DAY, 3)
+    await jobs.run_mood_week()
+    assert len(sent) == 1 and sent[0][1] == "mood"
+
+
+async def test_mood_week_job_is_silent_on_an_empty_week(store):
+    jobs, sent = _jobs(store)
+    await jobs.run_mood_week()
+    assert sent == []

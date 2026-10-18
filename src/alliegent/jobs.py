@@ -426,6 +426,36 @@ class Jobs:
         await self.notify(mood.PROMPT, "mood")
         self.mood.log_prompt(today, "daily")
 
+    async def build_mood_week(self, end: date | None = None) -> str | None:
+        """The seven days to `end` in #mood, beside what the agenda got done.
+
+        Read locally and posted to #mood; nothing goes to a model. The agenda
+        column is dropped, not the report, when Notion cannot be read.
+        """
+        if self.mood is None:
+            return None
+        from . import mood
+        from .reports import finished
+
+        end = end or self.today()
+        start = end - timedelta(days=6)
+        entries = self.mood.between(start, end)
+        before = self.mood.between(start - timedelta(days=7), start - timedelta(days=1))
+        agenda: dict[date, tuple[int, int]] | None = {}
+        try:
+            for item in await self.agenda.items_between(start, end):
+                if item.day is None or item.canceled:
+                    continue
+                done, planned = agenda.get(item.day, (0, 0))
+                agenda[item.day] = (done + finished(item), planned + 1)
+        except Exception:
+            log.exception("agenda unreadable for the mood week")
+            agenda = None
+        return mood.week_report(end, entries, before=before, agenda=agenda)
+
+    async def run_mood_week(self) -> None:
+        await self._send(await self.build_mood_week(), "mood")
+
     async def run_bonus_rollover(self) -> None:
         if self.assets is None:
             return

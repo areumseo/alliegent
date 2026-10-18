@@ -42,6 +42,8 @@ weekly_review_weekday = "sun"
 weekly_review_time = "21:00"
 # #mood: the one check-in question a day. Blank switches it off.
 mood_checkin = "21:00"
+mood_week_weekday = "sun"
+mood_week_time = "21:30"
 
 [plans]
 # Vested + SNOW as a share of Liquid, above which the check warns.

@@ -25,6 +25,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | Karrot candidates | Mon 09:00 | What is decided on but not yet listed. Silent when there is nothing waiting |
 | Karrot sales | Sat 20:00 | The week's sales, with the month, the year and the running total. Silent when nothing sold and nothing is owed |
 | Weekly review | Sun 21:00 | Completion stats for the past week as a review draft |
+| Mood week | Sun 21:30 | The last seven days in `#mood`: each day's score beside what the agenda got done, the average against the week before, and words that came up in more than one note. Silent on a week with no check-ins |
 | Mood check-in | 21:00 daily | One question in `#mood`. Silent on a day already checked in or already asked. Off unless `DISCORD_MOOD_CHANNEL_ID` is set |
 
 The evening alert stays silent when there is nothing pending. A daily "all clear" ping trains you to ignore the channel, so only the morning brief is unconditional — and it distinguishes a day you finished from a day with nothing on it, rather than reporting both as empty.
@@ -47,6 +48,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/assets show` · `/assets trend` · `/assets plan` · `/assets gain <amount> [month]` · `/assets retirement` | Latest snapshot with what changed, the recent history, the latest snapshot against the month it is heading for, a realised gain on foreign shares recorded against the year's allowance, and income after retirement in won a month |
 | `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `spent`, `bought`, `sales`, `summary` |
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
+| `/week` | The last seven days in `#mood`, as Sunday's post has them. Posted to `#mood` wherever it is typed |
 | `/checkin <score> [note]` | Record today's mood, 1 to 5 or a face, with an optional one-line note. A second check-in the same day replaces the score. Seen only by you unless typed in `#mood`. See [Mood check-in](#mood-check-in) |
 
 Everything the bot writes in Discord is English, so nothing needs an input-method switch — except English quiz situations, for the reason given below. Data keeps the language it arrived in — Karrot item names are Korean because they are quoted from a Korean marketplace. Korean date words are still accepted as `when` values.
@@ -312,6 +314,8 @@ A score is a digit from 1 to 5 or a face (😞 1, 😕 2, 😐 3, 😊 4, 😁 5
 - Anything longer, or on more than one line, is kept whole as the day's entry. The bot does not summarise it or guess a score from it; send a number or a face to score the day.
 - A voice memo is transcribed on the Mac mini with [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) and kept as an entry, like long text. It needs Apple Silicon and `brew install ffmpeg`; the model (`[mood] whisper_model`, about 1.6 GB) downloads from Hugging Face the first time. The audio is deleted once transcribed.
 - A second answer the same day overwrites what it carries and keeps the rest. Anything sent before 04:00 counts for the day before.
+
+**The week** is worked out on the machine, with no model involved. It states what the scores were, how much of the agenda got done on low and high days, and which words repeated in notes; it does not say what any of that means. Long entries and transcripts are never read for it.
 
 **What may leave the machine.** Only scores and one-line notes may ever be sent to the Anthropic API, for the weekly summary and `/talk`. Long entries and transcripts stay in `mood.db`. Mentioning the bot in `#mood` is still a check-in, so nothing written there goes to the chat agent.
 
