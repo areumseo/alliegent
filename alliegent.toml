@@ -44,6 +44,9 @@ weekly_review_time = "21:00"
 mood_checkin = "21:00"
 mood_week_weekday = "sun"
 mood_week_time = "21:30"
+mood_cleanup = "04:30"
+mood_backup_weekday = "sun"
+mood_backup_time = "22:00"
 
 [plans]
 # Vested + SNOW as a share of Liquid, above which the check warns.
@@ -104,3 +107,9 @@ done = "Done"
 db_path = "data/mood.db"
 # Voice memos are transcribed on this machine (Apple Silicon + ffmpeg).
 whisper_model = "mlx-community/whisper-large-v3-turbo"
+# Long entries and transcripts are cleared after this many days.
+raw_retention_days = 14
+# A folder on the external disk for the weekly encrypted backup. It must
+# exist; the bot never creates it. Blank switches backups off.
+backup_dir = ""
+backup_keep = 8

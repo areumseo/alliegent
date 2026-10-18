@@ -26,6 +26,8 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | Karrot sales | Sat 20:00 | The week's sales, with the month, the year and the running total. Silent when nothing sold and nothing is owed |
 | Weekly review | Sun 21:00 | Completion stats for the past week as a review draft |
 | Mood week | Sun 21:30 | The last seven days in `#mood`: each day's score beside what the agenda got done, the average against the week before, and words that came up in more than one note. Silent on a week with no check-ins |
+| Mood cleanup | 04:30 daily | Clears long entries and transcripts older than 14 days (`[mood] raw_retention_days`); scores and notes stay |
+| Mood backup | Sun 22:00 | An encrypted copy of `mood.db` on the external disk. Says so in `#mood` when the disk is not connected. Off unless `[mood] backup_dir` is set |
 | Mood check-in | 21:00 daily | One question in `#mood`. Silent on a day already checked in or already asked. Off unless `DISCORD_MOOD_CHANNEL_ID` is set |
 
 The evening alert stays silent when there is nothing pending. A daily "all clear" ping trains you to ignore the channel, so only the morning brief is unconditional — and it distinguishes a day you finished from a day with nothing on it, rather than reporting both as empty.
@@ -50,6 +52,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
 | `/week` | The last seven days in `#mood`, as Sunday's post has them. Posted to `#mood` wherever it is typed |
 | `/talk` | The last two weeks of `#mood` as one block of text to paste into a conversation elsewhere: scores, averages, sharp changes, low stretches, repeated words and notes. Never includes long entries or transcripts. Seen only by you unless typed in `#mood` |
+| `/forget <when>` | Delete one day's `#mood` check-in (`2026-10-18`, `10-18`, `today`, `yesterday`) or `all` of them. Answered only to you |
 | `/checkin <score> [note]` | Record today's mood, 1 to 5 or a face, with an optional one-line note. A second check-in the same day replaces the score. Seen only by you unless typed in `#mood`. See [Mood check-in](#mood-check-in) |
 
 Everything the bot writes in Discord is English, so nothing needs an input-method switch — except English quiz situations, for the reason given below. Data keeps the language it arrived in — Karrot item names are Korean because they are quoted from a Korean marketplace. Korean date words are still accepted as `when` values.
@@ -327,6 +330,20 @@ A score is a digit from 1 to 5 or a face (😞 1, 😕 2, 😐 3, 😊 4, 😁 5
 When one fires, `#mood` gets one line, once: an offer to talk, with `/talk` to start from. It is not repeated for seven days and never followed up. After three unanswered evenings the offer goes out instead of a fourth question.
 
 **The safety line.** Seven or more days in a row scored 2 or lower, or anything written in `#mood` that suggests danger (죽고 싶다, 자해, *want to die*, and similar), gets a different message instead: reach someone close, or call 자살예방상담전화 **109** (24 hours), or 112 / 119 in an emergency. The danger message is sent every time, with no cooldown. These are the one place `#mood` writes Korean, because the line it points to is a Korean service. The bot does not diagnose, assess or interpret, and gives no advice nobody asked for.
+
+**Keeping and forgetting.** Long entries and transcripts are cleared after 14 days; scores and one-line notes are kept. Deleted and cleared text is overwritten in the file (`secure_delete`), and `/forget all` also vacuums it. Copies in backups made before a `/forget` remain until those backups rotate out.
+
+**Backups** go to a folder on the external disk, once a week, encrypted. Set it up once:
+
+```bash
+uv run python -m alliegent.mood newkey     # prints a key
+```
+
+Put the key in `.env` as `MOOD_BACKUP_KEY`, and keep a second copy somewhere other than the Mac mini (a password manager): without it the backups cannot be read. Then set `backup_dir` under `[mood]` in `alliegent.toml` to a folder on the disk, for example `/Volumes/Backup/alliegent-mood`, and create that folder. The bot never creates it, because a folder created while the disk is unplugged would land on the internal drive. The last eight backups are kept (`backup_keep`). To restore one:
+
+```bash
+uv run python -m alliegent.mood restore /Volumes/Backup/alliegent-mood/mood-2026-10-18.db.enc restored.db
+```
 
 **What may leave the machine.** Nothing, as built: no part of `#mood` calls a model. The rule if one is ever added is that only scores and one-line notes may be sent; long entries and transcripts stay in `mood.db`. `/talk` is for carrying elsewhere by hand, so it follows the same rule. Mentioning the bot in `#mood` is still a check-in, so nothing written there goes to the chat agent.
 

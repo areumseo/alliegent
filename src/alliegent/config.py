@@ -102,6 +102,10 @@ class Secrets(BaseSettings):
     # feature off. Unlike every other channel it never falls back to the
     # default, so a check-in can never land somewhere public.
     discord_mood_channel_id: int = 0
+    # Encrypts the weekly #mood backup. Make one with
+    # `uv run python -m alliegent.mood newkey` and keep a copy somewhere other
+    # than this machine: without it the backups cannot be read.
+    mood_backup_key: str = ""
 
     @field_validator(
         "discord_guild_id",
@@ -275,6 +279,10 @@ class Schedule(BaseModel):
     # The week in #mood, after Sunday's check-in has had its chance.
     mood_week_weekday: str = "sun"
     mood_week_time: str = "21:30"
+    # Long entries past their retention are cleared each night.
+    mood_cleanup: str = "04:30"
+    mood_backup_weekday: str = "sun"
+    mood_backup_time: str = "22:00"
 
     @field_validator("incomplete_alert", mode="before")
     @classmethod
@@ -336,6 +344,13 @@ class MoodConfig(BaseModel):
     # Voice memos are transcribed on this machine by mlx-whisper. Downloaded
     # from Hugging Face on first use (about 1.6 GB), then cached.
     whisper_model: str = "mlx-community/whisper-large-v3-turbo"
+    # Long entries and transcripts are cleared after this many days; the
+    # score and the note stay.
+    raw_retention_days: int = 14
+    # Where the weekly encrypted backup goes: a folder on the external disk,
+    # which must exist. Blank switches backups off.
+    backup_dir: str = ""
+    backup_keep: int = 8
 
     @property
     def resolved_path(self) -> Path:

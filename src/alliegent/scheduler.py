@@ -42,6 +42,8 @@ JOB_CHANNELS = {
     "build_costs": "build",
     "mood_checkin": "mood",
     "mood_week": "mood",
+    "mood_cleanup": "mood",
+    "mood_backup": "mood",
 }
 
 
@@ -125,6 +127,14 @@ def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
             time=sched.mood_week_time,
             day_of_week=sched.mood_week_weekday,
         )
+        add("mood_cleanup", jobs.run_mood_cleanup, time=sched.mood_cleanup)
+        if config.mood.backup_dir:
+            add(
+                "mood_backup",
+                jobs.run_mood_backup,
+                time=sched.mood_backup_time,
+                day_of_week=sched.mood_backup_weekday,
+            )
     if sched.bonus_rollover_time.strip() and sched.bonus_rollover_months:
         hour, minute = _hhmm(sched.bonus_rollover_time)
         months = ",".join(str(m) for m in sched.bonus_rollover_months)

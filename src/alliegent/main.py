@@ -157,6 +157,10 @@ async def main() -> None:
     mood = (
         MoodStore(config.mood.resolved_path) if secrets.discord_mood_channel_id else None
     )
+    # Logged, not fatal: one feature's missing setting must not stop the bot
+    # (see enabled_routes). The weekly run says so in #mood as well.
+    if mood is not None and config.mood.backup_dir and not secrets.mood_backup_key:
+        log.error("MOOD_BACKUP_KEY not set — the weekly mood backup will not run")
 
     def make_bot(enable_chat: bool) -> AlliegentBot:
         return AlliegentBot(

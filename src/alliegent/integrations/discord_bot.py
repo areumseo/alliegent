@@ -1792,6 +1792,40 @@ def _register(bot: AlliegentBot) -> None:
         )
         bot.mood.mark_answered("talk_offer")
 
+    @tree.command(name="forget", description="Delete #mood check-ins: one day, or all")
+    @app_commands.describe(when="A date (2026-10-18, 10-18, today, yesterday) or 'all'")
+    async def forget_cmd(interaction: discord.Interaction, when: str) -> None:
+        if bot.mood is None:
+            await interaction.response.send_message(
+                "⚠️ DISCORD_MOOD_CHANNEL_ID is not set.", ephemeral=True
+            )
+            return
+        # Always private: what was deleted is nobody else's business either.
+        if when.strip().casefold() == "all":
+            day = None
+        else:
+            try:
+                text = when.strip().casefold()
+                today = mood.checkin_day(datetime.now(bot.config.tz))
+                if text in {"yesterday", "어제"}:
+                    day = today - timedelta(days=1)
+                else:
+                    day = parse_day(text, today)
+            except ValueError as exc:
+                await interaction.response.send_message(f"⚠️ {exc}", ephemeral=True)
+                return
+        count = bot.mood.forget(day)
+        what = "everything" if day is None else reports.fmt_date(day)
+        backups = (
+            " Copies in backups made before now remain until they rotate out."
+            if bot.config.mood.backup_dir and count
+            else ""
+        )
+        await interaction.response.send_message(
+            f"🗑️ Deleted {what} ({count} check-in{'s' * (count != 1)}).{backups}",
+            ephemeral=True,
+        )
+
     @tree.command(name="brief", description="Run the daily brief now")
     async def brief_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.defer()

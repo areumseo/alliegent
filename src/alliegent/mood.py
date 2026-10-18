@@ -15,7 +15,7 @@ import os
 import re
 import sqlite3
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -101,6 +101,9 @@ class MoodStore:
     def _connect(self) -> Iterator[sqlite3.Connection]:
         db = sqlite3.connect(self.path)
         db.row_factory = sqlite3.Row
+        # Deleted and cleared text is overwritten in the file, not just
+        # unlinked from it: forgetting should not leave it in free pages.
+        db.execute("PRAGMA secure_delete = ON")
         try:
             with db:
                 yield db
@@ -205,6 +208,39 @@ class MoodStore:
                 """,
                 (kind,),
             )
+
+    def clear_raw(self, before: date) -> int:
+        """Drop the long entries of days before `before`; scores and notes stay."""
+        with self._connect() as db:
+            cursor = db.execute(
+                "UPDATE checkin SET raw_text = NULL WHERE date < ? AND raw_text IS NOT NULL",
+                (before.isoformat(),),
+            )
+        return cursor.rowcount
+
+    def forget(self, day: date | None) -> int:
+        """Delete one day's check-in, or everything when `day` is None."""
+        with self._connect() as db:
+            if day is None:
+                count = db.execute("DELETE FROM checkin").rowcount
+                db.execute("DELETE FROM prompt_log")
+            else:
+                count = db.execute(
+                    "DELETE FROM checkin WHERE date = ?", (day.isoformat(),)
+                ).rowcount
+        if day is None:
+            with closing(sqlite3.connect(self.path)) as db:
+                db.execute("VACUUM")
+        return count
+
+    def snapshot(self) -> bytes:
+        """The whole database as bytes, consistent even mid-write."""
+        with (
+            closing(sqlite3.connect(self.path)) as source,
+            closing(sqlite3.connect(":memory:")) as copy,
+        ):
+            source.backup(copy)
+            return copy.serialize()
 
     def has_raw(self, day: date) -> bool:
         with self._connect() as db:
@@ -700,3 +736,84 @@ def due_notice(store: MoodStore, today: date, *, silence: bool = False) -> tuple
         )
         fired = enough and now is not None and then is not None and then - now >= DROP
     return ("talk_offer", OFFER) if fired else None
+
+
+# -- retention and backup ------------------------------------------------------
+
+BACKUP_PREFIX = "mood-"
+BACKUP_SUFFIX = ".db.enc"
+
+
+class BackupSkipped(RuntimeError):
+    """The backup folder is not there -- usually the disk is not plugged in."""
+
+
+def new_backup_key() -> str:
+    from cryptography.fernet import Fernet
+
+    return Fernet.generate_key().decode()
+
+
+def backup(store: MoodStore, folder: Path, key: str, day: date, *, keep: int) -> Path:
+    """Write an encrypted copy of the database into `folder`, keeping `keep`.
+
+    The folder must already exist: it is on an external disk, and creating
+    it when the disk is missing would put the backup on the internal one
+    under /Volumes, which is exactly where it should not be.
+    """
+    from cryptography.fernet import Fernet
+
+    if not folder.is_dir():
+        raise BackupSkipped(f"{folder} is not there")
+    target = folder / f"{BACKUP_PREFIX}{day.isoformat()}{BACKUP_SUFFIX}"
+    sealed = Fernet(key.encode()).encrypt(store.snapshot())
+    partial = target.with_suffix(".partial")
+    fd = os.open(partial, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(sealed)
+    partial.replace(target)
+    for old in sorted(folder.glob(f"{BACKUP_PREFIX}*{BACKUP_SUFFIX}"))[:-keep]:
+        old.unlink()
+    return target
+
+
+def restore(source: Path, key: str, out: Path) -> None:
+    """Decrypt a backup into a database file at `out`, owner-only."""
+    from cryptography.fernet import Fernet
+
+    data = Fernet(key.encode()).decrypt(source.read_bytes())
+    if out.exists():
+        raise FileExistsError(f"{out} exists; restore into a new path")
+    fd = os.open(out, os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(data)
+
+
+def _main() -> None:
+    """`python -m alliegent.mood newkey` or `... restore BACKUP OUT`.
+
+    The key is read from MOOD_BACKUP_KEY, as the bot reads it.
+    """
+    import argparse
+
+    from .config import get_secrets
+
+    parser = argparse.ArgumentParser(prog="python -m alliegent.mood")
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("newkey", help="print a new backup key")
+    restoring = commands.add_parser("restore", help="decrypt a backup")
+    restoring.add_argument("backup", type=Path)
+    restoring.add_argument("out", type=Path)
+    args = parser.parse_args()
+    if args.command == "newkey":
+        print(new_backup_key())
+        return
+    key = get_secrets().mood_backup_key
+    if not key:
+        raise SystemExit("MOOD_BACKUP_KEY is not set.")
+    restore(args.backup, key, args.out)
+    print(f"Restored to {args.out}")
+
+
+if __name__ == "__main__":
+    _main()

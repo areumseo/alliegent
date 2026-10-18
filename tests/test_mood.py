@@ -19,17 +19,21 @@ from alliegent.mood import (
     SAFETY_LOW,
     SAFETY_NOW,
     TALK_NOTE_MAX,
+    BackupSkipped,
     Checkin,
     MoodStore,
     Reply,
     VoiceUnavailable,
+    backup,
     checkin_day,
     confirmation,
     due_notice,
     low_runs,
     mentions_crisis,
+    new_backup_key,
     parse_reply,
     parse_score,
+    restore,
     talk_summary,
     week_report,
 )
@@ -506,3 +510,92 @@ async def test_the_offer_replaces_the_question_after_three_silent_days(store):
         store.log_prompt(DAY - timedelta(days=back), "daily")
     await jobs.run_mood_checkin()
     assert sent == [(OFFER, "mood")]
+
+
+# -- step 6: retention, backup, /forget ---------------------------------------------
+
+
+def test_clearing_raw_keeps_scores_and_notes(store):
+    old, recent = DAY - timedelta(days=15), DAY - timedelta(days=3)
+    store.record(old, score=2, note="short", raw_text="long old entry")
+    store.record(recent, score=3, raw_text="long recent entry")
+    assert store.clear_raw(DAY - timedelta(days=14)) == 1
+    assert not store.has_raw(old) and store.has_raw(recent)
+    assert (store.get(old).score, store.get(old).note) == (2, "short")
+
+
+def test_cleared_text_is_not_left_in_the_file(store):
+    store.record(DAY - timedelta(days=30), score=2, raw_text="UNIQUEMARKER" * 50)
+    store.clear_raw(DAY)
+    assert b"UNIQUEMARKER" not in store.path.read_bytes()
+
+
+def test_forget_one_day_or_everything(store):
+    store.upsert(DAY, 3, "today")
+    store.upsert(DAY - timedelta(days=1), 2, "SECRETNOTE")
+    store.log_prompt(DAY, "daily")
+    assert store.forget(DAY - timedelta(days=1)) == 1
+    assert store.get(DAY) is not None and store.get(DAY - timedelta(days=1)) is None
+    assert b"SECRETNOTE" not in store.path.read_bytes()
+    assert store.forget(None) == 1
+    assert store.between(DAY - timedelta(days=30), DAY) == []
+    assert not store.prompted(DAY, "daily")
+
+
+def test_backup_round_trip_and_rotation(store, tmp_path):
+    folder = tmp_path / "disk"
+    folder.mkdir()
+    key = new_backup_key()
+    store.upsert(DAY, 4, "kept")
+    for back in range(4, -1, -1):
+        written = backup(store, folder, key, DAY - timedelta(weeks=back), keep=3)
+    assert stat.S_IMODE(written.stat().st_mode) == 0o600
+    assert sorted(p.name for p in folder.iterdir()) == [
+        "mood-2026-10-04.db.enc",
+        "mood-2026-10-11.db.enc",
+        "mood-2026-10-18.db.enc",
+    ]
+    assert b"kept" not in written.read_bytes()
+    out = tmp_path / "restored.db"
+    restore(written, key, out)
+    assert MoodStore(out).get(DAY).note == "kept"
+
+
+def test_backup_does_not_create_a_missing_disk(store, tmp_path):
+    with pytest.raises(BackupSkipped):
+        backup(store, tmp_path / "Volumes" / "Gone", new_backup_key(), DAY, keep=8)
+    assert not (tmp_path / "Volumes").exists()
+
+
+def test_restore_never_overwrites(store, tmp_path):
+    folder = tmp_path / "disk"
+    folder.mkdir()
+    key = new_backup_key()
+    written = backup(store, folder, key, DAY, keep=8)
+    with pytest.raises(FileExistsError):
+        restore(written, key, store.path)
+
+
+async def test_backup_job_says_when_the_disk_is_missing(store, tmp_path):
+    jobs, sent = _jobs(store)
+    jobs.config.mood.backup_dir = str(tmp_path / "missing")
+    jobs._secrets = Secrets(mood_backup_key=new_backup_key())
+    await jobs.run_mood_backup()
+    assert len(sent) == 1 and "Mood backup skipped" in sent[0][0] and sent[0][1] == "mood"
+
+
+async def test_cleanup_job_uses_the_configured_retention(store):
+    jobs, _ = _jobs(store)
+    store.record(DAY - timedelta(days=15), score=2, raw_text="old")
+    store.record(DAY - timedelta(days=13), score=2, raw_text="recent")
+    await jobs.run_mood_cleanup()
+    assert not store.has_raw(DAY - timedelta(days=15))
+    assert store.has_raw(DAY - timedelta(days=13))
+
+
+async def test_backup_job_says_when_the_key_is_missing(store, tmp_path):
+    jobs, sent = _jobs(store)
+    jobs.config.mood.backup_dir = str(tmp_path)
+    await jobs.run_mood_backup()
+    assert sent == [("⚠️ Mood backup skipped: MOOD_BACKUP_KEY is not set.", "mood")]
+    assert list(tmp_path.iterdir()) == [store.path.parent]

@@ -464,6 +464,39 @@ class Jobs:
     async def run_mood_week(self) -> None:
         await self._send(await self.build_mood_week(), "mood")
 
+    async def run_mood_cleanup(self) -> None:
+        if self.mood is None:
+            return
+        days = self.config.mood.raw_retention_days
+        cleared = self.mood.clear_raw(self.today() - timedelta(days=days))
+        log.info("cleared %d mood entries past %d days", cleared, days)
+
+    async def run_mood_backup(self) -> None:
+        """The weekly encrypted copy. Says so in #mood when the disk is missing,
+        since a backup that quietly stops is found out when it is needed."""
+        if self.mood is None or not self.config.mood.backup_dir:
+            return
+        from pathlib import Path
+
+        from . import mood
+
+        folder = Path(self.config.mood.backup_dir).expanduser()
+        key = self._secrets.mood_backup_key if self._secrets else ""
+        if not key:
+            await self.notify("⚠️ Mood backup skipped: MOOD_BACKUP_KEY is not set.", "mood")
+            return
+        try:
+            await asyncio.to_thread(
+                mood.backup, self.mood, folder, key, self.today(), keep=self.config.mood.backup_keep
+            )
+        except mood.BackupSkipped:
+            await self.notify(
+                f"⚠️ Mood backup skipped: `{folder}` is not there. Is the disk connected?",
+                "mood",
+            )
+            return
+        log.info("mood backup written")
+
     async def run_bonus_rollover(self) -> None:
         if self.assets is None:
             return
