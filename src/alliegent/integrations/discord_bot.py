@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import tempfile
 from collections.abc import Coroutine
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from time import monotonic
 from typing import Any
 
@@ -15,7 +17,7 @@ from discord import app_commands
 
 from .. import ask as ask_module
 from .. import assets as assets_module
-from .. import karrot, reports
+from .. import karrot, mood, reports
 from ..agenda import AgendaService, Project, ProjectService
 from ..chat import ChatAgent, strip_mentions
 from ..config import Config, Secrets
@@ -40,6 +42,7 @@ class AlliegentBot(discord.Client):
         retirement=None,
         costs=None,
         english=None,
+        mood=None,
         guild_id: int = 0,
         enable_chat: bool = True,
     ) -> None:
@@ -49,7 +52,8 @@ class AlliegentBot(discord.Client):
         # and the bot looks like it is ignoring you.
         chat_on = enable_chat and bool(secrets.anthropic_api_key)
         intents = discord.Intents.default()
-        intents.message_content = chat_on
+        # #mood is read without a mention too, and needs no API key.
+        intents.message_content = chat_on or (enable_chat and mood is not None)
         super().__init__(intents=intents)
         self.config = config
         self.agenda = agenda
@@ -61,6 +65,7 @@ class AlliegentBot(discord.Client):
         self.retirement = retirement
         self.costs = costs
         self.english = english
+        self.mood = mood
         self.secrets = secrets
         self.guild_id = guild_id
         self.tree = app_commands.CommandTree(self)
@@ -81,6 +86,7 @@ class AlliegentBot(discord.Client):
             plans=plans,
             costs=costs,
             english=english,
+            mood=mood,
             anthropic_api_key=secrets.anthropic_api_key,
             calendar_source=make_source(secrets),
             secrets=secrets,
@@ -110,6 +116,12 @@ class AlliegentBot(discord.Client):
         material, so everything posted there is read without a mention.
         """
         if message.author.bot:
+            return
+        # Before the chat agent, so a mention in #mood is still a check-in and
+        # what is written there never goes to the model.
+        mood_channel = self.secrets.discord_mood_channel_id
+        if self.mood is not None and mood_channel and message.channel.id == mood_channel:
+            await self._mood_message(message)
             return
         english_channel = self.secrets.discord_english_channel_id
         if self.english is not None and english_channel and message.channel.id == english_channel:
@@ -228,6 +240,81 @@ class AlliegentBot(discord.Client):
 
     def today(self) -> date:
         return datetime.now(self.config.tz).date()
+
+    async def _mood_message(self, message: discord.Message) -> None:
+        """A #mood message is the day's check-in: a score, a note, a long entry
+        or a voice memo. Nothing it says is logged or echoed back."""
+        day = mood.checkin_day(datetime.now(self.config.tz))
+        # "@alliegent 3" is a score too: a mention here is not a question.
+        # Not strip_mentions, which joins lines -- and the line breaks are
+        # what keep a multi-line entry from being read as a one-line note.
+        content = message.content
+        if self.user is not None:
+            for form in (f"<@{self.user.id}>", f"<@!{self.user.id}>"):
+                content = content.replace(form, "")
+        reply = mood.parse_reply(content)
+        voice = next(
+            (a for a in message.attachments if (a.content_type or "").startswith("audio/")),
+            None,
+        )
+        if voice is not None:
+            try:
+                async with message.channel.typing():
+                    spoken = await self._transcribe(voice)
+            except mood.VoiceUnavailable as exc:
+                log.error("voice memo not transcribed: %s", exc)
+                await message.reply(
+                    f"⚠️ Could not transcribe that ({exc}). Type it instead.",
+                    mention_author=False,
+                )
+                return
+            except Exception as exc:
+                # The type only: a message from deep in the decoder could
+                # carry part of what was said.
+                log.error("voice memo failed: %s", type(exc).__name__)
+                await message.reply(
+                    "⚠️ Could not transcribe that. Type it instead.", mention_author=False
+                )
+                return
+            # Spoken words are an entry, never a note: a note is the one thing
+            # a summary may quote, and a transcript was not written to be.
+            parts = [reply.raw_text, reply.note, spoken]
+            raw = "\n".join(p for p in parts if p) or None
+            reply = mood.Reply(score=reply.score, raw_text=raw)
+        if reply == mood.Reply():
+            return
+        entry = self.mood.record(
+            day, score=reply.score, note=reply.note, raw_text=reply.raw_text
+        )
+        await message.reply(
+            mood.confirmation(entry, wrote=reply.raw_text is not None),
+            mention_author=False,
+        )
+        await self._mood_notice(day, " ".join(t for t in (content, reply.raw_text) if t))
+
+    async def _mood_notice(self, day: date, written: str) -> None:
+        """After a check-in: point to people if what was written says danger,
+        otherwise send whichever offer the rules call for, if any."""
+        if mood.mentions_crisis(written):
+            # Every time, never on a cooldown: this is the one message that
+            # must not be skipped for having been sent before.
+            await self.notify(mood.SAFETY_NOW, "mood")
+            self.mood.log_prompt(day, "safety")
+            return
+        notice = mood.due_notice(self.mood, day)
+        if notice is not None:
+            kind, text = notice
+            await self.notify(text, "mood")
+            self.mood.log_prompt(day, kind)
+
+    async def _transcribe(self, attachment: discord.Attachment) -> str:
+        """Transcribe on this machine; the audio is deleted straight after."""
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / (Path(attachment.filename).name or "memo.ogg")
+            await attachment.save(path)
+            return await asyncio.to_thread(
+                mood.transcribe, path, self.config.mood.whisper_model
+            )
 
     async def _english_message(self, message: discord.Message) -> None:
         """A reply to a quiz is answers; anything else is lesson material."""
@@ -1654,6 +1741,105 @@ def _register(bot: AlliegentBot) -> None:
             for name in names
             if typed in name.casefold()
         ][:25]
+
+    @tree.command(name="checkin", description="Record today's mood, 1-5")
+    @app_commands.describe(
+        score="1 (low) to 5 (high), or a face",
+        note="One line, optional",
+    )
+    async def checkin_cmd(
+        interaction: discord.Interaction, score: str, note: str | None = None
+    ) -> None:
+        # Seen only by whoever typed it, unless it was typed in #mood itself:
+        # a check-in made from a shared channel must not be posted there.
+        private = interaction.channel_id != bot.secrets.discord_mood_channel_id
+        if bot.mood is None:
+            await interaction.response.send_message(
+                "⚠️ DISCORD_MOOD_CHANNEL_ID is not set.", ephemeral=True
+            )
+            return
+        value = mood.parse_score(score)
+        if value is None:
+            await interaction.response.send_message(
+                "⚠️ A score is 1 to 5, or a face.", ephemeral=True
+            )
+            return
+        day = mood.checkin_day(datetime.now(bot.config.tz))
+        entry = bot.mood.upsert(day, value, note)
+        await interaction.response.send_message(
+            mood.confirmation(entry), ephemeral=private
+        )
+        await bot._mood_notice(day, note or "")
+
+    @tree.command(name="week", description="The last seven days in #mood")
+    async def week_cmd(interaction: discord.Interaction) -> None:
+        private = interaction.channel_id != bot.secrets.discord_mood_channel_id
+        await interaction.response.defer(ephemeral=private)
+        if bot.mood is None:
+            await interaction.followup.send("⚠️ DISCORD_MOOD_CHANNEL_ID is not set.")
+            return
+        day = mood.checkin_day(datetime.now(bot.config.tz))
+        message = await bot.jobs.build_mood_week(day)
+        if message is None:
+            await interaction.followup.send("No check-ins in the last seven days.")
+            return
+        await _deliver(bot, interaction, message, "mood")
+
+    @tree.command(name="talk", description="Two weeks of #mood as text to paste into a chat")
+    async def talk_cmd(interaction: discord.Interaction) -> None:
+        # Answered where it is asked, and only to its author outside #mood:
+        # it is something to copy, not a post for the channel's record.
+        private = interaction.channel_id != bot.secrets.discord_mood_channel_id
+        if bot.mood is None:
+            await interaction.response.send_message(
+                "⚠️ DISCORD_MOOD_CHANNEL_ID is not set.", ephemeral=True
+            )
+            return
+        end = mood.checkin_day(datetime.now(bot.config.tz))
+        entries = bot.mood.between(end - timedelta(days=mood.TALK_DAYS - 1), end)
+        if not entries:
+            await interaction.response.send_message(
+                "No check-ins in the last two weeks.", ephemeral=private
+            )
+            return
+        await interaction.response.send_message(
+            mood.talk_summary(end, entries), ephemeral=private
+        )
+        bot.mood.mark_answered("talk_offer")
+
+    @tree.command(name="forget", description="Delete #mood check-ins: one day, or all")
+    @app_commands.describe(when="A date (2026-10-18, 10-18, today, yesterday) or 'all'")
+    async def forget_cmd(interaction: discord.Interaction, when: str) -> None:
+        if bot.mood is None:
+            await interaction.response.send_message(
+                "⚠️ DISCORD_MOOD_CHANNEL_ID is not set.", ephemeral=True
+            )
+            return
+        # Always private: what was deleted is nobody else's business either.
+        if when.strip().casefold() == "all":
+            day = None
+        else:
+            try:
+                text = when.strip().casefold()
+                today = mood.checkin_day(datetime.now(bot.config.tz))
+                if text in {"yesterday", "어제"}:
+                    day = today - timedelta(days=1)
+                else:
+                    day = parse_day(text, today)
+            except ValueError as exc:
+                await interaction.response.send_message(f"⚠️ {exc}", ephemeral=True)
+                return
+        count = bot.mood.forget(day)
+        what = "everything" if day is None else reports.fmt_date(day)
+        backups = (
+            " Copies in backups made before now remain until they rotate out."
+            if bot.config.mood.backup_dir and count
+            else ""
+        )
+        await interaction.response.send_message(
+            f"🗑️ Deleted {what} ({count} check-in{'s' * (count != 1)}).{backups}",
+            ephemeral=True,
+        )
 
     @tree.command(name="brief", description="Run the daily brief now")
     async def brief_cmd(interaction: discord.Interaction) -> None:

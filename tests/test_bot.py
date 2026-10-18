@@ -36,6 +36,10 @@ EXPECTED = {
     "news",
     "karrot",
     "assets",
+    "checkin",
+    "week",
+    "talk",
+    "forget",
 }
 
 
@@ -240,12 +244,14 @@ COMMAND_CHANNELS = {
     "news": "news",
     "karrot": "karrot",
     "assets": "assets",
+    "week": "mood",
 }
 
 # Short write confirmations answer in place: routing a one-line "Added — X"
 # would turn every write into two messages. So does /ask: an opinion belongs to
-# the conversation it was asked in, whichever channel that is.
-INLINE_COMMANDS = {"add", "done", "delete", "change", "ask"}
+# the conversation it was asked in, whichever channel that is. /checkin is a
+# write confirmation too, and outside #mood it is seen only by its author.
+INLINE_COMMANDS = {"add", "done", "delete", "change", "ask", "checkin", "talk", "forget"}
 
 
 def test_every_command_either_routes_or_is_deliberately_inline():
@@ -255,7 +261,8 @@ def test_every_command_either_routes_or_is_deliberately_inline():
 
 def test_routed_kinds_all_resolve_to_a_channel():
     secrets = Secrets(discord_channel_id=1)
-    for kind in set(COMMAND_CHANNELS.values()):
+    # Except #mood, which deliberately has no fallback (see test_mood).
+    for kind in set(COMMAND_CHANNELS.values()) - {"mood"}:
         assert secrets.channel_for(kind) > 0
 
 

@@ -42,6 +42,7 @@ class Jobs:
         plans=None,
         costs=None,
         english=None,
+        mood=None,
         anthropic_api_key: str = "",
         calendar_source: Callable | None = None,
         secrets: Secrets | None = None,
@@ -56,6 +57,7 @@ class Jobs:
         self.plans = plans
         self.costs = costs
         self.english = english
+        self.mood = mood
         self.config = config
         self.notify = notify
         self._anthropic_api_key = anthropic_api_key
@@ -409,6 +411,91 @@ class Jobs:
         await self.english.record_questions(today, questions, message_id)
         await self.english.mark_quizzed([lesson.id for lesson in lessons])
         log.info("sent english quiz (%d questions)", len(questions))
+
+    async def run_mood_checkin(self) -> None:
+        """The day's one question in #mood, unless the day is already answered
+        or already asked. Asked twice reads as a nudge, which #mood never sends."""
+        if self.mood is None:
+            return
+        from . import mood
+
+        today = self.today()
+        if self.mood.get(today) is not None or self.mood.prompted(today, "daily"):
+            log.info("mood check-in already done or asked today")
+            return
+        # Three unanswered evenings: the offer goes out in place of a fourth
+        # question, rather than as one more thing to answer.
+        notice = mood.due_notice(self.mood, today, silence=True)
+        if notice is not None:
+            kind, message = notice
+            await self.notify(message, "mood")
+            self.mood.log_prompt(today, kind)
+            return
+        await self.notify(mood.PROMPT, "mood")
+        self.mood.log_prompt(today, "daily")
+
+    async def build_mood_week(self, end: date | None = None) -> str | None:
+        """The seven days to `end` in #mood, beside what the agenda got done.
+
+        Read locally and posted to #mood; nothing goes to a model. The agenda
+        column is dropped, not the report, when Notion cannot be read.
+        """
+        if self.mood is None:
+            return None
+        from . import mood
+        from .reports import finished
+
+        end = end or self.today()
+        start = end - timedelta(days=6)
+        entries = self.mood.between(start, end)
+        before = self.mood.between(start - timedelta(days=7), start - timedelta(days=1))
+        agenda: dict[date, tuple[int, int]] | None = {}
+        try:
+            for item in await self.agenda.items_between(start, end):
+                if item.day is None or item.canceled:
+                    continue
+                done, planned = agenda.get(item.day, (0, 0))
+                agenda[item.day] = (done + finished(item), planned + 1)
+        except Exception:
+            log.exception("agenda unreadable for the mood week")
+            agenda = None
+        return mood.week_report(end, entries, before=before, agenda=agenda)
+
+    async def run_mood_week(self) -> None:
+        await self._send(await self.build_mood_week(), "mood")
+
+    async def run_mood_cleanup(self) -> None:
+        if self.mood is None:
+            return
+        days = self.config.mood.raw_retention_days
+        cleared = self.mood.clear_raw(self.today() - timedelta(days=days))
+        log.info("cleared %d mood entries past %d days", cleared, days)
+
+    async def run_mood_backup(self) -> None:
+        """The weekly encrypted copy. Says so in #mood when the disk is missing,
+        since a backup that quietly stops is found out when it is needed."""
+        if self.mood is None or not self.config.mood.backup_dir:
+            return
+        from pathlib import Path
+
+        from . import mood
+
+        folder = Path(self.config.mood.backup_dir).expanduser()
+        key = self._secrets.mood_backup_key if self._secrets else ""
+        if not key:
+            await self.notify("⚠️ Mood backup skipped: MOOD_BACKUP_KEY is not set.", "mood")
+            return
+        try:
+            await asyncio.to_thread(
+                mood.backup, self.mood, folder, key, self.today(), keep=self.config.mood.backup_keep
+            )
+        except mood.BackupSkipped:
+            await self.notify(
+                f"⚠️ Mood backup skipped: `{folder}` is not there. Is the disk connected?",
+                "mood",
+            )
+            return
+        log.info("mood backup written")
 
     async def run_bonus_rollover(self) -> None:
         if self.assets is None:
