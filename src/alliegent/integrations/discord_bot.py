@@ -245,7 +245,14 @@ class AlliegentBot(discord.Client):
         """A #mood message is the day's check-in: a score, a note, a long entry
         or a voice memo. Nothing it says is logged or echoed back."""
         day = mood.checkin_day(datetime.now(self.config.tz))
-        reply = mood.parse_reply(message.content)
+        # "@alliegent 3" is a score too: a mention here is not a question.
+        # Not strip_mentions, which joins lines -- and the line breaks are
+        # what keep a multi-line entry from being read as a one-line note.
+        content = message.content
+        if self.user is not None:
+            for form in (f"<@{self.user.id}>", f"<@!{self.user.id}>"):
+                content = content.replace(form, "")
+        reply = mood.parse_reply(content)
         voice = next(
             (a for a in message.attachments if (a.content_type or "").startswith("audio/")),
             None,
@@ -259,6 +266,14 @@ class AlliegentBot(discord.Client):
                 await message.reply(
                     f"⚠️ Could not transcribe that ({exc}). Type it instead.",
                     mention_author=False,
+                )
+                return
+            except Exception as exc:
+                # The type only: a message from deep in the decoder could
+                # carry part of what was said.
+                log.error("voice memo failed: %s", type(exc).__name__)
+                await message.reply(
+                    "⚠️ Could not transcribe that. Type it instead.", mention_author=False
                 )
                 return
             # Spoken words are an entry, never a note: a note is the one thing
@@ -275,7 +290,7 @@ class AlliegentBot(discord.Client):
             mood.confirmation(entry, wrote=reply.raw_text is not None),
             mention_author=False,
         )
-        await self._mood_notice(day, " ".join(t for t in (message.content, reply.raw_text) if t))
+        await self._mood_notice(day, " ".join(t for t in (content, reply.raw_text) if t))
 
     async def _mood_notice(self, day: date, written: str) -> None:
         """After a check-in: point to people if what was written says danger,

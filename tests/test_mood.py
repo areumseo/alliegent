@@ -599,3 +599,13 @@ async def test_backup_job_says_when_the_key_is_missing(store, tmp_path):
     await jobs.run_mood_backup()
     assert sent == [("⚠️ Mood backup skipped: MOOD_BACKUP_KEY is not set.", "mood")]
     assert list(tmp_path.iterdir()) == [store.path.parent]
+
+
+async def test_a_mention_in_mood_is_still_a_check_in_and_keeps_its_lines(store, monkeypatch):
+    monkeypatch.setattr("alliegent.mood.checkin_day", lambda now: DAY)
+    bot = _bot(store)
+    monkeypatch.setattr(type(bot), "user", SimpleNamespace(id=42), raising=False)
+    await bot.on_message(_message("<@42> 4"))
+    assert store.get(DAY).score == 4
+    await bot.on_message(_message("<@42> short\nentry"))
+    assert store.get(DAY).note is None and store.has_raw(DAY)
