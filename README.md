@@ -25,6 +25,7 @@ The Discord bot and the job scheduler share a single asyncio loop, so the whole 
 | Karrot candidates | Mon 09:00 | What is decided on but not yet listed. Silent when there is nothing waiting |
 | Karrot sales | Sat 20:00 | The week's sales, with the month, the year and the running total. Silent when nothing sold and nothing is owed |
 | Weekly review | Sun 21:00 | Completion stats for the past week as a review draft |
+| Mood check-in | 21:00 daily | One question in `#mood`. Silent on a day already checked in or already asked. Off unless `DISCORD_MOOD_CHANNEL_ID` is set |
 
 The evening alert stays silent when there is nothing pending. A daily "all clear" ping trains you to ignore the channel, so only the morning brief is unconditional — and it distinguishes a day you finished from a day with nothing on it, rather than reporting both as empty.
 
@@ -302,7 +303,17 @@ A low-effort daily record of mood and energy, kept so patterns can be seen and, 
 
 **`#mood` should be private**, with the bot and you as its only members. Its channel never falls back to `DISCORD_CHANNEL_ID`, so a missing ID switches the feature off rather than sending check-ins somewhere shared. `/checkin` used from any other channel answers only to you.
 
-A score is a digit from 1 to 5 or a face (😞 1, 😕 2, 😐 3, 😊 4, 😁 5, and a few more of each). The confirmation is one line with the date and the score; a note is acknowledged, not echoed back.
+A score is a digit from 1 to 5 or a face (😞 1, 😕 2, 😐 3, 😊 4, 😁 5, and a few more of each). The confirmation is one line with the date and the score; what you wrote is acknowledged, never echoed back.
+
+**Answering in `#mood`.** At 21:00 the bot asks one question. Everything posted in `#mood` is read as that day's check-in, without a mention:
+
+- `4` or `😊` scores the day; `2 couldn't focus` scores it and keeps a one-line note.
+- One short line (up to 200 characters) is a note. A score can follow in a second message.
+- Anything longer, or on more than one line, is kept whole as the day's entry. The bot does not summarise it or guess a score from it; send a number or a face to score the day.
+- A voice memo is transcribed on the Mac mini with [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) and kept as an entry, like long text. It needs Apple Silicon and `brew install ffmpeg`; the model (`[mood] whisper_model`, about 1.6 GB) downloads from Hugging Face the first time. The audio is deleted once transcribed.
+- A second answer the same day overwrites what it carries and keeps the rest. Anything sent before 04:00 counts for the day before.
+
+**What may leave the machine.** Only scores and one-line notes may ever be sent to the Anthropic API, for the weekly summary and `/talk`. Long entries and transcripts stay in `mood.db`. Mentioning the bot in `#mood` is still a check-in, so nothing written there goes to the chat agent.
 
 ## Assets
 

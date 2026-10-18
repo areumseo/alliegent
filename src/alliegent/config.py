@@ -269,6 +269,9 @@ class Schedule(BaseModel):
     # time to switch it off.
     build_costs_day: int = 1
     build_costs_time: str = "09:30"
+    # The one question #mood asks each day. Silent if the day already has a
+    # check-in. Blank the time to switch it off.
+    mood_checkin: str = "21:00"
 
     @field_validator("incomplete_alert", mode="before")
     @classmethod
@@ -327,6 +330,9 @@ class MoodConfig(BaseModel):
     # The check-in database. Relative paths are taken from the repository
     # root; data/ is gitignored, and survives the updater's reset.
     db_path: str = "data/mood.db"
+    # Voice memos are transcribed on this machine by mlx-whisper. Downloaded
+    # from Hugging Face on first use (about 1.6 GB), then cached.
+    whisper_model: str = "mlx-community/whisper-large-v3-turbo"
 
     @property
     def resolved_path(self) -> Path:

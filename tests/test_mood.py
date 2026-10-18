@@ -1,12 +1,30 @@
 from __future__ import annotations
 
+import sqlite3
 import stat
-from datetime import date
+from datetime import date, datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
+from alliegent.agenda import AgendaService
 from alliegent.config import Config, Secrets
-from alliegent.mood import NOTE_MAX, MoodStore, confirmation, parse_score
+from alliegent.integrations.discord_bot import AlliegentBot
+from alliegent.jobs import Jobs
+from alliegent.mood import (
+    NOTE_MAX,
+    PROMPT,
+    MoodStore,
+    Reply,
+    VoiceUnavailable,
+    checkin_day,
+    confirmation,
+    parse_reply,
+    parse_score,
+)
+
+from .conftest import FakeNotionClient
 
 DAY = date(2026, 10, 18)
 
@@ -98,3 +116,181 @@ def test_relative_db_path_is_under_the_repo():
     path = Config().mood.resolved_path
     assert path.parts[-2:] == ("data", "mood.db")
     assert path.is_absolute()
+
+
+# -- step 2: the daily question and replies in #mood ---------------------------
+
+MOOD_CHANNEL = 77
+
+
+@pytest.mark.parametrize(
+    ("text", "reply"),
+    [
+        ("4", Reply(score=4)),
+        ("😞", Reply(score=1)),
+        ("2 slept badly", Reply(score=2, note="slept badly")),
+        ("3, ok", Reply(score=3, note="ok")),
+        ("long day at work", Reply(note="long day at work")),
+        ("3 hours of sleep", Reply(score=3, note="hours of sleep")),
+        ("first line\nsecond line", Reply(raw_text="first line\nsecond line")),
+        ("x" * 300, Reply(raw_text="x" * 300)),
+        ("2 " + "y" * 300, Reply(score=2, raw_text="y" * 300)),
+        ("   ", Reply()),
+    ],
+)
+def test_parse_reply(text, reply):
+    assert parse_reply(text) == reply
+
+
+@pytest.mark.parametrize(
+    ("hour", "day"), [(0, date(2026, 10, 17)), (3, date(2026, 10, 17)), (4, DAY), (21, DAY)]
+)
+def test_replies_after_midnight_belong_to_the_evening_before(hour, day):
+    assert checkin_day(datetime(2026, 10, 18, hour, 30)) == day
+
+
+def test_a_score_after_a_long_entry_keeps_the_entry(store):
+    store.record(DAY, raw_text="a long day\nwith a lot in it")
+    entry = store.record(DAY, score=2)
+    assert entry.score == 2
+    assert store.has_raw(DAY)
+
+
+def test_answering_marks_the_prompt_answered(store):
+    store.log_prompt(DAY, "daily")
+    store.record(DAY, score=3)
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("SELECT answered FROM prompt_log").fetchone()[0] == 1
+
+
+def _jobs(store):
+    sent = []
+
+    async def notify(message, kind):
+        sent.append((message, kind))
+
+    client = FakeNotionClient()
+    config = Config()
+    jobs = Jobs(
+        AgendaService(client, config, "agenda-db"),
+        None,
+        config,
+        notify,
+        clock=lambda: DAY,
+        mood=store,
+    )
+    return jobs, sent
+
+
+async def test_daily_question_goes_to_mood_once(store):
+    jobs, sent = _jobs(store)
+    await jobs.run_mood_checkin()
+    await jobs.run_mood_checkin()
+    assert sent == [(PROMPT, "mood")]
+    assert store.prompted(DAY, "daily")
+
+
+async def test_no_question_on_a_day_already_checked_in(store):
+    jobs, sent = _jobs(store)
+    store.upsert(DAY, 4)
+    await jobs.run_mood_checkin()
+    assert sent == []
+
+
+async def test_no_question_without_the_feature():
+    jobs, sent = _jobs(None)
+    await jobs.run_mood_checkin()
+    assert sent == []
+
+
+def _bot(store):
+    client = FakeNotionClient()
+    config = Config()
+    return AlliegentBot(
+        config=config,
+        agenda=AgendaService(client, config, "agenda-db"),
+        projects=None,
+        secrets=Secrets(discord_channel_id=1, discord_mood_channel_id=MOOD_CHANNEL),
+        mood=store,
+    )
+
+
+def _message(content, attachments=(), channel=MOOD_CHANNEL):
+    return SimpleNamespace(
+        content=content,
+        attachments=list(attachments),
+        author=SimpleNamespace(bot=False),
+        channel=SimpleNamespace(id=channel),
+        reply=AsyncMock(),
+        mention_everyone=False,
+    )
+
+
+async def test_mood_channel_needs_message_content_without_an_api_key(store):
+    assert _bot(store).intents.message_content
+
+
+async def test_a_mood_message_is_recorded_and_not_echoed(store, monkeypatch):
+    monkeypatch.setattr("alliegent.mood.checkin_day", lambda now: DAY)
+    bot = _bot(store)
+    message = _message("2 couldn't focus at all")
+    await bot.on_message(message)
+    entry = store.get(DAY)
+    assert (entry.score, entry.note) == (2, "couldn't focus at all")
+    line = message.reply.await_args.args[0]
+    assert line == "✅ Sun 18 Oct: 2/5. Note saved."
+    assert "focus" not in line
+
+
+async def test_a_long_entry_is_kept_raw_and_asks_for_nothing(store, monkeypatch):
+    monkeypatch.setattr("alliegent.mood.checkin_day", lambda now: DAY)
+    bot = _bot(store)
+    message = _message("a lot happened\nand I am tired")
+    await bot.on_message(message)
+    assert store.get(DAY).note is None
+    assert store.has_raw(DAY)
+    assert (
+        message.reply.await_args.args[0] == "📝 Sun 18 Oct saved. Send 1-5 or a face to score it."
+    )
+
+
+async def test_messages_elsewhere_are_not_check_ins(store):
+    bot = _bot(store)
+    await bot.on_message(_message("3", channel=5))
+    assert store.get(DAY) is None
+
+
+class _Typing:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+async def test_a_voice_memo_is_transcribed_into_the_raw_entry(store, monkeypatch):
+    monkeypatch.setattr("alliegent.mood.checkin_day", lambda now: DAY)
+    monkeypatch.setattr("alliegent.mood.transcribe", lambda path, model: "오늘 좀 지쳤어")
+    bot = _bot(store)
+    memo = SimpleNamespace(content_type="audio/ogg", filename="voice-message.ogg", save=AsyncMock())
+    message = _message("", [memo])
+    message.channel.typing = _Typing
+    await bot.on_message(message)
+    entry = store.get(DAY)
+    assert entry.note is None
+    assert store.has_raw(DAY)
+    assert "지쳤" not in message.reply.await_args.args[0]
+
+
+async def test_voice_without_mlx_says_so(store, monkeypatch):
+    def unavailable(path, model):
+        raise VoiceUnavailable("no mlx here")
+
+    monkeypatch.setattr("alliegent.mood.transcribe", unavailable)
+    bot = _bot(store)
+    memo = SimpleNamespace(content_type="audio/ogg", filename="memo.ogg", save=AsyncMock())
+    message = _message("", [memo])
+    message.channel.typing = _Typing
+    await bot.on_message(message)
+    assert store.get(DAY) is None
+    assert "Could not transcribe" in message.reply.await_args.args[0]

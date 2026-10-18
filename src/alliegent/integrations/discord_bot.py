@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import tempfile
 from collections.abc import Coroutine
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from time import monotonic
 from typing import Any
 
@@ -50,7 +52,8 @@ class AlliegentBot(discord.Client):
         # and the bot looks like it is ignoring you.
         chat_on = enable_chat and bool(secrets.anthropic_api_key)
         intents = discord.Intents.default()
-        intents.message_content = chat_on
+        # #mood is read without a mention too, and needs no API key.
+        intents.message_content = chat_on or (enable_chat and mood is not None)
         super().__init__(intents=intents)
         self.config = config
         self.agenda = agenda
@@ -83,6 +86,7 @@ class AlliegentBot(discord.Client):
             plans=plans,
             costs=costs,
             english=english,
+            mood=mood,
             anthropic_api_key=secrets.anthropic_api_key,
             calendar_source=make_source(secrets),
             secrets=secrets,
@@ -112,6 +116,12 @@ class AlliegentBot(discord.Client):
         material, so everything posted there is read without a mention.
         """
         if message.author.bot:
+            return
+        # Before the chat agent, so a mention in #mood is still a check-in and
+        # what is written there never goes to the model.
+        mood_channel = self.secrets.discord_mood_channel_id
+        if self.mood is not None and mood_channel and message.channel.id == mood_channel:
+            await self._mood_message(message)
             return
         english_channel = self.secrets.discord_english_channel_id
         if self.english is not None and english_channel and message.channel.id == english_channel:
@@ -230,6 +240,50 @@ class AlliegentBot(discord.Client):
 
     def today(self) -> date:
         return datetime.now(self.config.tz).date()
+
+    async def _mood_message(self, message: discord.Message) -> None:
+        """A #mood message is the day's check-in: a score, a note, a long entry
+        or a voice memo. Nothing it says is logged or echoed back."""
+        day = mood.checkin_day(datetime.now(self.config.tz))
+        reply = mood.parse_reply(message.content)
+        voice = next(
+            (a for a in message.attachments if (a.content_type or "").startswith("audio/")),
+            None,
+        )
+        if voice is not None:
+            try:
+                async with message.channel.typing():
+                    spoken = await self._transcribe(voice)
+            except mood.VoiceUnavailable as exc:
+                log.error("voice memo not transcribed: %s", exc)
+                await message.reply(
+                    f"⚠️ Could not transcribe that ({exc}). Type it instead.",
+                    mention_author=False,
+                )
+                return
+            # Spoken words are an entry, never a note: a note is the one thing
+            # a summary may quote, and a transcript was not written to be.
+            parts = [reply.raw_text, reply.note, spoken]
+            raw = "\n".join(p for p in parts if p) or None
+            reply = mood.Reply(score=reply.score, raw_text=raw)
+        if reply == mood.Reply():
+            return
+        entry = self.mood.record(
+            day, score=reply.score, note=reply.note, raw_text=reply.raw_text
+        )
+        await message.reply(
+            mood.confirmation(entry, wrote=reply.raw_text is not None),
+            mention_author=False,
+        )
+
+    async def _transcribe(self, attachment: discord.Attachment) -> str:
+        """Transcribe on this machine; the audio is deleted straight after."""
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / (Path(attachment.filename).name or "memo.ogg")
+            await attachment.save(path)
+            return await asyncio.to_thread(
+                mood.transcribe, path, self.config.mood.whisper_model
+            )
 
     async def _english_message(self, message: discord.Message) -> None:
         """A reply to a quiz is answers; anything else is lesson material."""
@@ -1679,7 +1733,8 @@ def _register(bot: AlliegentBot) -> None:
                 "⚠️ A score is 1 to 5, or a face.", ephemeral=True
             )
             return
-        entry = bot.mood.upsert(bot.today(), value, note)
+        day = mood.checkin_day(datetime.now(bot.config.tz))
+        entry = bot.mood.upsert(day, value, note)
         await interaction.response.send_message(
             mood.confirmation(entry), ephemeral=private
         )

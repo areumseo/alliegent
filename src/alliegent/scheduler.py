@@ -40,6 +40,7 @@ JOB_CHANNELS = {
     "project_log": "build",
     "project_open": "build",
     "build_costs": "build",
+    "mood_checkin": "mood",
 }
 
 
@@ -115,6 +116,8 @@ def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
     for when in sched.incomplete_alert:
         add(f"incomplete_alert@{when}", jobs.run_incomplete_alert, time=when)
     add("english_quiz", jobs.run_english_quiz, time=sched.english_quiz)
+    if jobs.mood is not None:
+        add("mood_checkin", jobs.run_mood_checkin, time=sched.mood_checkin)
     if sched.bonus_rollover_time.strip() and sched.bonus_rollover_months:
         hour, minute = _hhmm(sched.bonus_rollover_time)
         months = ",".join(str(m) for m in sched.bonus_rollover_months)

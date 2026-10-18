@@ -16,6 +16,9 @@ dependencies = [
     "recurring-ical-events>=3.8.2",
     "caldav>=3.2.1",
     "pypdf>=5",
+    # Voice memos in #mood, transcribed on the machine. Apple Silicon only;
+    # elsewhere the voice path says it is unavailable.
+    "mlx-whisper>=0.4; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 
 [project.scripts]
@@ -47,3 +50,8 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.uv]
+# Held on the 1.x line pulled in by mlx-whisper: 2.x moved to an HTTP
+# client package this project has not reviewed. Lift deliberately.
+constraint-dependencies = ["huggingface-hub<2"]

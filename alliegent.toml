@@ -40,6 +40,8 @@ project_week_weekday = "sun"
 project_week_time = "20:00"
 weekly_review_weekday = "sun"
 weekly_review_time = "21:00"
+# #mood: the one check-in question a day. Blank switches it off.
+mood_checkin = "21:00"
 
 [plans]
 # Vested + SNOW as a share of Liquid, above which the check warns.
@@ -93,3 +95,10 @@ progress = "Progress"
 [projects.status_values]
 active = "In progress"
 done = "Done"
+
+[mood]
+# Local SQLite file for #mood check-ins. Relative to the repository root;
+# data/ is gitignored.
+db_path = "data/mood.db"
+# Voice memos are transcribed on this machine (Apple Silicon + ffmpeg).
+whisper_model = "mlx-community/whisper-large-v3-turbo"

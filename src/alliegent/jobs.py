@@ -42,6 +42,7 @@ class Jobs:
         plans=None,
         costs=None,
         english=None,
+        mood=None,
         anthropic_api_key: str = "",
         calendar_source: Callable | None = None,
         secrets: Secrets | None = None,
@@ -56,6 +57,7 @@ class Jobs:
         self.plans = plans
         self.costs = costs
         self.english = english
+        self.mood = mood
         self.config = config
         self.notify = notify
         self._anthropic_api_key = anthropic_api_key
@@ -409,6 +411,20 @@ class Jobs:
         await self.english.record_questions(today, questions, message_id)
         await self.english.mark_quizzed([lesson.id for lesson in lessons])
         log.info("sent english quiz (%d questions)", len(questions))
+
+    async def run_mood_checkin(self) -> None:
+        """The day's one question in #mood, unless the day is already answered
+        or already asked. Asked twice reads as a nudge, which #mood never sends."""
+        if self.mood is None:
+            return
+        from . import mood
+
+        today = self.today()
+        if self.mood.get(today) is not None or self.mood.prompted(today, "daily"):
+            log.info("mood check-in already done or asked today")
+            return
+        await self.notify(mood.PROMPT, "mood")
+        self.mood.log_prompt(today, "daily")
 
     async def run_bonus_rollover(self) -> None:
         if self.assets is None:
