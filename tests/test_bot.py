@@ -36,6 +36,7 @@ EXPECTED = {
     "news",
     "karrot",
     "assets",
+    "checkin",
 }
 
 
@@ -244,8 +245,9 @@ COMMAND_CHANNELS = {
 
 # Short write confirmations answer in place: routing a one-line "Added — X"
 # would turn every write into two messages. So does /ask: an opinion belongs to
-# the conversation it was asked in, whichever channel that is.
-INLINE_COMMANDS = {"add", "done", "delete", "change", "ask"}
+# the conversation it was asked in, whichever channel that is. /checkin is a
+# write confirmation too, and outside #mood it is seen only by its author.
+INLINE_COMMANDS = {"add", "done", "delete", "change", "ask", "checkin"}
 
 
 def test_every_command_either_routes_or_is_deliberately_inline():

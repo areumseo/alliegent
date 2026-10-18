@@ -46,6 +46,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/assets show` · `/assets trend` · `/assets plan` · `/assets gain <amount> [month]` · `/assets retirement` | Latest snapshot with what changed, the recent history, the latest snapshot against the month it is heading for, a realised gain on foreign shares recorded against the year's allowance, and income after retirement in won a month |
 | `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `spent`, `bought`, `sales`, `summary` |
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
+| `/checkin <score> [note]` | Record today's mood, 1 to 5 or a face, with an optional one-line note. A second check-in the same day replaces the score. Seen only by you unless typed in `#mood`. See [Mood check-in](#mood-check-in) |
 
 Everything the bot writes in Discord is English, so nothing needs an input-method switch — except English quiz situations, for the reason given below. Data keeps the language it arrived in — Karrot item names are Korean because they are quoted from a Korean marketplace. Korean date words are still accepted as `when` values.
 
@@ -99,6 +100,7 @@ Each job posts to the channel matching its kind:
 | `DISCORD_KARROT_CHANNEL_ID` | Karrot listings report |
 | `DISCORD_ASSETS_CHANNEL_ID` | Weekly asset prompt |
 | `DISCORD_ENGLISH_CHANNEL_ID` | English lesson material in, quizzes and grading out |
+| `DISCORD_MOOD_CHANNEL_ID` | The private `#mood` check-in. The one channel with no fallback: left blank, the feature is off |
 | `DISCORD_CHANNEL_ID` | Fallback for anything left blank |
 
 ### 3. Run locally
@@ -291,6 +293,16 @@ Cost is kept down deliberately. PDF text is extracted on the server with `pypdf`
 Answers are read as a **reply to the quiz message**, which is how they are told apart from new lesson material posted while a quiz is open. Numbered lines land on their numbers, plain lines fill in order, and a skipped number stays empty rather than shifting every later answer onto the wrong question.
 
 Spaced repetition, the pre-lesson review and the monthly mistake report are the second phase; the Reviews database records every result from the start so they will have history to work from.
+
+## Mood check-in
+
+A low-effort daily record of mood and energy, kept so patterns can be seen and, when wanted, handed to a longer conversation elsewhere. The bot records, notices and summarises; it does not counsel, diagnose or interpret, and it does not offer advice nobody asked for.
+
+**Everything stays on the machine.** Check-ins live in a SQLite file, `data/mood.db` by default (`[mood] db_path` in `alliegent.toml`), created owner-only (`0600`) in an owner-only directory. Nothing is written to Notion. `data/` is gitignored and survives the updater's `git reset --hard`, which leaves ignored files alone.
+
+**`#mood` should be private**, with the bot and you as its only members. Its channel never falls back to `DISCORD_CHANNEL_ID`, so a missing ID switches the feature off rather than sending check-ins somewhere shared. `/checkin` used from any other channel answers only to you.
+
+A score is a digit from 1 to 5 or a face (😞 1, 😕 2, 😐 3, 😊 4, 😁 5, and a few more of each). The confirmation is one line with the date and the score; a note is acknowledged, not echoed back.
 
 ## Assets
 

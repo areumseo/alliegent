@@ -15,6 +15,7 @@ from .english import EnglishService
 from .integrations.discord_bot import AlliegentBot
 from .integrations.notion import NotionClient
 from .karrot import ExpenseService, KarrotService
+from .mood import MoodStore
 from .plans import PlanService
 from .retirement import RetirementService
 from .scheduler import build_scheduler
@@ -152,6 +153,11 @@ async def main() -> None:
     if karrot and expenses is None:
         log.warning("NOTION_KARROT_EXPENSES_DB_ID not set — Karrot revenue is gross")
 
+    # Local only: switched on by its channel, since it has no Notion database.
+    mood = (
+        MoodStore(config.mood.resolved_path) if secrets.discord_mood_channel_id else None
+    )
+
     def make_bot(enable_chat: bool) -> AlliegentBot:
         return AlliegentBot(
             config=config,
@@ -164,6 +170,7 @@ async def main() -> None:
             retirement=retirement,
             costs=costs,
             english=english,
+            mood=mood,
             secrets=secrets,
             guild_id=secrets.discord_guild_id,
             enable_chat=enable_chat,

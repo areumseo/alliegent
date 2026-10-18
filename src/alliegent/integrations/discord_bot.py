@@ -15,7 +15,7 @@ from discord import app_commands
 
 from .. import ask as ask_module
 from .. import assets as assets_module
-from .. import karrot, reports
+from .. import karrot, mood, reports
 from ..agenda import AgendaService, Project, ProjectService
 from ..chat import ChatAgent, strip_mentions
 from ..config import Config, Secrets
@@ -40,6 +40,7 @@ class AlliegentBot(discord.Client):
         retirement=None,
         costs=None,
         english=None,
+        mood=None,
         guild_id: int = 0,
         enable_chat: bool = True,
     ) -> None:
@@ -61,6 +62,7 @@ class AlliegentBot(discord.Client):
         self.retirement = retirement
         self.costs = costs
         self.english = english
+        self.mood = mood
         self.secrets = secrets
         self.guild_id = guild_id
         self.tree = app_commands.CommandTree(self)
@@ -1654,6 +1656,33 @@ def _register(bot: AlliegentBot) -> None:
             for name in names
             if typed in name.casefold()
         ][:25]
+
+    @tree.command(name="checkin", description="Record today's mood, 1-5")
+    @app_commands.describe(
+        score="1 (low) to 5 (high), or a face",
+        note="One line, optional",
+    )
+    async def checkin_cmd(
+        interaction: discord.Interaction, score: str, note: str | None = None
+    ) -> None:
+        # Seen only by whoever typed it, unless it was typed in #mood itself:
+        # a check-in made from a shared channel must not be posted there.
+        private = interaction.channel_id != bot.secrets.discord_mood_channel_id
+        if bot.mood is None:
+            await interaction.response.send_message(
+                "⚠️ DISCORD_MOOD_CHANNEL_ID is not set.", ephemeral=True
+            )
+            return
+        value = mood.parse_score(score)
+        if value is None:
+            await interaction.response.send_message(
+                "⚠️ A score is 1 to 5, or a face.", ephemeral=True
+            )
+            return
+        entry = bot.mood.upsert(bot.today(), value, note)
+        await interaction.response.send_message(
+            mood.confirmation(entry), ephemeral=private
+        )
 
     @tree.command(name="brief", description="Run the daily brief now")
     async def brief_cmd(interaction: discord.Interaction) -> None:

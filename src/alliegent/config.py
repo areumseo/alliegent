@@ -98,6 +98,10 @@ class Secrets(BaseSettings):
     discord_karrot_channel_id: int = 0
     discord_assets_channel_id: int = 0
     discord_english_channel_id: int = 0
+    # #mood: a private channel for the daily check-in. Blank switches the
+    # feature off. Unlike every other channel it never falls back to the
+    # default, so a check-in can never land somewhere public.
+    discord_mood_channel_id: int = 0
 
     @field_validator(
         "discord_guild_id",
@@ -110,6 +114,7 @@ class Secrets(BaseSettings):
         "discord_karrot_channel_id",
         "discord_assets_channel_id",
         "discord_english_channel_id",
+        "discord_mood_channel_id",
         mode="before",
     )
     @classmethod
@@ -145,6 +150,7 @@ class Secrets(BaseSettings):
             "karrot": self.discord_karrot_channel_id or self.discord_channel_id,
             "assets": self.discord_assets_channel_id or self.discord_channel_id,
             "english": self.discord_english_channel_id or self.discord_channel_id,
+            "mood": self.discord_mood_channel_id,
         }
         target = routes.get(kind, agenda)
         if not target:
@@ -317,6 +323,17 @@ class NewsConfig(BaseModel):
     count: int = 5
 
 
+class MoodConfig(BaseModel):
+    # The check-in database. Relative paths are taken from the repository
+    # root; data/ is gitignored, and survives the updater's reset.
+    db_path: str = "data/mood.db"
+
+    @property
+    def resolved_path(self) -> Path:
+        path = Path(self.db_path).expanduser()
+        return path if path.is_absolute() else REPO_ROOT / path
+
+
 class Config(BaseModel):
     timezone: str = "Asia/Seoul"
     schedule: Schedule = Field(default_factory=Schedule)
@@ -325,6 +342,7 @@ class Config(BaseModel):
     news: NewsConfig = Field(default_factory=NewsConfig)
     karrot: KarrotConfig = Field(default_factory=KarrotConfig)
     plans: PlansConfig = Field(default_factory=PlansConfig)
+    mood: MoodConfig = Field(default_factory=MoodConfig)
 
     @property
     def tz(self) -> ZoneInfo:
