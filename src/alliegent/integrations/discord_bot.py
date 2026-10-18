@@ -1753,6 +1753,27 @@ def _register(bot: AlliegentBot) -> None:
             return
         await _deliver(bot, interaction, message, "mood")
 
+    @tree.command(name="talk", description="Two weeks of #mood as text to paste into a chat")
+    async def talk_cmd(interaction: discord.Interaction) -> None:
+        # Answered where it is asked, and only to its author outside #mood:
+        # it is something to copy, not a post for the channel's record.
+        private = interaction.channel_id != bot.secrets.discord_mood_channel_id
+        if bot.mood is None:
+            await interaction.response.send_message(
+                "⚠️ DISCORD_MOOD_CHANNEL_ID is not set.", ephemeral=True
+            )
+            return
+        end = mood.checkin_day(datetime.now(bot.config.tz))
+        entries = bot.mood.between(end - timedelta(days=mood.TALK_DAYS - 1), end)
+        if not entries:
+            await interaction.response.send_message(
+                "No check-ins in the last two weeks.", ephemeral=private
+            )
+            return
+        await interaction.response.send_message(
+            mood.talk_summary(end, entries), ephemeral=private
+        )
+
     @tree.command(name="brief", description="Run the daily brief now")
     async def brief_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.defer()

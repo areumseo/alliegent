@@ -473,3 +473,106 @@ def week_report(
     if words:
         lines.append("Came up more than once: " + ", ".join(f"{w} ({n})" for w, n in words) + ".")
     return "\n".join(lines)
+
+
+# -- /talk ---------------------------------------------------------------------
+
+TALK_DAYS = 14
+# Notes are cut to this in /talk, so fourteen of them fit one Discord message
+# and the summary copies as a single block.
+TALK_NOTE_MAX = 100
+
+
+def _short(day: date) -> str:
+    return f"{day.month}/{day.day}"
+
+
+def low_runs(
+    entries: list[Checkin], *, at_most: int = 2, length: int = 3
+) -> list[tuple[date, date]]:
+    """Stretches of `length` or more consecutive days all scored `at_most` or lower.
+
+    A day with no score breaks a stretch: it is not known to be low.
+    """
+    runs: list[tuple[date, date]] = []
+    start = last = None
+
+    def close() -> None:
+        if start is not None and (last - start).days + 1 >= length:
+            runs.append((start, last))
+
+    for entry in sorted(entries, key=lambda e: e.day):
+        if entry.score is None or entry.score > at_most:
+            close()
+            start = last = None
+        elif last is not None and entry.day == last + timedelta(days=1):
+            last = entry.day
+        else:
+            close()
+            start = last = entry.day
+    close()
+    return runs
+
+
+def talk_summary(end: date, entries: list[Checkin]) -> str:
+    """Fourteen days as one block of plain text, to paste into a conversation.
+
+    Scores, repeated words, notes and summaries, and what changed sharply.
+    No long entry, no transcript: those never leave this machine, and this
+    is written to be carried somewhere else.
+    """
+    start = end - timedelta(days=TALK_DAYS - 1)
+    entries = [e for e in entries if start <= e.day <= end]
+    by_day = {e.day: e for e in entries}
+    scored = [e for e in entries if e.score is not None]
+    lines = [
+        f"Mood check-ins, {_short(start)} to {_short(end)} "
+        f"({TALK_DAYS} days, {len(scored)} scored 1-5, 5 is best)",
+    ]
+    days = [start + timedelta(days=n) for n in range(TALK_DAYS)]
+    marks = []
+    for day in days:
+        entry = by_day.get(day)
+        marks.append(f"{_short(day)} {entry.score if entry and entry.score else '-'}")
+    lines.append("Scores: " + ", ".join(marks))
+
+    first = average([e for e in scored if e.day < start + timedelta(days=7)])
+    second = average([e for e in scored if e.day >= start + timedelta(days=7)])
+    if first is not None and second is not None:
+        lines.append(f"Average: first week {first:.1f}, second week {second:.1f}")
+    elif scored:
+        lines.append(f"Average: {average(scored):.1f}")
+
+    changes = []
+    previous = None
+    for entry in scored:
+        if previous is not None and abs(entry.score - previous.score) >= 2:
+            changes.append(
+                f"{_short(previous.day)} {previous.score} -> {_short(entry.day)} {entry.score}"
+            )
+        previous = entry
+    if changes:
+        lines.append("Changes of 2 or more: " + "; ".join(changes))
+    for first_day, last_day in low_runs(entries):
+        lines.append(f"Scored 2 or lower every day {_short(first_day)} to {_short(last_day)}")
+    missing = sum(1 for day in days if day not in by_day)
+    if missing:
+        lines.append(f"No check-in on {missing} of {TALK_DAYS} days")
+
+    words = repeated_words(entries)
+    if words:
+        lines.append("Came up more than once: " + ", ".join(f"{w} ({n})" for w, n in words))
+
+    written = [e for e in reversed(entries) if e.note or e.summary]
+    if written:
+        lines.append("Notes, newest first:")
+        for entry in written:
+            text = " / ".join(t for t in (entry.summary, entry.note) if t)
+            if len(text) > TALK_NOTE_MAX:
+                text = text[: TALK_NOTE_MAX - 1] + "…"
+            score = f" ({entry.score})" if entry.score else ""
+            lines.append(f"- {_short(entry.day)}{score}: {text}")
+
+    # A note with a fence in it would end the block early.
+    body = "\n".join(lines).replace("```", "'''")
+    return f"```\n{body}\n```"

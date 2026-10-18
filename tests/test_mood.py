@@ -15,14 +15,17 @@ from alliegent.jobs import Jobs
 from alliegent.mood import (
     NOTE_MAX,
     PROMPT,
+    TALK_NOTE_MAX,
     Checkin,
     MoodStore,
     Reply,
     VoiceUnavailable,
     checkin_day,
     confirmation,
+    low_runs,
     parse_reply,
     parse_score,
+    talk_summary,
     week_report,
 )
 
@@ -353,3 +356,43 @@ async def test_mood_week_job_is_silent_on_an_empty_week(store):
     jobs, sent = _jobs(store)
     await jobs.run_mood_week()
     assert sent == []
+
+
+# -- step 4: /talk ---------------------------------------------------------------
+
+
+def test_low_runs_need_consecutive_scored_days():
+    entries = [
+        _entry(date(2026, 10, 10), 2),
+        _entry(date(2026, 10, 11), 1),
+        _entry(date(2026, 10, 12), 2),
+        _entry(date(2026, 10, 13), 2),
+        _entry(date(2026, 10, 14), 4),
+        _entry(date(2026, 10, 15), 1),
+        _entry(date(2026, 10, 16), 1),
+        # 10/17 missing: the second stretch is only two days long.
+        _entry(date(2026, 10, 18), 1),
+    ]
+    assert low_runs(entries) == [(date(2026, 10, 10), date(2026, 10, 13))]
+
+
+def test_talk_summary_is_one_block_without_raw_entries(store):
+    store.record(date(2026, 10, 6), score=4, note="좋은 하루")
+    store.record(date(2026, 10, 14), score=2, note="회사 스트레스")
+    store.record(date(2026, 10, 15), score=2, raw_text="SECRET long entry\nwith lines")
+    store.record(DAY, score=1, note="잠을 못 잠 ```")
+    text = talk_summary(DAY, store.between(date(2026, 10, 5), DAY))
+    assert text.startswith("```\n") and text.endswith("\n```")
+    assert text.count("```") == 2
+    assert "SECRET" not in text
+    assert "10/5 to 10/18" in text
+    assert "Changes of 2 or more: 10/6 4 -> 10/14 2" in text
+    assert "Scored 2 or lower every day 10/14 to 10/15" not in text  # two days only
+    assert "- 10/18 (1): 잠을 못 잠" in text
+    assert text.index("10/18 (1)") < text.index("10/14 (2)")
+
+
+def test_talk_summary_cuts_long_notes():
+    text = talk_summary(DAY, [_entry(DAY, 3, "x" * NOTE_MAX)])
+    assert "x" * TALK_NOTE_MAX not in text
+    assert "x" * (TALK_NOTE_MAX - 1) + "…" in text

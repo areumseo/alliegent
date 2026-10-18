@@ -49,6 +49,7 @@ The evening alert stays silent when there is nothing pending. A daily "all clear
 | `/karrot …` | Second-hand listings: `list`, `add`, `sold`, `sent`, `paid`, `spent`, `bought`, `sales`, `summary` |
 | `/news` | Build the AI news digest now — acknowledges immediately and posts to the news channel when ready (under a minute) |
 | `/week` | The last seven days in `#mood`, as Sunday's post has them. Posted to `#mood` wherever it is typed |
+| `/talk` | The last two weeks of `#mood` as one block of text to paste into a conversation elsewhere: scores, averages, sharp changes, low stretches, repeated words and notes. Never includes long entries or transcripts. Seen only by you unless typed in `#mood` |
 | `/checkin <score> [note]` | Record today's mood, 1 to 5 or a face, with an optional one-line note. A second check-in the same day replaces the score. Seen only by you unless typed in `#mood`. See [Mood check-in](#mood-check-in) |
 
 Everything the bot writes in Discord is English, so nothing needs an input-method switch — except English quiz situations, for the reason given below. Data keeps the language it arrived in — Karrot item names are Korean because they are quoted from a Korean marketplace. Korean date words are still accepted as `when` values.
@@ -317,7 +318,7 @@ A score is a digit from 1 to 5 or a face (😞 1, 😕 2, 😐 3, 😊 4, 😁 5
 
 **The week** is worked out on the machine, with no model involved. It states what the scores were, how much of the agenda got done on low and high days, and which words repeated in notes; it does not say what any of that means. Long entries and transcripts are never read for it.
 
-**What may leave the machine.** Only scores and one-line notes may ever be sent to the Anthropic API, for the weekly summary and `/talk`. Long entries and transcripts stay in `mood.db`. Mentioning the bot in `#mood` is still a check-in, so nothing written there goes to the chat agent.
+**What may leave the machine.** Nothing, as built: no part of `#mood` calls a model. The rule if one is ever added is that only scores and one-line notes may be sent; long entries and transcripts stay in `mood.db`. `/talk` is for carrying elsewhere by hand, so it follows the same rule. Mentioning the bot in `#mood` is still a check-in, so nothing written there goes to the chat agent.
 
 ## Assets
 
