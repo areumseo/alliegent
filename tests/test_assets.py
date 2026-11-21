@@ -65,6 +65,38 @@ async def test_each_bucket_lands_in_the_right_group():
     assert snap.expected == 136  # espp + bonus
 
 
+async def test_a_reimbursement_is_expected_not_held():
+    """Money spent on the company's behalf and not yet paid back is on its way,
+    like an unpaid bonus: outside the total, inside TOTAL+EXP."""
+    _, svc = service([row("p1", "2026-09-14", savings=1000, reimbursement=40)])
+    snap = await svc.latest()
+    assert snap.total == 1000
+    assert snap.expected == 40
+    assert snap.total_with_expected == 1040
+
+
+def test_a_reimbursement_shows_in_the_expected_section():
+    snap = A.Snapshot("p1", MONDAY, {"Savings": 1000, "Reimbursement": 40})
+    text = A.snapshot_message(snap, None)
+    assert "Reimburse" in text and "EXPECTED" in text
+    assert all(line.isascii() for line in _table(text))
+
+
+async def test_a_reimbursement_rides_along_with_a_rollover():
+    client, svc = service(
+        [row("p1", "2026-09-17", savings=1000, bonus=300, reimbursement=40)]
+    )
+    await svc.roll_bonus_into_savings(OCT_1)
+    assert client.created[0][1]["Reimbursement"]["number"] == 40
+
+
+async def test_a_rollover_leaves_an_empty_reimbursement_unwritten():
+    """So a database that has not been given the column yet still takes the row."""
+    client, svc = service([row("p1", "2026-09-17", savings=1000, bonus=300)])
+    await svc.roll_bonus_into_savings(OCT_1)
+    assert "Reimbursement" not in client.created[0][1]
+
+
 async def test_expected_money_is_kept_out_of_the_total():
     """ESPP still accruing and an unpaid bonus are not held. In the total, every
     weekly change would mix money earned with an estimate revised."""
