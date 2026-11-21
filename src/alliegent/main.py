@@ -162,6 +162,8 @@ async def main() -> None:
     if mood is not None and config.mood.backup_dir and not secrets.mood_backup_key:
         log.error("MOOD_BACKUP_KEY not set — the weekly mood backup will not run")
 
+    calendar_sync = make_calendar_sync(agenda, config, secrets)
+
     def make_bot(enable_chat: bool) -> AlliegentBot:
         return AlliegentBot(
             config=config,
@@ -175,6 +177,7 @@ async def main() -> None:
             costs=costs,
             english=english,
             mood=mood,
+            calendar_sync=calendar_sync,
             secrets=secrets,
             guild_id=secrets.discord_guild_id,
             enable_chat=enable_chat,
@@ -212,6 +215,33 @@ async def main() -> None:
         if scheduler.running:
             scheduler.shutdown(wait=False)
         await client.aclose()
+
+
+def make_calendar_sync(agenda, config, secrets):
+    """The calendar → agenda copy, when ICLOUD_SYNC_CALENDARS names calendars."""
+    if not secrets.icloud_sync_calendars.strip():
+        return None
+    from .calendar_sync import CalendarSync, LinkStore
+    from .integrations.calendar import occurrences_from_caldav
+
+    if not (secrets.icloud_username and secrets.icloud_app_password):
+        log.error(
+            "ICLOUD_SYNC_CALENDARS is set but ICLOUD_USERNAME / ICLOUD_APP_PASSWORD "
+            "are not — the calendar → agenda copy is off"
+        )
+        return None
+
+    async def fetch(first, last):
+        return await occurrences_from_caldav(secrets, first, last, config.tz)
+
+    settings = config.calendar_sync
+    return CalendarSync(
+        agenda,
+        LinkStore(settings.resolved_path),
+        fetch,
+        lookahead_days=settings.lookahead_days,
+        max_removals=settings.max_removals,
+    )
 
 
 def run() -> None:

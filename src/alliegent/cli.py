@@ -9,6 +9,8 @@ can be checked before letting the scheduler loose:
     uv run python -m alliegent.cli feeds             # what each news feed returns
     uv run python -m alliegent.cli plan              # last month against its plan
     uv run python -m alliegent.cli projectlog        # each project's day, as posted at 22:00
+    uv run python -m alliegent.cli calsync           # what the calendar copy would change
+    uv run python -m alliegent.cli calsync --commit  # ...and change it
 
 Add --send to post the result to the Discord channel the job would normally
 use. That verifies the token, the channel IDs, and the bot's permissions in
@@ -39,6 +41,7 @@ JOBS = (
     "projectopen",
     "buildcosts",
     "buildtools",
+    "calsync",
 )
 
 # Diagnostics rather than jobs: they report on the setup instead of producing
@@ -58,6 +61,7 @@ JOB_CHANNEL = {
     "projectlog": "build",
     "projectopen": "build",
     "buildcosts": "build",
+    "calsync": "agenda",
     "buildtools": "build",
 }
 
@@ -243,6 +247,17 @@ async def _run(name: str, commit: bool, send: bool) -> int:
             message = await jobs.build_plan_check(commit=False)
             if message is None:
                 print(await plan_status(plans, jobs.today()))
+        elif name == "calsync":
+            from .main import make_calendar_sync
+
+            sync = make_calendar_sync(agenda, config, secrets)
+            if sync is None:
+                print("ICLOUD_SYNC_CALENDARS is not set: the calendar copy is off.")
+                return 1
+            result = await sync.run(jobs.today(), commit=commit)
+            message = result.summary()
+            if not commit:
+                print("(preview only — pass --commit to actually change rows)\n")
         elif name == "scaffold":
             message = await jobs.week_scaffold(commit=commit)
             if not commit:
@@ -283,7 +298,7 @@ def main() -> int:
     parser.add_argument(
         "--commit",
         action="store_true",
-        help="for the scaffold job, actually create the rows in Notion",
+        help="for scaffold and calsync, actually write the rows in Notion",
     )
     parser.add_argument(
         "--send",
