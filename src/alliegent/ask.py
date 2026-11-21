@@ -9,8 +9,9 @@ the model the same reports the bot would post there: costs and project status in
 #build, the snapshot and the plan in #assets, sales in #karrot, the day in
 anywhere else.
 
-It sees those reports and nothing else, and says so when they do not answer the
-question. It has no tools and writes nothing, which is the point of keeping it
+It also gets the last two weeks of messages from every channel but #mood (see
+channel_history), so a question about what was said is answered from what was
+written. It says so when neither answers the question. It has no tools and writes nothing, which is the point of keeping it
 apart from the chat agent: asking for an opinion can never change a row.
 
 The reports go to the Anthropic API with the question, as the agenda does when
@@ -62,6 +63,20 @@ whatever language they are in.
 Reports from the {where} channel:
 
 {context}\
+"""
+
+# Added when the channels themselves were read: what was said, not only the
+# reports. #mood is never among them.
+HISTORY = """
+
+Below the reports is what has recently been written in the server's channels,
+headed by channel, oldest first within each. Use it for questions about what
+was said, decided or posted. When you rely on it, say which channel it was in;
+if it is not there, say so rather than guessing.
+
+Recent messages:
+
+{history}\
 """
 
 
@@ -192,6 +207,7 @@ async def answer(
     api_key: str,
     today: date,
     kind: str | None,
+    history: str | None = None,
     client=None,
 ) -> str:
     """The model's view. `client` is injectable so the call can be tested."""
@@ -208,7 +224,7 @@ async def answer(
                 weekday=today.strftime("%A"),
                 where=f"#{kind}" if kind else "this",
                 context=context,
-            ),
+            ) + (HISTORY.format(history=history) if history else ""),
             # Low, as the chat agent has it. The figures are already in the prompt, so
             # what is left is saying what they mean, and a long think before it is
             # most of what made the answer take a minute.

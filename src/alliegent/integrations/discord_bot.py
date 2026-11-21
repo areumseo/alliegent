@@ -17,7 +17,7 @@ from discord import app_commands
 
 from .. import ask as ask_module
 from .. import assets as assets_module
-from .. import karrot, mood, reports
+from .. import channel_history, karrot, mood, reports
 from ..agenda import AgendaService, Project, ProjectService
 from ..chat import ChatAgent, strip_mentions
 from ..config import Config, Secrets
@@ -1516,8 +1516,8 @@ def _register(bot: AlliegentBot) -> None:
         message = retirement_message(sources, rates, day, rate_problem=problem)
         await _deliver(bot, interaction, message, "assets")
 
-    @tree.command(name="ask", description="Ask alliegent what it thinks")
-    @app_commands.describe(question="What you want an opinion on")
+    @tree.command(name="ask", description="Ask alliegent; it reads the reports and the channels")
+    @app_commands.describe(question="What you want to know or an opinion on")
     async def ask_cmd(interaction: discord.Interaction, question: str) -> None:
         # Answered where it is asked, in whichever channel: an opinion belongs to
         # the conversation it was asked in, so it is never routed elsewhere.
@@ -1532,12 +1532,17 @@ def _register(bot: AlliegentBot) -> None:
         try:
             parent = getattr(interaction.channel, "parent_id", None)
             kind = ask_module.channel_kind(bot.secrets, interaction.channel_id, parent)
-            context = await ask_module.gather_context(bot.jobs, kind)
+            # The reports and what was said in the channels (never #mood),
+            # read together.
+            context, history = await asyncio.gather(
+                ask_module.gather_context(bot.jobs, kind),
+                channel_history.gather(bot, bot.secrets, now=datetime.now(bot.config.tz)),
+            )
             reports_took = monotonic() - started
             reply = await asyncio.wait_for(
                 ask_module.answer(
                     question, context, api_key=bot.secrets.anthropic_api_key,
-                    today=bot.today(), kind=kind,
+                    today=bot.today(), kind=kind, history=history,
                 ),
                 timeout=ask_module.ANSWER_TIMEOUT + 5,
             )
