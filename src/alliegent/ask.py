@@ -23,9 +23,11 @@ the bot is mentioned. Amounts included, in #build and #assets.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from datetime import date
+from pathlib import Path
 
 from . import assets as assets_module
 
@@ -210,9 +212,14 @@ async def answer(
     today: date,
     kind: str | None,
     history: str | None = None,
+    turns: list[tuple[str, str]] | None = None,
     client=None,
 ) -> str:
-    """The model's view. `client` is injectable so the call can be tested."""
+    """The model's view. `client` is injectable so the call can be tested.
+
+    `turns` are the earlier questions and answers when this one replies to an
+    answer, oldest first, so a follow-up is read as part of that conversation.
+    """
     from anthropic import AsyncAnthropic
 
     own = client is None
@@ -231,7 +238,7 @@ async def answer(
             # what is left is saying what they mean, and a long think before it is
             # most of what made the answer take a minute.
             output_config={"effort": "low"},
-            messages=[{"role": "user", "content": question}],
+            messages=conversation(turns or [], question),
         )
     finally:
         if own:
@@ -242,3 +249,77 @@ async def answer(
         block.text for block in response.content if getattr(block, "type", None) == "text"
     ).strip()
     return reply or "…"
+
+
+# -- following up by replying -------------------------------------------------------
+#
+# A reply to one of the bot's /ask answers carries the conversation on: the
+# earlier questions and answers go to the model with the new one. Mentions stay
+# the agenda's, so asking a follow-up can never change a row.
+
+# Earlier exchanges sent with a follow-up. Past this the oldest drop off: the
+# reports and the channels are read afresh each time, so the turns only need to
+# carry what was asked and said.
+MAX_TURNS = 6
+# Answers remembered. A reply to one older than this starts afresh.
+MAX_THREADS = 300
+THREADS_PATH = "data/ask_threads.json"
+
+
+def conversation(turns: list[tuple[str, str]], question: str) -> list[dict]:
+    """The messages for the model: earlier exchanges, then the new question."""
+    messages: list[dict] = []
+    for asked, said in turns[-MAX_TURNS:]:
+        messages.append({"role": "user", "content": asked})
+        messages.append({"role": "assistant", "content": said})
+    messages.append({"role": "user", "content": question})
+    return messages
+
+
+class Threads:
+    """Which bot messages are /ask answers, and the conversation each ends.
+
+    Kept in a small file under data/ (gitignored, and kept by the updater) so a
+    restart -- every update is one -- does not cut a conversation off. Each
+    answer message keeps its whole conversation, so replying to an earlier
+    answer branches from there, as it would in person.
+    """
+
+    def __init__(self, path: str | Path = THREADS_PATH, limit: int = MAX_THREADS):
+        self.path = Path(path)
+        self.limit = limit
+        self._data: dict[str, list[list[str]]] | None = None
+
+    def _load(self) -> dict[str, list[list[str]]]:
+        if self._data is None:
+            try:
+                self._data = json.loads(self.path.read_text())
+            except FileNotFoundError:
+                self._data = {}
+            except (OSError, ValueError):
+                log.exception("ask: could not read %s; starting afresh", self.path)
+                self._data = {}
+        return self._data
+
+    def get(self, message_id: int) -> list[tuple[str, str]] | None:
+        """The conversation an answer message ends, or None if it is not one."""
+        turns = self._load().get(str(message_id))
+        return None if turns is None else [(q, a) for q, a in turns]
+
+    def remember(self, message_ids, turns: list[tuple[str, str]]) -> None:
+        """Note that these messages (one answer, maybe in parts) end `turns`."""
+        data = self._load()
+        kept = [[q, a] for q, a in turns[-MAX_TURNS:]]
+        for message_id in message_ids:
+            data.pop(str(message_id), None)  # re-added, so it counts as newest
+            data[str(message_id)] = kept
+        while len(data) > self.limit:
+            data.pop(next(iter(data)))
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, ensure_ascii=False))
+            tmp.replace(self.path)
+        except OSError:
+            # Still remembered until the next restart.
+            log.exception("ask: could not save %s", self.path)

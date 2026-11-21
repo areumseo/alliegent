@@ -69,6 +69,8 @@ class AlliegentBot(discord.Client):
         self.secrets = secrets
         self.guild_id = guild_id
         self.tree = app_commands.CommandTree(self)
+        # Which messages are /ask answers, so a reply to one carries it on.
+        self.ask_threads = ask_module.Threads()
         self._tasks: set[asyncio.Task[None]] = set()
         self.chat = (
             ChatAgent(secrets.anthropic_api_key, agenda, config, secrets)
@@ -128,6 +130,16 @@ class AlliegentBot(discord.Client):
             await self._english_message(message)
             return
 
+        # A reply to an /ask answer carries that conversation on, mention or
+        # not. Before the chat agent: a reply pings the bot by default, and a
+        # follow-up question must never reach the tools that change the agenda.
+        ref = getattr(message, "reference", None)
+        if ref is not None and ref.message_id and self.user is not None:
+            turns = self.ask_threads.get(ref.message_id)
+            if turns is not None:
+                await self._ask_followup(message, turns)
+                return
+
         if self.chat is None or self.user is None:
             return
         if message.author.bot or not self.user.mentioned_in(message):
@@ -148,6 +160,59 @@ class AlliegentBot(discord.Client):
                 reply = f"⚠️ Something went wrong: {type(exc).__name__}"
         for part in reports.chunk(reply):
             await message.reply(part, mention_author=False)
+
+    async def ask(self, channel, question: str, turns=None) -> str:
+        """An /ask answer for `channel`: its reports and the channels' recent
+        messages (never #mood), read together, then the model's view."""
+        started = monotonic()
+        parent = getattr(channel, "parent_id", None)
+        kind = ask_module.channel_kind(self.secrets, getattr(channel, "id", None), parent)
+        context, history = await asyncio.gather(
+            ask_module.gather_context(self.jobs, kind),
+            channel_history.gather(self, self.secrets, now=datetime.now(self.config.tz)),
+        )
+        reports_took = monotonic() - started
+        reply = await asyncio.wait_for(
+            ask_module.answer(
+                question, context, api_key=self.secrets.anthropic_api_key,
+                today=self.today(), kind=kind, history=history, turns=turns,
+            ),
+            timeout=ask_module.ANSWER_TIMEOUT + 5,
+        )
+        # Where the time went, so a slow one can be told from a slow model.
+        log.info(
+            "ask in %s: reports %.1fs, answer %.1fs%s",
+            kind or "an unrecognised channel", reports_took,
+            monotonic() - started - reports_took,
+            f", following {len(turns)} earlier" if turns else "",
+        )
+        return reply
+
+    async def _ask_followup(self, message: discord.Message, turns) -> None:
+        """A reply to an /ask answer: answered as part of that conversation."""
+        text = strip_mentions(message.content, self.user.id) if self.user else message.content
+        if not text:
+            return
+        if not self.secrets.anthropic_api_key:
+            await message.reply("⚠️ ANTHROPIC_API_KEY is not set.", mention_author=False)
+            return
+        async with message.channel.typing():
+            try:
+                reply = await self.ask(message.channel, text, turns)
+            except TimeoutError:
+                log.warning("ask follow-up timed out")
+                reply = "⚠️ That took too long, so I gave up. Try again in a minute."
+                await message.reply(reply, mention_author=False)
+                return
+            except Exception:
+                log.exception("ask follow-up failed")
+                await message.reply("⚠️ I couldn't answer that just now.", mention_author=False)
+                return
+        sent = [
+            await message.reply(part, mention_author=False, suppress_embeds=True)
+            for part in reports.chunk(reply)
+        ]
+        self.ask_threads.remember([m.id for m in sent], [*turns, (text, reply)])
 
     async def notify(self, message: str, kind: str = "agenda") -> list[discord.Message]:
         """Push a scheduled message to the channel configured for `kind`.
@@ -1527,27 +1592,10 @@ def _register(bot: AlliegentBot) -> None:
             return
         # Everything that can fail is inside: after defer(), an error that
         # escapes leaves "thinking…" showing until Discord gives up on it.
-        started = monotonic()
-        reports_took = 0.0
         try:
-            parent = getattr(interaction.channel, "parent_id", None)
-            kind = ask_module.channel_kind(bot.secrets, interaction.channel_id, parent)
-            # The reports and what was said in the channels (never #mood),
-            # read together.
-            context, history = await asyncio.gather(
-                ask_module.gather_context(bot.jobs, kind),
-                channel_history.gather(bot, bot.secrets, now=datetime.now(bot.config.tz)),
-            )
-            reports_took = monotonic() - started
-            reply = await asyncio.wait_for(
-                ask_module.answer(
-                    question, context, api_key=bot.secrets.anthropic_api_key,
-                    today=bot.today(), kind=kind, history=history,
-                ),
-                timeout=ask_module.ANSWER_TIMEOUT + 5,
-            )
+            reply = await bot.ask(interaction.channel, question)
         except TimeoutError:
-            log.warning("ask timed out after %.0fs", monotonic() - started)
+            log.warning("ask timed out")
             await interaction.followup.send(
                 "⚠️ That took too long, so I gave up. Try again in a minute."
             )
@@ -1556,13 +1604,12 @@ def _register(bot: AlliegentBot) -> None:
             log.exception("ask failed")
             await interaction.followup.send("⚠️ I couldn't answer that just now.")
             return
-        # Where the time went, so a slow one can be told from a slow model.
-        log.info(
-            "ask in %s: reports %.1fs, answer %.1fs",
-            kind or "an unrecognised channel", reports_took,
-            monotonic() - started - reports_took,
-        )
-        await _reply(interaction, reply)
+        # Kept, so replying to the answer carries the conversation on.
+        sent = [
+            await interaction.followup.send(part, suppress_embeds=True, wait=True)
+            for part in reports.chunk(reply)
+        ]
+        bot.ask_threads.remember([m.id for m in sent if m is not None], [(question, reply)])
 
     projects_group = app_commands.Group(
         name="build", description="Build: projects' weeks, days and status, and tool costs"
