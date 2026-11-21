@@ -37,10 +37,12 @@ log = logging.getLogger(__name__)
 LIQUID = ("Savings", "Stock/Funds", "Vested")
 # Locked: assets, but not spendable now. Still counted in the total.
 LOCKED = ("Pension", "Deposit", "Mom")
-# Expected: on its way, not held. Kept out of the total. Two columns rather than
-# one, because they move differently -- ESPP builds up each payday, a bonus is a
-# single estimate -- and a single column would hide which one changed.
-EXPECTED = ("ESPP", "Bonus")
+# Expected: on its way, not held. Kept out of the total. Separate columns rather
+# than one, because they move differently -- ESPP builds up each payday, a bonus
+# is a single estimate, a reimbursement is money already spent and waiting to
+# come back -- and a single column would hide which one changed.
+REIMBURSEMENT = "Reimbursement"
+EXPECTED = ("ESPP", "Bonus", REIMBURSEMENT)
 
 HELD = LIQUID + LOCKED
 BUCKETS = HELD + EXPECTED
@@ -62,6 +64,7 @@ LABELS = {
     "Mom": "Mom",
     "ESPP": "ESPP (6mo)",
     "Bonus": "Bonus",
+    "Reimbursement": "Reimburse",
 }
 
 
@@ -174,7 +177,14 @@ class AssetService:
         if not amount:
             return None
         before = base.amounts.get(target, 0)
-        amounts = {name: base.amounts.get(name, 0) for name in BUCKETS}
+        # Reimbursement is the newest column, so a database not yet given it
+        # must still take the write: like SNOW below, it is carried only when
+        # there is some.
+        amounts = {
+            name: base.amounts.get(name, 0)
+            for name in BUCKETS
+            if name != REIMBURSEMENT or base.amounts.get(name)
+        }
         amounts[target] = before + amount
         amounts[source] = 0
         # Carried too, or a rollover row on the 1st -- which is what the plan
