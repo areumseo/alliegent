@@ -43,6 +43,7 @@ class AlliegentBot(discord.Client):
         costs=None,
         english=None,
         mood=None,
+        calendar_sync=None,
         guild_id: int = 0,
         enable_chat: bool = True,
     ) -> None:
@@ -87,6 +88,7 @@ class AlliegentBot(discord.Client):
             costs=costs,
             english=english,
             mood=mood,
+            calendar_sync=calendar_sync,
             anthropic_api_key=secrets.anthropic_api_key,
             calendar_source=make_source(secrets),
             secrets=secrets,

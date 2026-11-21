@@ -260,6 +260,24 @@ The Notion row is written first, so a calendar failure reports itself on its own
 **A calendar that can't be read says so in the brief.** The block is simply absent otherwise, which is indistinguishable from a day with no events — that hid an expired app password for a week. An authorisation failure is named specifically, because it will not clear up on its own: only a new app-specific password from appleid.apple.com fixes it.
 
 
+### Calendar → agenda
+
+Appointments typed into the calendar used to be typed a second time as agenda rows. `ICLOUD_SYNC_CALENDARS` names the calendars whose events are copied into the agenda database instead, every 15 minutes (`[calendar_sync]` in `alliegent.toml`), from today through 14 days ahead:
+
+- a new event becomes a row with its title, day and time (all-day events get no time), and a category inferred the way `/add` infers one;
+- a moved or renamed event moves or renames its row, and a deleted one sends its row to Notion's trash, where it can be restored;
+- a recurring event gets one row per occurrence, and moving one occurrence moves only that row.
+
+One way only: the calendar decides the day and time, and what is set only in Notion (status, category, project, priority) is never touched. A title edited in Notion stays until the event's own title changes. A row deleted in Notion while its event stays is taken as "not on my list" and is not brought back.
+
+Named calendars only, never "all": holidays and shared calendars would fill the agenda with rows that are not anyone's to do. A named calendar that does not exist stops the copy and says so in #agenda, once, and again when it works.
+
+Which row came from which event is kept in `data/calendar_sync.db` on the machine running the bot, so the database's columns do not change. On the first run, a row already typed by hand for the same day and activity ("Cafe shift 11AM" for the calendar's "Cafe shift") is linked rather than copied again. Events the bot itself wrote with `/add … cal: true` are not copied back.
+
+Deleting is the one step guarded beyond that. More than 10 events gone in one run (`max_removals`), or a read in which any event failed to parse, trashes nothing and says so in #agenda: a calendar that came back empty by mistake should not empty the agenda with it.
+
+`uv run python -m alliegent.cli calsync` previews what a run would change; add `--commit` to carry it out.
+
 ## The AI news digest
 
 At 09:00 the digest covers **yesterday** — at nine in the morning the day's own stories have barely been filed, and the day that just finished is the one worth reading about.

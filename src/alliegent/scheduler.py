@@ -7,6 +7,7 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from .config import Config
 from .jobs import Jobs
@@ -72,6 +73,12 @@ def _announcing(jobs: Jobs, name: str, func):
                 log.exception("could not report the failure of %s", name)
 
     return run
+
+
+def _now(config: Config):
+    from datetime import datetime
+
+    return datetime.now(config.tz)
 
 
 def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
@@ -185,6 +192,22 @@ def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
                 max_instances=1,
             )
             log.info("scheduled espp_rollover on %s at %s", day, sched.espp_rollover_time)
+    if jobs.calendar_sync is not None:
+        minutes = config.calendar_sync.interval_minutes
+        scheduler.add_job(
+            # Not wrapped in _announcing: the job reports its own problems
+            # once, rather than every few minutes.
+            jobs.run_calendar_sync,
+            IntervalTrigger(minutes=minutes, timezone=config.tz),
+            id="calendar_sync",
+            name="calendar_sync",
+            # First run right away, so a restart does not wait a full interval.
+            next_run_time=_now(config),
+            misfire_grace_time=minutes * 60,
+            coalesce=True,
+            max_instances=1,
+        )
+        log.info("scheduled calendar_sync every %d minutes", minutes)
     add("plan_check", jobs.run_plan_check, time=sched.plan_report_time)
     add("project_log", jobs.run_project_log, time=sched.project_log_time)
     add("project_open", jobs.run_project_open, time=sched.project_open_time)

@@ -6,9 +6,11 @@ revoked by unpublishing and republishing. CalDAV authenticates with an
 app-specific password instead — nothing is published, and the password can be
 revoked on its own from the Apple ID account page.
 
-Calendar events stay in the calendar; the agenda database stays for tasks.
-Nothing is written to Notion, so there is no sync problem to solve — a moved
-or cancelled event simply reads differently tomorrow.
+The brief reads the calendar fresh every morning, so a moved or cancelled
+event simply reads differently tomorrow. Copying events into the agenda is a
+separate, opt-in job (`calendar_sync`), which reads them through
+`occurrences_from_caldav` below: that path carries each event's identity, so
+a moved event can follow into Notion instead of arriving twice.
 
 Recurrence is the part that has to be right: an ICS stores "every Tue and Thu
 at 19:10" as one VEVENT with an RRULE, plus separate exception entries for the
@@ -292,6 +294,150 @@ def _caldav_fetch(
                 except Exception:
                     log.exception("could not parse a CalDAV event")
     return events
+
+
+# -- occurrences, for copying into the agenda -------------------------------
+
+
+class CalendarSyncError(RuntimeError):
+    """The calendars to copy from could not be read in full."""
+
+
+@dataclass(frozen=True)
+class Occurrence:
+    """One event on one day, with an identity that survives a move.
+
+    `key` is the event's UID for a one-off event, so changing its time keeps
+    the key. A recurring event's occurrences share one UID, so each also
+    carries the slot it was scheduled for (its RECURRENCE-ID): moving one
+    Thursday's class keeps that Thursday's key, and the series' other
+    occurrences keep theirs.
+    """
+
+    key: str
+    summary: str
+    day: date
+    at: time | None  # None for all-day events
+    calendar: str
+
+
+# Events the bot itself wrote (`/add … cal: true`, chat) carry this UID
+# suffix. They began as agenda rows, so copying them back would duplicate the
+# row they came from.
+OWN_UID_SUFFIX = "@alliegent"
+
+
+def _slot(value: datetime | date) -> str:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.strftime("%Y%m%dT%H%M%S")
+        return value.astimezone(ZoneInfo("UTC")).strftime("%Y%m%dT%H%M%SZ")
+    return value.isoformat()
+
+
+def _occurrences_from(
+    ics: bytes, first: date, last: date, tz: ZoneInfo, calendar_name: str = ""
+) -> list[Occurrence]:
+    """Every occurrence dated in [first, last], by local date."""
+    calendar = icalendar.Calendar.from_ical(ics)
+    recurring = {
+        str(c.get("UID"))
+        for c in calendar.walk("VEVENT")
+        if c.get("RRULE") or c.get("RDATE") or c.get("RECURRENCE-ID")
+    }
+    start = datetime.combine(first, time.min, tzinfo=tz)
+    end = datetime.combine(last + timedelta(days=1), time.min, tzinfo=tz)
+
+    found: list[Occurrence] = []
+    for component in recurring_ical_events.of(calendar).between(start, end):
+        uid = str(component.get("UID", "")).strip()
+        if not uid or uid.endswith(OWN_UID_SUFFIX):
+            continue
+        if str(component.get("STATUS", "")).upper() == "CANCELLED":
+            continue
+        dtstart = component.get("DTSTART")
+        if dtstart is None:
+            continue
+        value = dtstart.dt
+        if isinstance(value, datetime):
+            local = value.astimezone(tz) if value.tzinfo else value.replace(tzinfo=tz)
+            day, at = local.date(), local.time().replace(tzinfo=None)
+        else:
+            day, at = value, None
+        if not first <= day <= last:
+            continue
+        if uid in recurring:
+            rid = component.get("RECURRENCE-ID") or dtstart
+            key = f"{uid}#{_slot(rid.dt)}"
+        else:
+            key = uid
+        summary = str(component.get("SUMMARY", "")).strip() or "(untitled)"
+        found.append(Occurrence(key, summary, day, at, calendar_name))
+    return found
+
+
+def _caldav_fetch_range(
+    url: str,
+    username: str,
+    password: str,
+    first: date,
+    last: date,
+    tz: ZoneInfo,
+    names: list[str],
+) -> tuple[list[Occurrence], bool]:
+    """Blocking read of the named calendars over [first, last].
+
+    Stricter than the brief's read, because here an event that failed to come
+    back reads as an event that was deleted. A missing calendar or a failed
+    search raises; an event that cannot be parsed is skipped, and the second
+    value comes back False so the caller knows not to remove anything.
+    """
+    import caldav
+
+    start = datetime.combine(first, time.min, tzinfo=tz)
+    end = datetime.combine(last + timedelta(days=1), time.min, tzinfo=tz)
+
+    found: list[Occurrence] = []
+    complete = True
+    with caldav.DAVClient(url=url, username=username, password=password) as client:
+        calendars = {_display_name(c): c for c in _event_calendars(client)}
+        missing = [n for n in names if n not in calendars]
+        if missing:
+            raise CalendarSyncError(
+                f"No calendar named {', '.join(map(repr, missing))}. "
+                f"Available: {', '.join(sorted(calendars))}"
+            )
+        for name in names:
+            for obj in calendars[name].search(start=start, end=end, event=True):
+                try:
+                    found.extend(_occurrences_from(obj.data.encode(), first, last, tz, name))
+                except Exception:
+                    log.exception("could not parse a CalDAV event in %r", name)
+                    complete = False
+    return found, complete
+
+
+async def occurrences_from_caldav(
+    secrets, first: date, last: date, tz: ZoneInfo, url: str = CALDAV_URL
+) -> tuple[list[Occurrence], bool]:
+    """Occurrences in the calendars named by ICLOUD_SYNC_CALENDARS."""
+    names = [n.strip() for n in secrets.icloud_sync_calendars.split(",") if n.strip()]
+    if not names:
+        return [], True
+    if not (secrets.icloud_username and secrets.icloud_app_password):
+        raise CalendarSyncError(
+            "Copying the calendar needs ICLOUD_USERNAME and ICLOUD_APP_PASSWORD."
+        )
+    return await asyncio.to_thread(
+        _caldav_fetch_range,
+        url,
+        secrets.icloud_username,
+        secrets.icloud_app_password,
+        first,
+        last,
+        tz,
+        names,
+    )
 
 
 async def events_from_caldav(

@@ -101,6 +101,14 @@ progress = "Progress"
 active = "In progress"
 done = "Done"
 
+[calendar_sync]
+# Copies events from the calendars named by ICLOUD_SYNC_CALENDARS (in .env)
+# into the agenda. Off while that is empty.
+interval_minutes = 15   # Apple's calendar cannot announce a change; this is the delay
+lookahead_days = 14     # today through this many days ahead
+max_removals = 10       # more deletions than this in one run are held and reported
+db_path = "data/calendar_sync.db"
+
 [mood]
 # Local SQLite file for #mood check-ins. Relative to the repository root;
 # data/ is gitignored.

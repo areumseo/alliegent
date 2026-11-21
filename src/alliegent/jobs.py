@@ -43,6 +43,7 @@ class Jobs:
         costs=None,
         english=None,
         mood=None,
+        calendar_sync=None,
         anthropic_api_key: str = "",
         calendar_source: Callable | None = None,
         secrets: Secrets | None = None,
@@ -58,6 +59,10 @@ class Jobs:
         self.costs = costs
         self.english = english
         self.mood = mood
+        self.calendar_sync = calendar_sync
+        # The last calendar-sync problem reported, so a run every fifteen
+        # minutes says so once rather than ninety-six times a day.
+        self._calendar_sync_problem: str | None = None
         self.config = config
         self.notify = notify
         self._anthropic_api_key = anthropic_api_key
@@ -496,6 +501,50 @@ class Jobs:
             )
             return
         log.info("mood backup written")
+
+    async def run_calendar_sync(self) -> None:
+        """Copy new calendar events into the agenda; follow moves and deletes.
+
+        Runs every few minutes, so it reports problems itself instead of
+        through the scheduler's failure notice: once when a problem starts or
+        changes, and once when it clears.
+        """
+        if self.calendar_sync is None:
+            return
+        try:
+            result = await self.calendar_sync.run(self.today())
+        except Exception as exc:
+            log.exception("calendar sync failed")
+            problem = str(exc) or type(exc).__name__
+            if "authorization" in type(exc).__name__.casefold():
+                problem = (
+                    "the calendar refused the app password. Make a new one at "
+                    "appleid.apple.com and set ICLOUD_APP_PASSWORD."
+                )
+            if problem != self._calendar_sync_problem:
+                self._calendar_sync_problem = problem
+                await self.notify(
+                    f"⚠️ Calendar → agenda copy stopped: {problem}", "agenda"
+                )
+            return
+
+        previous = self._calendar_sync_problem
+        if previous and not previous.startswith("held:"):
+            await self.notify("✅ Calendar → agenda copy is working again.", "agenda")
+        problem = None
+        if result.held:
+            problem = "held:" + ",".join(sorted(result.held))
+            if problem != previous:
+                await self.notify(
+                    f"⚠️ {len(result.held)} events are gone from the calendar, so "
+                    "their agenda rows would be trashed. That many at once, or a "
+                    "read that was not complete, looks like a bad read, so nothing "
+                    "was removed: " + ", ".join(result.held),
+                    "agenda",
+                )
+        self._calendar_sync_problem = problem
+        if result.changed:
+            log.info("calendar sync: %s", result.summary())
 
     async def run_bonus_rollover(self) -> None:
         if self.assets is None:

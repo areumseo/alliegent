@@ -68,6 +68,11 @@ class Secrets(BaseSettings):
     # into whichever calendar happened to come back first is not a guess worth
     # making on someone's real calendar.
     icloud_write_calendar: str = ""
+    # Calendars whose events are copied into the agenda database, by name,
+    # comma-separated. Empty switches the copy off. Deliberately not "all":
+    # holidays and shared calendars would fill the agenda with rows that are
+    # not anyone's to do.
+    icloud_sync_calendars: str = ""
 
     # Fallback source. ICS subscription links are unauthenticated — anyone
     # holding one can read that calendar — so they are secrets despite looking
@@ -358,6 +363,28 @@ class MoodConfig(BaseModel):
         return path if path.is_absolute() else REPO_ROOT / path
 
 
+class CalendarSyncConfig(BaseModel):
+    # How often the calendar is read for new, moved and deleted events.
+    # Apple's calendar cannot announce a change, so this is the delay.
+    interval_minutes: int = 15
+    # Events from today through this many days ahead are copied. Further out
+    # is left until it comes into range, so a far-off plan is not a row to
+    # keep moving for months.
+    lookahead_days: int = 14
+    # More removals than this in one run are held back and reported rather
+    # than carried out: a calendar that came back empty by mistake should not
+    # empty the agenda with it.
+    max_removals: int = 10
+    # Which calendar event each agenda row came from. Local, like #mood's
+    # database: no Notion column to add, and data/ survives the updater.
+    db_path: str = "data/calendar_sync.db"
+
+    @property
+    def resolved_path(self) -> Path:
+        path = Path(self.db_path).expanduser()
+        return path if path.is_absolute() else REPO_ROOT / path
+
+
 class Config(BaseModel):
     timezone: str = "Asia/Seoul"
     schedule: Schedule = Field(default_factory=Schedule)
@@ -367,6 +394,7 @@ class Config(BaseModel):
     karrot: KarrotConfig = Field(default_factory=KarrotConfig)
     plans: PlansConfig = Field(default_factory=PlansConfig)
     mood: MoodConfig = Field(default_factory=MoodConfig)
+    calendar_sync: CalendarSyncConfig = Field(default_factory=CalendarSyncConfig)
 
     @property
     def tz(self) -> ZoneInfo:
