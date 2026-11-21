@@ -11,7 +11,9 @@ anywhere else.
 
 It also gets the last two weeks of messages from every channel but #mood (see
 channel_history), so a question about what was said is answered from what was
-written. It says so when neither answers the question. It has no tools and writes nothing, which is the point of keeping it
+written. It says so when neither answers the question.
+
+It has no tools and writes nothing, which is the point of keeping it
 apart from the chat agent: asking for an opinion can never change a row.
 
 The reports go to the Anthropic API with the question, as the agenda does when
