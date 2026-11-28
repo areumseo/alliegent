@@ -22,7 +22,7 @@ from ..agenda import AgendaService, Project, ProjectService
 from ..chat import ChatAgent, strip_mentions
 from ..config import Config, Secrets
 from ..jobs import Jobs
-from .calendar import make_source
+from .calendar import make_range_source, make_source
 
 log = logging.getLogger(__name__)
 
@@ -91,6 +91,7 @@ class AlliegentBot(discord.Client):
             mood=mood,
             anthropic_api_key=secrets.anthropic_api_key,
             calendar_source=make_source(secrets),
+            calendar_range=make_range_source(secrets),
             secrets=secrets,
             post_project=self.post_project,
         )

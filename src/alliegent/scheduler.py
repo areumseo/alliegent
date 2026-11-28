@@ -40,6 +40,7 @@ JOB_CHANNELS = {
     "project_log": "build",
     "project_open": "build",
     "build_costs": "build",
+    "calendar_import": "agenda",
     "mood_checkin": "mood",
     "mood_week": "mood",
     "mood_cleanup": "mood",
@@ -188,6 +189,19 @@ def build_scheduler(jobs: Jobs, config: Config) -> AsyncIOScheduler:
     add("plan_check", jobs.run_plan_check, time=sched.plan_report_time)
     add("project_log", jobs.run_project_log, time=sched.project_log_time)
     add("project_open", jobs.run_project_open, time=sched.project_open_time)
+    every = config.calendar_import.every_minutes
+    if every > 0:
+        scheduler.add_job(
+            jobs.run_calendar_import,
+            CronTrigger(minute=f"*/{every}", timezone=config.tz),
+            id="calendar_import",
+            name="calendar_import",
+            # Frequent and idempotent: a missed run is caught up by the next.
+            misfire_grace_time=every * 60,
+            coalesce=True,
+            max_instances=1,
+        )
+        log.info("scheduled calendar_import every %d minutes", every)
     if sched.build_costs_time.strip():
         hour, minute = _hhmm(sched.build_costs_time)
         scheduler.add_job(

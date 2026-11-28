@@ -68,6 +68,12 @@ class Secrets(BaseSettings):
     # into whichever calendar happened to come back first is not a guess worth
     # making on someone's real calendar.
     icloud_write_calendar: str = ""
+    # Which agenda category each calendar's events are filed under when they
+    # are copied into the agenda: "Calendar=Category", separated by ";" or new
+    # lines. Here rather than in alliegent.toml because calendar names are
+    # personal and that file is public. An unlisted calendar's events get the
+    # category inferred from how the same title was filed before.
+    calendar_categories: str = ""
 
     # Fallback source. ICS subscription links are unauthenticated — anyone
     # holding one can read that calendar — so they are secrets despite looking
@@ -186,6 +192,9 @@ class AgendaProps(BaseModel):
     # A select, suggested as High / Medium / Low. Optional on every item, and
     # "" turns the column off entirely.
     priority: str = "Priority"
+    # Text column the calendar import writes each event's key into, so the same
+    # occurrence is never added twice. "" switches the import off.
+    calendar_id: str = "Calendar ID"
 
 
 class ProjectProps(BaseModel):
@@ -309,6 +318,22 @@ class AgendaConfig(BaseModel):
     )
 
 
+class CalendarImportConfig(BaseModel):
+    # Every this many minutes the calendar is read and new events are copied
+    # into the agenda. 0 switches it off.
+    every_minutes: int = 15
+    # How far ahead to copy, counting today.
+    days: int = 14
+    # Every key ever imported, so a row deleted in Notion is not brought back
+    # on the next run. data/ is gitignored and survives the updater's reset.
+    imported_path: str = "data/calendar_imported.json"
+
+    @property
+    def resolved_path(self) -> Path:
+        path = Path(self.imported_path).expanduser()
+        return path if path.is_absolute() else REPO_ROOT / path
+
+
 class ProjectsConfig(BaseModel):
     stale_after_days: int = 7
     props: ProjectProps = Field(default_factory=ProjectProps)
@@ -367,6 +392,7 @@ class Config(BaseModel):
     karrot: KarrotConfig = Field(default_factory=KarrotConfig)
     plans: PlansConfig = Field(default_factory=PlansConfig)
     mood: MoodConfig = Field(default_factory=MoodConfig)
+    calendar_import: CalendarImportConfig = Field(default_factory=CalendarImportConfig)
 
     @property
     def tz(self) -> ZoneInfo:

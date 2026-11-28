@@ -279,6 +279,7 @@ def test_scheduler_registers_the_enabled_jobs():
         "project_log",
         "project_open",
         "build_costs",
+        "calendar_import",
         "weekly_planning",
         "project_week",
         "weekly_review",
