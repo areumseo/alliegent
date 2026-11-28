@@ -6,9 +6,10 @@ revoked by unpublishing and republishing. CalDAV authenticates with an
 app-specific password instead — nothing is published, and the password can be
 revoked on its own from the Apple ID account page.
 
-Calendar events stay in the calendar; the agenda database stays for tasks.
-Nothing is written to Notion, so there is no sync problem to solve — a moved
-or cancelled event simply reads differently tomorrow.
+The daily brief reads the calendar as it is, so a moved or cancelled event
+simply reads differently tomorrow. Events are also copied into the agenda by
+`calendar_import`, which needs each one's UID and calendar, so they are carried
+on every Event.
 
 Recurrence is the part that has to be right: an ICS stores "every Tue and Thu
 at 19:10" as one VEVENT with an RRULE, plus separate exception entries for the
@@ -45,6 +46,14 @@ class Event:
     summary: str
     start: datetime | None  # None for all-day events
     all_day: bool
+    # The calendar's own identity for the event. A recurring event has one UID
+    # for every occurrence, so the import keys on it together with the day.
+    uid: str = ""
+    # The display name of the calendar it came from, e.g. "Work".
+    calendar: str = ""
+    # The local day the occurrence falls on -- needed for all-day events,
+    # which have no start time to read it from.
+    day: date | None = None
 
     def sort_key(self) -> tuple[int, time]:
         # All-day events belong at the top of the day, ahead of timed ones.
@@ -78,14 +87,15 @@ async def _fetch(client: httpx.AsyncClient, url: str) -> bytes | None:
         return None
 
 
-def _events_from(ics: bytes, day: date, tz: ZoneInfo) -> list[Event]:
-    calendar = icalendar.Calendar.from_ical(ics)
+def _events_from(ics: bytes, day: date, tz: ZoneInfo, calendar: str = "") -> list[Event]:
+    parsed = icalendar.Calendar.from_ical(ics)
     events: list[Event] = []
     # `.at(day)` covers the whole day; `.between(day, day)` is a zero-length
     # span and quietly returns nothing.
-    for component in recurring_ical_events.of(calendar).at(day):
+    for component in recurring_ical_events.of(parsed).at(day):
         start = component.get("DTSTART")
         summary = str(component.get("SUMMARY", "")).strip() or "(untitled)"
+        uid = str(component.get("UID", "")).strip()
         value = start.dt if start is not None else None
 
         if isinstance(value, datetime):
@@ -95,9 +105,9 @@ def _events_from(ics: bytes, day: date, tz: ZoneInfo) -> list[Event]:
             if local.date() != day:
                 # A recurrence can land just outside the day once converted.
                 continue
-            events.append(Event(summary, local, all_day=False))
+            events.append(Event(summary, local, False, uid, calendar, day))
         else:
-            events.append(Event(summary, None, all_day=True))
+            events.append(Event(summary, None, True, uid, calendar, day))
     return events
 
 
@@ -288,10 +298,103 @@ def _caldav_fetch(
                 # recurrence, EXDATE and timezone handling stay identical
                 # rather than depending on what the server chose to expand.
                 try:
-                    events.extend(_events_from(obj.data.encode(), day, tz))
+                    events.extend(
+                        _events_from(obj.data.encode(), day, tz, _display_name(calendar))
+                    )
                 except Exception:
                     log.exception("could not parse a CalDAV event")
     return events
+
+
+def calendar_names(url: str, username: str, password: str) -> list[str]:
+    """The event calendars on the account, by display name. Blocking."""
+    import caldav
+
+    with caldav.DAVClient(url=url, username=username, password=password) as client:
+        return sorted(_display_name(c) for c in _event_calendars(client))
+
+
+def _caldav_fetch_range(
+    url: str,
+    username: str,
+    password: str,
+    first: date,
+    days: int,
+    tz: ZoneInfo,
+    names: list[str],
+) -> list[Event]:
+    """Every occurrence from `first` for `days` days, with its calendar's name.
+
+    One search per calendar for the whole span, then each object expanded day
+    by day with the same code the brief uses, so a recurring event yields one
+    occurrence per day it falls on, exceptions and all.
+    """
+    import caldav
+
+    start = datetime.combine(first, time.min, tzinfo=tz)
+    end = start + timedelta(days=days)
+    span = [first + timedelta(days=i) for i in range(days)]
+    events: list[Event] = []
+    with caldav.DAVClient(url=url, username=username, password=password) as client:
+        for calendar in _event_calendars(client):
+            name = _display_name(calendar)
+            if names and name not in names:
+                continue
+            try:
+                found = calendar.search(start=start, end=end, event=True)
+            except Exception:
+                log.exception("CalDAV search failed for calendar %r", name)
+                continue
+            for obj in found:
+                data = obj.data.encode()
+                for day in span:
+                    try:
+                        events.extend(_events_from(data, day, tz, name))
+                    except Exception:
+                        log.exception("could not parse a CalDAV event")
+                        break
+    return events
+
+
+async def events_between_caldav(
+    username: str,
+    password: str,
+    first: date,
+    days: int,
+    tz: ZoneInfo,
+    names: list[str] | None = None,
+    url: str = CALDAV_URL,
+) -> list[Event]:
+    """Occurrences over a span of days. The same event in two calendars is
+    kept once, the first calendar's."""
+    if not (username and password):
+        return []
+    events = await asyncio.to_thread(
+        _caldav_fetch_range, url, username, password, first, days, tz, names or []
+    )
+    unique: dict[tuple, Event] = {}
+    for event in events:
+        unique.setdefault((event.summary, event.day, event.start, event.all_day), event)
+    return list(unique.values())
+
+
+# What the import is handed: "every occurrence from this day for this many days".
+RangeSource = Callable[["date", int, "ZoneInfo"], Awaitable[list["Event"]]]
+
+
+def make_range_source(secrets) -> RangeSource | None:
+    """The span reader for the import. CalDAV only: an ICS feed has the UIDs
+    too, but it is the fallback for reading, not a source worth syncing from."""
+    if not (secrets.icloud_username and secrets.icloud_app_password):
+        return None
+    names = [n.strip() for n in secrets.icloud_calendars.split(",") if n.strip()]
+
+    async def caldav_range(first: date, days: int, tz: ZoneInfo) -> list[Event]:
+        return await events_between_caldav(
+            secrets.icloud_username, secrets.icloud_app_password, first, days, tz, names
+        )
+
+    return caldav_range
 
 
 async def events_from_caldav(

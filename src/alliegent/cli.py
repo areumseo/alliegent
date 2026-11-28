@@ -39,11 +39,12 @@ JOBS = (
     "projectopen",
     "buildcosts",
     "buildtools",
+    "calendarimport",
 )
 
 # Diagnostics rather than jobs: they report on the setup instead of producing
 # a message, so they have nothing to post and no channel to post it to.
-CHECKS = ("feeds",)
+CHECKS = ("feeds", "calendars")
 
 # Which channel each job posts to, mirroring jobs.py.
 JOB_CHANNEL = {
@@ -59,6 +60,7 @@ JOB_CHANNEL = {
     "projectopen": "build",
     "buildcosts": "build",
     "buildtools": "build",
+    "calendarimport": "agenda",
 }
 
 
@@ -152,12 +154,50 @@ async def plan_status(plans, today) -> str:
     )
 
 
+async def check_calendars(config) -> int:
+    """The calendars on the account, the agenda's categories, and which
+    calendar files under which -- what CALENDAR_CATEGORIES has to be written
+    against."""
+    from .calendar_import import parse_categories
+    from .integrations.calendar import CALDAV_URL, calendar_names
+
+    secrets = get_secrets()
+    if not (secrets.icloud_username and secrets.icloud_app_password):
+        print("No CalDAV account: set ICLOUD_USERNAME and ICLOUD_APP_PASSWORD.")
+        return 1
+    names = await asyncio.to_thread(
+        calendar_names, CALDAV_URL, secrets.icloud_username, secrets.icloud_app_password
+    )
+    agenda = AgendaService(
+        NotionClient(secrets.notion_token), config, secrets.notion_agenda_db_id
+    )
+    offered = await agenda.category_names()
+    mapping = parse_categories(secrets.calendar_categories)
+    print("Agenda categories: " + ", ".join(offered))
+    print("\nCalendar -> category")
+    for name in names:
+        target = mapping.get(name.casefold())
+        if target is None:
+            note = "(not mapped: inferred from past titles)"
+        elif target not in offered:
+            note = f"{target}  ⚠️ not an agenda category, so it is ignored"
+        else:
+            note = target
+        print(f"  {name}: {note}")
+    unknown = [k for k in mapping if k not in {n.casefold() for n in names}]
+    if unknown:
+        print("\n⚠️ Mapped but no such calendar: " + ", ".join(unknown))
+    return 0
+
+
 async def _run(name: str, commit: bool, send: bool) -> int:
     config = get_config()
     # Before the secrets: a check needs the network, not a Notion token, and
     # refusing to run one because .env is incomplete helps nobody.
     if name == "feeds":
         return await check_feeds(config)
+    if name == "calendars":
+        return await check_calendars(config)
 
     secrets = get_secrets()
     secrets.require("notion_token", "notion_agenda_db_id")
@@ -173,7 +213,7 @@ async def _run(name: str, commit: bool, send: bool) -> int:
         else None
     )
     from .assets import AssetService
-    from .integrations.calendar import make_source
+    from .integrations.calendar import make_range_source, make_source
     from .plans import PlanService
 
     assets = (
@@ -208,6 +248,7 @@ async def _run(name: str, commit: bool, send: bool) -> int:
         costs=costs,
         anthropic_api_key=secrets.anthropic_api_key,
         calendar_source=make_source(secrets),
+        calendar_range=make_range_source(secrets),
         secrets=secrets,
     )
 
@@ -243,6 +284,12 @@ async def _run(name: str, commit: bool, send: bool) -> int:
             message = await jobs.build_plan_check(commit=False)
             if message is None:
                 print(await plan_status(plans, jobs.today()))
+        elif name == "calendarimport":
+            message = await jobs.calendar_import(commit=commit)
+            if not commit:
+                print("(preview only — pass --commit to actually add the rows)\n")
+                if message is None:
+                    print("Nothing new to add from the calendar.")
         elif name == "scaffold":
             message = await jobs.week_scaffold(commit=commit)
             if not commit:

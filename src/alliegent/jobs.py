@@ -45,10 +45,17 @@ class Jobs:
         mood=None,
         anthropic_api_key: str = "",
         calendar_source: Callable | None = None,
+        calendar_range: Callable | None = None,
         secrets: Secrets | None = None,
         post_project: Callable[[int | None, str, str], Awaitable[int | None]] | None = None,
     ) -> None:
         self.calendar_source = calendar_source
+        # Reads a span of days for the calendar import; None when there is no
+        # CalDAV account to read.
+        self.calendar_range = calendar_range
+        # The day the import last reported a failure, so a calendar that stays
+        # unreachable says so once a day rather than every fifteen minutes.
+        self._import_failed_on: date | None = None
         self.agenda = agenda
         self.projects = projects
         self.karrot = karrot
@@ -102,6 +109,11 @@ class Jobs:
         todays = await self.agenda.items_on(today)
         overdue = await self.agenda.overdue(today)
         events, calendar_problem = await self.calendar_on(today)
+        # Once events are copied into the agenda, each would print twice --
+        # in the calendar block and in the list. The list is where it can be
+        # ticked off, so the calendar block keeps only what is not in it.
+        listed = {" ".join(i.title.split()).casefold() for i in todays}
+        events = [e for e in events if " ".join(e.summary.split()).casefold() not in listed]
         return reports.daily_brief(
             today, todays, overdue, events, calendar_problem=calendar_problem
         )
@@ -542,6 +554,40 @@ class Jobs:
     def coming_monday(self, today: date) -> date:
         """The Monday of the week to scaffold — today if it already is Monday."""
         return today + timedelta(days=(7 - today.weekday()) % 7)
+
+    async def calendar_import(self, *, commit: bool = True) -> str | None:
+        """Copy the coming days' calendar events into the agenda. `commit=False`
+        says what would be added without writing anything."""
+        if self.calendar_range is None or not self.agenda.props.calendar_id:
+            return None
+        from .calendar_import import import_message, parse_categories, run_import
+
+        cfg = self.config.calendar_import
+        first = self.today()
+        events = await self.calendar_range(first, cfg.days, self.config.tz)
+        categories = parse_categories(
+            self._secrets.calendar_categories if self._secrets else ""
+        )
+        rows = await run_import(
+            self.agenda, events, categories, cfg.resolved_path, first, cfg.days,
+            commit=commit,
+        )
+        return import_message(rows, preview=not commit)
+
+    async def run_calendar_import(self) -> None:
+        # Not left to the scheduler's failure notice, which would post every
+        # fifteen minutes for as long as the calendar is unreachable.
+        try:
+            await self._send(await self.calendar_import(), "agenda")
+        except Exception as exc:
+            log.exception("calendar import failed")
+            if self._import_failed_on != self.today():
+                self._import_failed_on = self.today()
+                await self.notify(
+                    f"⚠️ Copying the calendar into the agenda failed: {type(exc).__name__}. "
+                    "It keeps trying every few minutes; this is said once a day.",
+                    "agenda",
+                )
 
     async def week_scaffold(self, *, commit: bool = True) -> str | None:
         """Copy last week's recurring items onto the coming week.

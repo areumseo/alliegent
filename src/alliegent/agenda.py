@@ -53,6 +53,8 @@ class AgendaItem:
     # Optional, and never part of the sort: the numbers /done and /delete take
     # are positions in the day, and a priority edit must not renumber them.
     priority: str | None = None
+    # Set on rows copied from the calendar: the event's UID and its day.
+    calendar_id: str = ""
 
     def sort_key(self) -> tuple:
         """Where this item sits in its day.
@@ -255,6 +257,7 @@ class AgendaService:
                 page, p.status, self._cfg.agenda.status_values["done"], self._closed
             ),
             priority=n.read_select(page, p.priority) if p.priority else None,
+            calendar_id=n.read_text(page, p.calendar_id) if p.calendar_id else "",
         )
 
     async def items_between(self, start: date, end: date) -> list[AgendaItem]:
@@ -376,6 +379,7 @@ class AgendaService:
         category: str | None = None,
         infer_category: bool = False,
         priority: str | None = None,
+        calendar_id: str | None = None,
     ) -> AgendaItem:
         p = self.props
         if category is None and infer_category:
@@ -392,6 +396,8 @@ class AgendaService:
             properties[p.category] = n.select(category)
         if priority and p.priority:
             properties[p.priority] = n.select(priority)
+        if calendar_id and p.calendar_id:
+            properties[p.calendar_id] = n.rich_text(calendar_id)
         page = await self._client.create_page(await self.data_source_id(), properties)
         return self._to_item(page)
 
